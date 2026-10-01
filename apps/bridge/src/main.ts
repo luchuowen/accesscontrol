@@ -59,7 +59,8 @@ const bridge = new Bridge(
 // Tamper Guard re-reads every member from AxTraxNG, so it runs every 10 minutes, not every cycle.
 const GUARD_MS = 10 * 60_000;
 const RESYNC_MS = 60 * 60_000;
-let lastGuard = 0;
+// First guard ~3 min after start: AxTraxNG's REST service is still starting right after a reboot.
+let lastGuard = Date.now() - GUARD_MS + 3 * 60_000;
 let lastResync = Date.now();
 for (;;) {
   if (Date.now() - lastResync > RESYNC_MS) {
