@@ -1,8 +1,18 @@
-import { DoorOpen, Server } from 'lucide-react';
+import { DoorOpen, Server, ShieldCheck } from 'lucide-react';
 import { Badge, PageHeader, Stat } from '@/components/ui';
 import { accessOverview } from '@/lib/data';
 import { ago, dateTime } from '@/lib/format';
 import { requireSession } from '@/lib/session';
+
+/** "stop 2027-12-31T23:59:59 -> 2026-09-04T23:59:59" → what the person in AxTraxNG had set. */
+function describe(change: string): string {
+  const m = /^(start|stop|group) (.+?) (?:->|→) (.+)$/.exec(change);
+  const when = (v: string) => (v === 'null' ? 'no date' : v.slice(0, 16).replace('T', ' '));
+  if (!m) return change === 'bValidDate' ? 'Date checking switched off' : `${change} changed`;
+  if (m[1] === 'stop') return `Valid until set to ${when(m[2] as string)}`;
+  if (m[1] === 'start') return `Valid from set to ${when(m[2] as string)}`;
+  return 'Door group changed';
+}
 
 export default async function Access() {
   const s = await requireSession();
@@ -19,6 +29,30 @@ export default async function Access() {
         <Stat label="Waiting" value={(d.stats?.total ?? 0) - (d.stats?.synced ?? 0)} />
         <Stat label="Errors" value={d.stats?.failed ?? 0} tone={d.stats?.failed ? 'warn' : 'default'} />
       </div>
+      {d.tamper.length > 0 && (
+        <section className="card mt-6 p-6">
+          <div className="flex items-center gap-2">
+            <ShieldCheck size={18} className="text-emerald-600" />
+            <div className="font-medium">Hand edits in AxTraxNG, undone automatically</div>
+          </div>
+          <p className="mt-1 text-sm text-ink-500">
+            Someone changed these members directly in the access-control software. Lango put back what they have paid
+            for within minutes. Last 30 days.
+          </p>
+          <ul className="mt-4 divide-y divide-ink-100 text-sm">
+            {d.tamper.map((t) => (
+              <li
+                key={`${t.at.getTime()}-${t.member_no}`}
+                className="flex flex-wrap items-baseline gap-x-4 gap-y-1 py-2.5"
+              >
+                <span className="w-32 shrink-0 text-ink-500">{dateTime(t.at)}</span>
+                <span className="font-medium">{t.name ?? `Member ${t.member_no}`}</span>
+                <span className="text-ink-500">{t.changes.map(describe).join(' · ')}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
       <div className="mt-6 grid gap-4 lg:grid-cols-3">
         <div className="space-y-4">
           {d.sites.map((site) => {

@@ -97,9 +97,9 @@ export async function converge(ax: AxtraxClient, s: AccessState, map: ZoneMap, n
     if (u.tFirstName !== next.tFirstName || u.tLastName !== next.tLastName) d.push('name');
     if (s.mobile && u.tMobile !== s.mobile) d.push('mobile');
     if (u.bValidDate !== next.bValidDate) d.push('bValidDate');
-    if (norm(u.dtStartDate) !== next.dtStartDate) d.push(`start ${norm(u.dtStartDate)} → ${next.dtStartDate}`);
-    if (norm(u.dtStopDate) !== next.dtStopDate) d.push(`stop ${norm(u.dtStopDate)} → ${next.dtStopDate}`);
-    if (u.UserAccGrp?.ID !== groupId) d.push(`group ${u.UserAccGrp?.ID} → ${groupId}`);
+    if (norm(u.dtStartDate) !== next.dtStartDate) d.push(`start ${norm(u.dtStartDate)} -> ${next.dtStartDate}`);
+    if (norm(u.dtStopDate) !== next.dtStopDate) d.push(`stop ${norm(u.dtStopDate)} -> ${next.dtStopDate}`);
+    if (u.UserAccGrp?.ID !== groupId) d.push(`group ${u.UserAccGrp?.ID} -> ${groupId}`);
     return d;
   };
   const diff = diffOf(cur);

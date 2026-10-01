@@ -62,7 +62,7 @@ describe('converge', () => {
     const u = fake.users.get(axtraxUserId);
     if (u) u.dtStopDate = '2027-03-31T23:59:59'; // receptionist "extends six months"
     const r = await converge(ax, paid, zones, now('2026-10-02T08:00'));
-    expect(r.changes).toEqual(['stop 2027-03-31T23:59:59 → 2026-10-31T23:59:59']);
+    expect(r.changes).toEqual(['stop 2027-03-31T23:59:59 -> 2026-10-31T23:59:59']);
     expect(fake.swipe(21001, 0, 11, '2026-11-15T10:00:00')).toBe(false);
   });
 
