@@ -18,10 +18,11 @@ export interface ConvergeResult {
 export async function ensureGroup(ax: AxtraxClient, zones: string[], map: ZoneMap): Promise<number> {
   if (zones.length === 0) return UNAUTHORIZED_GROUP_ID;
   const name = comboGroupName(zones);
-  const readers = [...new Set(zones.flatMap((z) => map[z] ?? []))].sort((a, b) => a - b);
-  if (readers.length === 0) throw new Error(`no readers mapped for zones ${zones.join(', ')}`);
   const existing = (await ax.accessGroups()).find((g) => g.tDesc === name);
   if (existing) return existing.ID;
+  // Only readers that really exist on this AxTraxNG server (a mis-mapped zone must not break the member).
+  const known = new Set((await ax.readers()).map((r) => r.ID));
+  const readers = [...new Set(zones.flatMap((z) => map[z] ?? []))].filter((r) => known.has(r)).sort((a, b) => a - b);
   const g = await ax.addAccessGroup({
     ID: 0,
     tDesc: name,
