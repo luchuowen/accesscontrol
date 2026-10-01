@@ -1,5 +1,5 @@
 {
-  "name": "@lango/core",
+  "name": "@lango/axtrax",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -10,12 +10,10 @@
     }
   },
   "scripts": {
-    "build": "tsc -b"
-  },
-  "dependencies": {
-    "luxon": "^3.7.2"
+    "build": "tsc -b",
+    "fake": "node dist/fake-cli.js"
   },
   "devDependencies": {
-    "@types/luxon": "^3.7.6"
+    "@types/node": "^22.20.4"
   }
 }

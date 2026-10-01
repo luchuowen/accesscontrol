@@ -1,5 +1,5 @@
 {
-  "name": "@lango/core",
+  "name": "@lango/db",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -10,12 +10,12 @@
     }
   },
   "scripts": {
-    "build": "tsc -b"
+    "migrate": "node dist/migrate-cli.js"
   },
   "dependencies": {
-    "luxon": "^3.7.2"
+    "postgres": "^3.4.9"
   },
   "devDependencies": {
-    "@types/luxon": "^3.7.6"
+    "@types/node": "^22.20.4"
   }
 }

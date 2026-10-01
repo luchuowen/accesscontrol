@@ -17,3 +17,7 @@
 - Source Code SMS: provider interface; API docs need portal login.
 
 ## Lessons
+- App DB role `lango_app` (no BYPASSRLS); migrations run as owner. FORCE RLS on all tenant tables.
+- Future-dated plans: set next segment's group now; panel enforces dtStartDate (offline-safe).
+- Tamper Guard = periodic idempotent converge; any change it makes is drift or a scheduled switch.
+- AxTraxNG NG is EOL 31 Dec 2026 (support to Dec 2027); AxTraxPro adapter is the next adapter.

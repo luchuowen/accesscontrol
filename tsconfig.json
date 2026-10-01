@@ -1,1 +1,10 @@
-{ "files": [], "references": [{ "path": "packages/core" }] }
+{
+  "files": [],
+  "references": [
+    { "path": "packages/core" },
+    { "path": "packages/axtrax" },
+    { "path": "packages/protocol" },
+    { "path": "apps/bridge" },
+    { "path": "packages/db" }
+  ]
+}
