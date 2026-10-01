@@ -9,6 +9,7 @@ export interface JournalData {
   zones: ZoneMap;
   states: Record<string, AccessState>; // by memberNo
   applied: Record<string, number>; // memberNo → applied version
+  wantKeys?: Record<string, string>; // memberNo → last desired fingerprint written
   lastEventTo: string | null;
   pendingAcks: { memberNo: number; version: number; ok: boolean; error?: string; axtraxUserId?: number }[];
 }

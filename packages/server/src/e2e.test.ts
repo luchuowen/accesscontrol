@@ -6,7 +6,7 @@ import { Bridge, Journal } from '@lango/bridge';
 import { connect, migrate, type Sql, withTenant } from '@lango/db';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { rebuildAccessState } from './access.js';
-import { handleAck, handleEvents, handleSync } from './bridge-api.js';
+import { handleAck, handleDrift, handleEvents, handleSync } from './bridge-api.js';
 import { recordPayment } from './payments.js';
 import { handleTaifaWebhook, TaifaPay } from './taifapay.js';
 
@@ -52,6 +52,7 @@ beforeAll(async () => {
     if (p === '/api/bridge/sync') return handleSync(app, req);
     if (p === '/api/bridge/ack') return handleAck(app, req);
     if (p === '/api/bridge/events') return handleEvents(app, req);
+    if (p === '/api/bridge/drift') return handleDrift(app, req);
     return Promise.resolve(new Response('not found', { status: 404 }));
   };
   bridge = new Bridge(
@@ -187,6 +188,17 @@ describe('walking skeleton: pay → door', () => {
     });
     const res = await handleTaifaWebhook(app, new Request('http://x', { method: 'POST', body }), 'demo-club', client);
     expect(await res.json()).toEqual({ ignored: 'not completed' });
+  });
+
+  it('Tamper Guard: a hand-made extension in AxTraxNG is reverted and reported to the owner', async () => {
+    const u = [...fake.users.values()].find((x) => x.EmpNumCompany === 21001);
+    if (u) u.dtStopDate = '2027-06-30T23:59:59';
+    const drift = await bridge.guard();
+    expect(drift).toHaveLength(1);
+    expect(fake.users.get(u?.ID ?? 0)?.dtStopDate).not.toBe('2027-06-30T23:59:59');
+    const [a] = await owner`select action, entity from audit_log where action = 'access.tamper_reverted'`;
+    expect(a).toMatchObject({ entity: '21001' });
+    expect(await bridge.guard()).toEqual([]); // nothing further to revert
   });
 
   it('RLS: another tenant sees none of this tenant’s members or payments', async () => {

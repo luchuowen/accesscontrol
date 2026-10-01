@@ -1,3 +1,4 @@
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { AxtraxClient } from '@lango/axtrax';
 import { Bridge } from './bridge.js';
 import { Journal } from './journal.js';
@@ -8,23 +9,45 @@ const env = (k: string, d?: string) => {
   return v;
 };
 const dataDir = env('LANGO_DATA', process.platform === 'win32' ? 'C:\\ProgramData\\Lango' : './.lango');
+const cloud = env('LANGO_CLOUD');
+const credFile = `${dataDir}/bridge.json`;
+mkdirSync(dataDir, { recursive: true });
+
+/** First run: exchange the one-time pairing code for credentials; afterwards reuse them. */
+async function credentials(): Promise<{ bridgeId: string; secret: string }> {
+  if (existsSync(credFile)) return JSON.parse(readFileSync(credFile, 'utf8'));
+  const r = await fetch(`${cloud}/api/bridge/pair`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code: env('LANGO_PAIR_CODE'), version: '0.1.0' }),
+  });
+  if (!r.ok) throw new Error(`pairing failed: HTTP ${r.status} ${await r.text()}`);
+  const c = (await r.json()) as { bridgeId: string; secret: string };
+  writeFileSync(credFile, JSON.stringify(c));
+  console.log(`paired as bridge ${c.bridgeId}`);
+  return c;
+}
+
+const c = await credentials();
 const ax = new AxtraxClient({
   baseUrl: env('AXTRAX_URL', 'http://localhost:8080'),
   username: env('AXTRAX_USER'),
   password: env('AXTRAX_PASSWORD'),
 });
 const bridge = new Bridge(
-  { cloudUrl: env('LANGO_CLOUD'), bridgeId: env('LANGO_BRIDGE_ID'), secret: env('LANGO_BRIDGE_SECRET') },
+  { cloudUrl: cloud, bridgeId: c.bridgeId, secret: c.secret },
   ax,
   new Journal(`${dataDir}/journal.json`),
 );
 
 let lastGuard = 0;
 for (;;) {
-  await bridge.cycle(25);
+  const t0 = Date.now();
+  await bridge.cycle(25).catch((e) => console.error(`cycle: ${(e as Error).message}`));
+  if (Date.now() - t0 < 2000) await new Promise((r) => setTimeout(r, 5000)); // back off when offline
   if (Date.now() - lastGuard > 60_000) {
     lastGuard = Date.now();
-    const drift = await bridge.guard();
-    for (const d of drift) console.log(`guard member ${d.memberNo}: ${d.changes.join(', ')}`);
+    for (const d of await bridge.guard().catch(() => []))
+      console.log(`guard member ${d.memberNo}: ${d.changes.join(', ')}`);
   }
 }

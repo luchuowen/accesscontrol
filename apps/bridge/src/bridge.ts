@@ -75,6 +75,7 @@ export class Bridge {
       try {
         const r = await converge(this.ax, s, this.j.data.zones, this.now());
         this.j.data.applied[s.memberNo] = s.version;
+        (this.j.data.wantKeys ??= {})[s.memberNo] = r.wantKey;
         out.push({ memberNo: s.memberNo, version: s.version, ok: true, axtraxUserId: r.axtraxUserId });
         if (r.changes.length) this.log(`member ${s.memberNo} v${s.version}: ${r.changes.join(', ')}`);
       } catch (e) {
@@ -93,13 +94,25 @@ export class Bridge {
    */
   async guard(): Promise<{ memberNo: number; changes: string[] }[]> {
     const drift: { memberNo: number; changes: string[] }[] = [];
+    const keys = (this.j.data.wantKeys ??= {});
     for (const s of Object.values(this.j.data.states)) {
+      if ((this.j.data.applied[s.memberNo] ?? -1) < s.version) continue; // not applied yet: applyPending owns it
       try {
         const r = await converge(this.ax, s, this.j.data.zones, this.now());
-        if (r.changes.length) drift.push({ memberNo: s.memberNo, changes: r.changes });
+        const scheduled = keys[s.memberNo] !== r.wantKey;
+        keys[s.memberNo] = r.wantKey;
+        if (r.changes.length && !scheduled) drift.push({ memberNo: s.memberNo, changes: r.changes });
+        else if (r.changes.length) this.log(`member ${s.memberNo}: scheduled switch ${r.changes.join(', ')}`);
       } catch (e) {
         this.log(`guard ${s.memberNo}: ${(e as Error).message}`);
       }
+    }
+    this.j.save();
+    if (drift.length) {
+      for (const d of drift) this.log(`TAMPER reverted for member ${d.memberNo}: ${d.changes.join(', ')}`);
+      await this.cloud('POST', '/api/bridge/drift', { drift }).catch((e) =>
+        this.log(`drift upload: ${(e as Error).message}`),
+      );
     }
     return drift;
   }

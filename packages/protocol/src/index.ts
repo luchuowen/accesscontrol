@@ -57,3 +57,7 @@ export const AccessEvent = z.object({
 });
 export const EventsRequest = z.object({ events: z.array(AccessEvent) });
 export type AccessEvent = z.infer<typeof AccessEvent>;
+
+export const DriftRequest = z.object({
+  drift: z.array(z.object({ memberNo: z.number().int(), changes: z.array(z.string()) })),
+});

@@ -11,6 +11,7 @@ const norm = (s: string | null | undefined) => (s ? s.slice(0, 19) : null);
 export interface ConvergeResult {
   axtraxUserId: number;
   changes: string[]; // human-readable list of fields changed in AxTraxNG ([] = already in desired state)
+  wantKey: string; // fingerprint of the desired state at `now` (changes ⇒ scheduled switch, same ⇒ tamper)
 }
 
 /** Ensure an access group exists for exactly this zone set; returns its ID. */
@@ -118,5 +119,6 @@ export async function converge(ax: AxtraxClient, s: AccessState, map: ZoneMap, n
       changes.push(`card ${card.iCardCode} ${status === 1 ? 'active' : 'inactive'}`);
     }
   }
-  return { axtraxUserId: found.ID, changes };
+  const wantKey = JSON.stringify([toLocal(want.validFrom), toLocal(want.validUntil), want.zones, want.cardsActive]);
+  return { axtraxUserId: found.ID, changes, wantKey };
 }

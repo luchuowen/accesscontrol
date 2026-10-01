@@ -1,7 +1,7 @@
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import type { Sql } from '@lango/db';
 import { withTenant } from '@lango/db';
-import { type AccessState, AckRequest, EventsRequest, type SyncResponse } from '@lango/protocol';
+import { type AccessState, AckRequest, DriftRequest, EventsRequest, type SyncResponse } from '@lango/protocol';
 
 interface BridgeRow {
   id: string;
@@ -101,4 +101,35 @@ export async function handleEvents(sql: Sql, req: Request): Promise<Response> {
     return inserted;
   });
   return json(200, { inserted: n });
+}
+
+/** POST /api/bridge/pair {code} — one-time pairing: exchanges the code shown in the console for credentials. */
+export async function handlePair(sql: Sql, req: Request): Promise<Response> {
+  const body = (await req.json().catch(() => ({}))) as { code?: string; machine?: string; version?: string };
+  const code = String(body.code ?? '')
+    .trim()
+    .toUpperCase();
+  if (!/^[0-9A-F]{8}$/.test(code)) return json(400, { error: 'invalid pairing code' });
+  const [b] = await sql<{ id: string; secret: string }[]>`
+    update bridges set pair_code = null, version = ${String(body.version ?? '')}, last_seen_at = now()
+    where pair_code = ${code} returning id, secret`;
+  if (!b) return json(404, { error: 'unknown or already used pairing code' });
+  return json(200, { bridgeId: b.id, secret: b.secret });
+}
+
+/** POST /api/bridge/drift — Tamper Guard found AxTraxNG edited outside Lango and reverted it. */
+export async function handleDrift(sql: Sql, req: Request): Promise<Response> {
+  const raw = await req.text();
+  const b = await authBridge(sql, req, raw);
+  if (!b) return json(401, { error: 'unauthorized' });
+  const body = DriftRequest.safeParse(JSON.parse(raw || '{}'));
+  if (!body.success) return json(400, { error: body.error.message });
+  await withTenant(sql, b.tenant_id, async (tx) => {
+    for (const d of body.data.drift) {
+      // Scheduled segment switches are expected; only edits to dates/group/cards made by people are tamper.
+      await tx`insert into audit_log (tenant_id, actor, action, entity, data)
+               values (${b.tenant_id}, 'site-bridge', 'access.tamper_reverted', ${String(d.memberNo)}, ${tx.json({ changes: d.changes } as never)})`;
+    }
+  });
+  return json(200, { ok: true });
 }
