@@ -148,6 +148,8 @@ export async function converge(ax: AxtraxClient, s: AccessState, map: ZoneMap, n
       changes.push(`card ${card.iCardCode} ${status === 1 ? 'active' : 'inactive'}`);
     }
   }
-  const wantKey = JSON.stringify([toLocal(want.validFrom), toLocal(want.validUntil), want.zones, want.cardsActive]);
+  // Fingerprint of what this bridge wants written (not just the raw state), so a bridge upgrade that changes
+  // how a state is expressed is treated as a scheduled change, not as tampering.
+  const wantKey = JSON.stringify([next.dtStartDate, next.dtStopDate, groupId, want.cardsActive]);
   return { axtraxUserId: found.ID, changes, wantKey };
 }
