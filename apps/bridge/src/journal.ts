@@ -28,7 +28,15 @@ export class Journal {
     }
   }
   static empty(): JournalData {
-    return { cursor: 0, timezone: 'Africa/Nairobi', zones: {}, states: {}, applied: {}, lastEventTo: null, pendingAcks: [] };
+    return {
+      cursor: 0,
+      timezone: 'Africa/Nairobi',
+      zones: {},
+      states: {},
+      applied: {},
+      lastEventTo: null,
+      pendingAcks: [],
+    };
   }
   save() {
     mkdirSync(dirname(this.file), { recursive: true });

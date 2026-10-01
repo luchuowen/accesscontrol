@@ -10,5 +10,6 @@ cp -r apps/web/.next/standalone/. "$D/app/"; cp -r apps/web/.next/static "$D/app
 cp -r packages/db/migrations "$D/migrations"
 B="--bundle --platform=node --target=node22 --format=esm --log-level=warning"
 npx esbuild packages/server/src/seed-cli.ts $B --outfile="$D/tools/seed.mjs" --banner:js="import{createRequire as __cr}from'module';const require=__cr(import.meta.url);"
+npx esbuild packages/server/src/pay-cli.ts $B --outfile="$D/tools/pay.mjs" --banner:js="import{createRequire as __cr}from'module';const require=__cr(import.meta.url);"
 npx esbuild packages/db/src/migrate-cli.ts $B --outfile="$D/tools/migrate.mjs"
 tar -cJf "$OUT" -C "$D" . && rm -rf "$D" && ls -la "$OUT"
