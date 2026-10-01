@@ -41,6 +41,8 @@ job files dropped into `lab/queue/`, writing output to `lab/results/`:
 ## Lessons from the lab (2026-10-01)
 - Never overwrite a staged file in `lab/` by re-committing the same path from the cloud workspace: use a new
   versioned name (`lango-app-v3.tar.xz`). Two "updates" silently shipped stale files this way.
+- A file edited after it was first written in the cloud workspace can still ship in its first version. Copy the final
+  content to a fresh name before sending it, and compare the checksum on the Mac before queueing.
 - Windows startup-script output can stop short of the final line; `run-on-vm.sh` treats 3 min of silence as done.
 - Proof 1 passed: KES 10 payment → AxTraxNG user 21002 valid 2026-10-02 00:00–23:59, group `LG: gym`, card active,
   confirmed by the bridge ack 3.1 s after the payment was recorded. Lapsed members move to Unauthorized with cards
