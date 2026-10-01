@@ -304,4 +304,19 @@ describe('walking skeleton: pay → door', () => {
     expect((await pair('ABCDE-FGHJK')).status).toBe(404);
     expect((await pair('MNPQR-STVWX')).status).toBe(404);
   });
+  it('TaifaPay webhook: a response we cannot read is answered 502 (so TaifaPay retries) and audited', async () => {
+    const fakeFetch = (async (u: string) =>
+      new Response(
+        JSON.stringify(String(u).endsWith('/auth/token') ? { access_token: 't', expires_in: '3599' } : { ok: true }),
+        { status: 200 },
+      )) as typeof fetch;
+    const client = new TaifaPay({ env: 'sandbox', clientId: 'c4', clientSecret: 's' }, fakeFetch);
+    const body = JSON.stringify({ data: { transactionId: 'TP-ODD-1' } });
+    const res = await handleTaifaWebhook(app, new Request('http://x', { method: 'POST', body }), 'demo-club', client);
+    expect(res.status).toBe(502);
+    const [a] = await owner`select entity from audit_log where action = 'payment.unreadable'`;
+    expect(a).toEqual({ entity: 'TP-ODD-1' });
+    const [fn] = await owner`select has_function_privilege('public', 'app_staff_login(text)', 'execute') as p`;
+    expect(fn).toEqual({ p: false });
+  });
 });

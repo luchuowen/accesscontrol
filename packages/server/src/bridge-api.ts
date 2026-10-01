@@ -107,7 +107,7 @@ export async function handleEvents(sql: Sql, req: Request): Promise<Response> {
 
 /** POST /api/bridge/pair {code} — one-time pairing: exchanges the code shown in the console for credentials. */
 export async function handlePair(sql: Sql, req: Request): Promise<Response> {
-  const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? 'local';
+  const ip = clientIp(req.headers);
   if (!rateLimit(`pair:${ip}`, 10, 60_000)) return json(429, { error: 'too many attempts, wait a minute' });
   const body = (await req.json().catch(() => ({}))) as { code?: string; version?: string };
   const code = normalisePairCode(String(body.code ?? ''));
@@ -133,14 +133,34 @@ export function normalisePairCode(raw: string): string | null {
 }
 
 const hits = new Map<string, number[]>();
-/** Small in-process sliding-window limiter (per instance) for unauthenticated endpoints. */
-export function rateLimit(key: string, max: number, windowMs: number): boolean {
+const recentHits = (key: string, windowMs: number) => {
   const now = Date.now();
   const recent = (hits.get(key) ?? []).filter((t) => now - t < windowMs);
-  recent.push(now);
   hits.set(key, recent);
-  if (hits.size > 10_000) hits.clear();
+  if (hits.size > 50_000) for (const [k, v] of hits) if (!v.length) hits.delete(k);
+  return recent;
+};
+/** Small in-process sliding-window limiter (per instance): records this attempt, false when over `max`. */
+export function rateLimit(key: string, max: number, windowMs: number): boolean {
+  const recent = recentHits(key, windowMs);
+  recent.push(Date.now());
   return recent.length <= max;
+}
+/** True when `key` already has `max` recorded failures in the window (does not record anything). */
+export function isLimited(key: string, max: number, windowMs: number): boolean {
+  return recentHits(key, windowMs).length >= max;
+}
+/** Record one failed attempt against `key` (use with isLimited for per-account limits). */
+export function recordFailure(key: string, windowMs: number): void {
+  recentHits(key, windowMs).push(Date.now());
+}
+/**
+ * Client IP as seen by our reverse proxy (Caddy replaces X-Forwarded-For from untrusted clients, so the
+ * last entry is the one it appended). Anything a client sends further left is ignored.
+ */
+export function clientIp(h: Headers): string {
+  const xff = h.get('x-forwarded-for');
+  return xff?.split(',').pop()?.trim() || 'local';
 }
 
 function safeJson(raw: string): unknown {

@@ -1,7 +1,12 @@
 -- Directory tables (staff_users, bridges) are not RLS-scoped because they are looked up before a tenant is known.
 -- The app role gets no direct access to them; it calls these narrow SECURITY DEFINER functions instead.
 ALTER TABLE bridges ADD COLUMN pair_expires_at timestamptz;
-UPDATE bridges SET pair_expires_at = now() + interval '30 days' WHERE pair_code IS NOT NULL;
+-- Unused pairing codes move to the new format (XXXXX-XXXXX, no look-alike characters) with a 30-day expiry.
+UPDATE bridges b SET pair_expires_at = now() + interval '30 days', pair_code = (
+  SELECT substr(c, 1, 5) || '-' || substr(c, 6) FROM (
+    SELECT string_agg(substr('23456789ABCDEFGHJKMNPQRSTVWXYZ', 1 + get_byte(gen_random_bytes(1), 0) % 30, 1), '' ORDER BY g) AS c
+    FROM generate_series(1, 10) g WHERE b.id IS NOT NULL) x)
+WHERE pair_code IS NOT NULL;
 
 CREATE FUNCTION app_bridge_auth(p_id uuid)
 RETURNS TABLE (id uuid, tenant_id uuid, site_id uuid, secret text)
@@ -41,3 +46,7 @@ CREATE FUNCTION app_staff_active(p_id uuid) RETURNS boolean
 LANGUAGE sql SECURITY DEFINER SET search_path = public AS $$
   SELECT coalesce((SELECT active FROM staff_users WHERE id = p_id), false)
 $$;
+
+-- Functions are executable by PUBLIC by default; only the app role may call these.
+REVOKE EXECUTE ON FUNCTION app_bridge_auth(uuid), app_bridge_touch(uuid), app_bridge_pair(text, text, text),
+  app_tenant_bridges(), app_staff_login(text), app_staff_active(uuid) FROM PUBLIC;

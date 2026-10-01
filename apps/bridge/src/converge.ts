@@ -26,21 +26,23 @@ export async function ensureGroup(ax: AxtraxClient, zones: string[], map: ZoneMa
   const existing = (await ax.accessGroups()).find((g) => g.tDesc === name);
   if (!existing) return (await ax.addAccessGroup({ ID: 0, tDesc: name, TimezoneReaders: want })).ID;
   // Keep the group in step with the zone map: a reader moved out of a zone must stop opening for it.
-  const have = (existing.TimezoneReaders ?? [])
-    .map((t) => `${t.IdReader}:${t.IdTimeZone}`)
-    .sort()
-    .join(',');
-  if (
-    have !==
-    want
+  // If the server's list omits TimezoneReaders we cannot compare, so we leave the group alone.
+  if (!Array.isArray(existing.TimezoneReaders)) return existing.ID;
+  const key = (l: { IdReader: number; IdTimeZone: number }[]) =>
+    l
       .map((t) => `${t.IdReader}:${t.IdTimeZone}`)
       .sort()
-      .join(',')
-  ) {
-    await ax.updateAccessGroup({
-      ...existing,
-      TimezoneReaders: want.map((t) => ({ ...t, IdAccessGroup: existing.ID })),
-    });
+      .join(',');
+  if (key(existing.TimezoneReaders) !== key(want)) {
+    try {
+      await ax.updateAccessGroup({
+        ...existing,
+        TimezoneReaders: want.map((t) => ({ ...t, IdAccessGroup: existing.ID })),
+      });
+    } catch (e) {
+      // The member must still converge (dates are what lock people out); the group is retried next pass.
+      console.warn(`access group "${name}" reader update failed: ${(e as Error).message}`);
+    }
   }
   return existing.ID;
 }

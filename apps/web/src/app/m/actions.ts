@@ -1,7 +1,7 @@
 'use server';
 import { createHmac } from 'node:crypto';
 import { withTenant } from '@lango/db';
-import { rateLimit, tenantTaifa } from '@lango/server';
+import { clientIp, isLimited, rateLimit, recordFailure, tenantTaifa } from '@lango/server';
 import { cookies, headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { sessionSecret } from '@/lib/session';
@@ -26,11 +26,14 @@ export async function memberLogin(form: FormData) {
     .toLowerCase();
   const no = Number.parseInt(String(form.get('memberNo') ?? ''), 10);
   const phone = digits(String(form.get('phone') ?? ''));
-  const ip = (await headers()).get('x-forwarded-for')?.split(',')[0]?.trim() ?? 'local';
-  if (!rateLimit(`member-login:${ip}`, 10, 5 * 60_000) || !rateLimit(`member-login:${slug}:${no}`, 5, 15 * 60_000))
-    redirect('/m?e=2');
+  const ip = clientIp(await headers());
+  const account = `member-login:${slug}:${no}`;
+  if (!rateLimit(`member-login-ip:${ip}`, 20, 5 * 60_000) || isLimited(account, 5, 15 * 60_000)) redirect('/m?e=2');
   const [t] = await db()<{ id: string }[]>`select id from tenants where slug = ${slug}`;
-  if (!t || !Number.isSafeInteger(no)) redirect('/m?e=1');
+  if (!t || !Number.isSafeInteger(no)) {
+    recordFailure(account, 15 * 60_000);
+    redirect('/m?e=1');
+  }
   const [m] = await withTenant(
     db(),
     t.id,
@@ -39,7 +42,10 @@ export async function memberLogin(form: FormData) {
         { id: string; phone: string | null }[]
       >`select id, phone from members where member_no = ${no} and status = 'active'`,
   );
-  if (!m?.phone || digits(m.phone) !== phone) redirect('/m?e=1');
+  if (!m?.phone || digits(m.phone) !== phone) {
+    recordFailure(account, 15 * 60_000);
+    redirect('/m?e=1');
+  }
   (await cookies()).set(COOKIE, sign(`${t.id}:${m.id}`), {
     httpOnly: true,
     sameSite: 'lax',

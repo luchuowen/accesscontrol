@@ -178,6 +178,7 @@ export class Bridge {
     for (let i = 0; i < events.length; i += 1000)
       await this.cloud('POST', '/api/bridge/events', { events: events.slice(i, i + 1000) });
     const full = evs.length >= limit;
+    if (full) this.log(`events: page of ${limit} was full; continuing from the newest event read`);
     const lastAt = events.reduce((m, e) => (e.at > m ? e.at : m), '');
     // When the page was full, continue from the newest event read (+10 min overlap covers the boundary).
     this.j.data.lastEventTo =

@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { Sql } from '@lango/db';
 import { withTenant } from '@lango/db';
+import { DateTime } from 'luxon';
 import { decrypt } from './crypto.js';
 import { recordPayment } from './payments.js';
 
@@ -165,7 +166,7 @@ export async function handleTaifaWebhook(
 ): Promise<Response> {
   const ok = (b: unknown) =>
     new Response(JSON.stringify(b), { status: 200, headers: { 'Content-Type': 'application/json' } });
-  const [t] = await sql<{ id: string }[]>`select id from tenants where slug = ${slug}`;
+  const [t] = await sql<{ id: string; timezone: string }[]>`select id, timezone from tenants where slug = ${slug}`;
   if (!t) return new Response('unknown tenant', { status: 404 });
   let evt: { eventType?: string; data?: Record<string, unknown> };
   try {
@@ -180,11 +181,27 @@ export async function handleTaifaWebhook(
   const truth = await client.transaction(txId);
   // Trust only TaifaPay's own record of this transaction (never fields from the unsigned webhook body).
   const rec = transactionRecord(truth);
-  if (!rec) return ok({ ignored: 'unrecognised transaction response' });
+  // A response we cannot read must never be acknowledged as handled: answer 502 so TaifaPay retries,
+  // and leave a trail the owner can see.
+  const unreadable = async (why: string) => {
+    await withTenant(
+      sql,
+      t.id,
+      (tx) => tx`insert into audit_log (tenant_id, actor, action, entity, data)
+      values (${t.id}, 'taifapay', 'payment.unreadable', ${txId}, ${tx.json({ why, verified: truth } as never)})`,
+    );
+    console.error(`taifapay ${slug} ${txId}: ${why}`);
+    return new Response(JSON.stringify({ error: why }), {
+      status: 502,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  };
+  if (!rec) return unreadable('unrecognised transaction response');
   if (rec.id && rec.id !== txId) return ok({ ignored: 'transaction id mismatch' });
   if (normalStatus(rec.status) !== 'completed') return ok({ ignored: 'not completed' });
   const amount = Number(rec.amount);
-  if (!Number.isSafeInteger(amount) || amount <= 0) return ok({ ignored: 'invalid amount' });
+  if (!Number.isSafeInteger(amount) || amount <= 0)
+    return unreadable(`unexpected amount ${String(rec.amount).slice(0, 40)}`);
   // Intents carry member + product; they only count when TaifaPay itself echoes our id and the amount matches.
   let productId: string | null = null;
   let intentId: string | null = null;
@@ -203,7 +220,9 @@ export async function handleTaifaWebhook(
       ref = String(it.member_no);
     }
   }
-  const paid = rec.paidAt ? new Date(rec.paidAt) : new Date();
+  // Naive provider timestamps are club-local; an explicit offset is respected. Never in the future.
+  const parsed = rec.paidAt ? DateTime.fromISO(rec.paidAt, { zone: t.timezone }) : null;
+  const paid = parsed?.isValid && parsed.toMillis() <= Date.now() + 60_000 ? parsed.toJSDate() : new Date();
   const r = await recordPayment(sql, t.id, {
     provider: 'taifapay',
     providerTxnId: txId,
@@ -214,7 +233,7 @@ export async function handleTaifaWebhook(
     productId,
     intentId,
     channel: 'mpesa',
-    paidAt: Number.isNaN(paid.getTime()) ? new Date() : paid,
+    paidAt: paid,
     raw: { webhook: evt, verified: truth },
   });
   return ok(r);

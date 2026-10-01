@@ -23,7 +23,7 @@ export async function rebuildAccessState(tx: Tx, tenantId: string, memberId: str
     select zone_key, starts_at, ends_at from entitlements where member_id = ${memberId}`;
   const sites = await tx<{ id: string; keys: string[] }[]>`
     select s.id, coalesce(array_agg(z.key) filter (where z.key is not null), '{}') as keys
-    from sites s left join zones z on z.site_id = s.id group by s.id`;
+    from sites s left join zones z on z.site_id = s.id group by s.id order by s.id`; // fixed lock order across sites
   let bumped = 0;
   for (const site of sites) {
     const mine = m.status === 'active' ? ents.filter((e) => site.keys.includes(e.zone_key)) : [];
