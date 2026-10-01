@@ -7,7 +7,11 @@ import { requireSession } from '@/lib/session';
 /** "stop 2027-12-31T23:59:59 -> 2026-09-04T23:59:59" → what the person in AxTraxNG had set. */
 function describe(change: string): string {
   const m = /^(start|stop|group) (.+?) (?:->|→) (.+)$/.exec(change);
-  const when = (v: string) => (v === 'null' ? 'no date' : v.slice(0, 16).replace('T', ' '));
+  const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const when = (v: string) => {
+    const d = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}:\d{2})/.exec(v); // naive club-local time from AxTraxNG
+    return d ? `${Number(d[3])} ${MONTHS[Number(d[2]) - 1]} ${d[1]}, ${d[4]}` : 'no date';
+  };
   if (!m) return change === 'bValidDate' ? 'Date checking switched off' : `${change} changed`;
   if (m[1] === 'stop') return `Valid until set to ${when(m[2] as string)}`;
   if (m[1] === 'start') return `Valid from set to ${when(m[2] as string)}`;
