@@ -134,7 +134,8 @@ export class FakeAxtrax {
       }
       case 'POST /api/Card/AddCard': {
         const c = b as unknown as CardInfoDT;
-        if (c.eCardType === 1 && (c.iCardCode < 1 || c.iCardCode > 65535)) return err(`card ${c.iCardCode} is not valid`);
+        if (c.eCardType === 1 && (c.iCardCode < 1 || c.iCardCode > 65535))
+          return err(`card ${c.iCardCode} is not valid`);
         if ([...this.cards.values()].some((x) => x.iCardCode === c.iCardCode && x.iSiteCode === c.iSiteCode))
           return err('Card already exists');
         const n = { ...c, ID: this.id() };

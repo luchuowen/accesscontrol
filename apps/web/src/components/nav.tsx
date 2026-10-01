@@ -1,5 +1,5 @@
 'use client';
-import { Activity, CreditCard, DoorOpen, Layers, LayoutDashboard, LogOut, Users } from 'lucide-react';
+import { Activity, CreditCard, DoorOpen, Layers, LayoutDashboard, LogOut, Plug, Users } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
@@ -9,6 +9,7 @@ const items = [
   { href: '/payments', label: 'Payments', icon: CreditCard },
   { href: '/plans', label: 'Plans & pricing', icon: Layers },
   { href: '/access', label: 'Doors & access', icon: DoorOpen },
+  { href: '/settings', label: 'Integrations', icon: Plug },
 ];
 
 export function Nav({ tenant, user, role }: { tenant: string; user: string; role: string }) {
