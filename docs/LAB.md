@@ -37,3 +37,11 @@ job files dropped into `lab/queue/`, writing output to `lab/results/`:
 - REST API installer is **Inno Setup** → `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-`.
 - Startup scripts run as SYSTEM in session 0: GUI installers hang there — always use silent switches.
 - `Invoke-WebRequest` needs `-UseBasicParsing` on a fresh Server 2019 profile.
+
+## Lessons from the lab (2026-10-01)
+- Never overwrite a staged file in `lab/` by re-committing the same path from the cloud workspace: use a new
+  versioned name (`lango-app-v3.tar.xz`). Two "updates" silently shipped stale files this way.
+- Windows startup-script output can stop short of the final line; `run-on-vm.sh` treats 3 min of silence as done.
+- Proof 1 passed: KES 10 payment → AxTraxNG user 21002 valid 2026-10-02 00:00–23:59, group `LG: gym`, card active,
+  confirmed by the bridge ack 3.1 s after the payment was recorded. Lapsed members move to Unauthorized with cards
+  inactive. Leftover group `LG: probe` (from the API probe) cannot be deleted through the REST API.
