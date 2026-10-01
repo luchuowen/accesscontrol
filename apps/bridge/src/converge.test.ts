@@ -93,4 +93,24 @@ describe('converge', () => {
     expect(fake.swipe(21001, 0, 11, '2026-10-01T08:15:00')).toBe(false);
     expect(fake.swipe(21001, 0, 12, '2026-10-01T08:15:00')).toBe(true);
   });
+  it('a never-paid member gets a real (past) validity window, and an update AxTraxNG ignores is an error', async () => {
+    await converge(ax, base, zones, now('2026-10-01T08:00'));
+    const u = [...fake.users.values()].find((x) => x.EmpNumCompany === 21001);
+    expect([u?.bValidDate, u?.dtStartDate, u?.dtStopDate]).toEqual([
+      true,
+      '2000-01-01T00:00:00',
+      '2000-01-01T23:59:59',
+    ]);
+    expect(fake.swipe(21001, 0, 11, '2026-10-01T08:05:00')).toBe(false);
+    // Simulate a server that drops the write: the converge must fail loudly, not report success.
+    const realUpdate = ax.updateUser.bind(ax);
+    ax.updateUser = (async (x) => ax.getUser(x.ID)) as typeof ax.updateUser;
+    const paid = {
+      ...base,
+      version: 2,
+      segments: [{ from: '2026-10-01T00:00:00', until: '2026-10-31T23:59:59', zones: ['gym'] }],
+    };
+    await expect(converge(ax, paid, zones, now('2026-10-01T08:10'))).rejects.toThrow(/did not apply/);
+    ax.updateUser = realUpdate;
+  });
 });

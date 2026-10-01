@@ -5,7 +5,10 @@ import type { AccessState, ZoneMap } from '@lango/protocol';
 import { DateTime } from 'luxon';
 
 const NAIVE = "yyyy-MM-dd'T'HH:mm:ss";
-const NEVER = '2000-01-01T00:00:00';
+// A member with nothing paid gets a one-day validity window in the past (start < stop: AxTraxNG ignores an
+// update whose window is empty or missing, so the user would keep its old dates).
+const NEVER_FROM = '2000-01-01T00:00:00';
+const NEVER_UNTIL = '2000-01-01T23:59:59';
 export const toLocal = (d: DateTime | null) => (d ? d.toFormat(NAIVE) : null);
 const norm = (s: string | null | undefined) => (s ? s.slice(0, 19) : null);
 
@@ -72,8 +75,8 @@ export async function converge(ax: AxtraxClient, s: AccessState, map: ZoneMap, n
       UserAccGrp: { ID: groupId },
       UserDepartment: { ID: 1 },
       bValidDate: true,
-      dtStartDate: toLocal(want.validFrom) ?? NEVER,
-      dtStopDate: toLocal(want.validUntil) ?? NEVER,
+      dtStartDate: toLocal(want.validFrom) ?? NEVER_FROM,
+      dtStopDate: toLocal(want.validUntil) ?? NEVER_UNTIL,
       UserCards: [],
     });
     changes.push('user created');
@@ -85,20 +88,27 @@ export async function converge(ax: AxtraxClient, s: AccessState, map: ZoneMap, n
     tLastName: s.lastName,
     ...(s.mobile ? { tMobile: s.mobile } : {}),
     bValidDate: true, // dates are always enforced; a member who never paid gets a validity window in the past
-    dtStartDate: toLocal(want.validFrom) ?? NEVER,
-    dtStopDate: toLocal(want.validUntil) ?? NEVER,
+    dtStartDate: toLocal(want.validFrom) ?? NEVER_FROM,
+    dtStopDate: toLocal(want.validUntil) ?? NEVER_UNTIL,
     UserAccGrp: { ...cur.UserAccGrp, ID: groupId },
   };
-  const diff: string[] = [];
-  if (cur.tFirstName !== next.tFirstName || cur.tLastName !== next.tLastName) diff.push('name');
-  if (s.mobile && cur.tMobile !== s.mobile) diff.push('mobile');
-  if (cur.bValidDate !== next.bValidDate) diff.push('bValidDate');
-  if (norm(cur.dtStartDate) !== next.dtStartDate) diff.push(`start ${norm(cur.dtStartDate)} → ${next.dtStartDate}`);
-  if (norm(cur.dtStopDate) !== next.dtStopDate) diff.push(`stop ${norm(cur.dtStopDate)} → ${next.dtStopDate}`);
-  if (cur.UserAccGrp?.ID !== groupId) diff.push(`group ${cur.UserAccGrp?.ID} → ${groupId}`);
+  const diffOf = (u: EmployeeInfoDT) => {
+    const d: string[] = [];
+    if (u.tFirstName !== next.tFirstName || u.tLastName !== next.tLastName) d.push('name');
+    if (s.mobile && u.tMobile !== s.mobile) d.push('mobile');
+    if (u.bValidDate !== next.bValidDate) d.push('bValidDate');
+    if (norm(u.dtStartDate) !== next.dtStartDate) d.push(`start ${norm(u.dtStartDate)} → ${next.dtStartDate}`);
+    if (norm(u.dtStopDate) !== next.dtStopDate) d.push(`stop ${norm(u.dtStopDate)} → ${next.dtStopDate}`);
+    if (u.UserAccGrp?.ID !== groupId) d.push(`group ${u.UserAccGrp?.ID} → ${groupId}`);
+    return d;
+  };
+  const diff = diffOf(cur);
   if (diff.length) {
     const { UserCards: _cards, ...rest } = next;
     await ax.updateUser({ ...rest, UserCards: cur.UserCards } as EmployeeInfoDT);
+    // AxTraxNG can accept an update and silently keep the old values; never report a write that did not land.
+    const still = diffOf(await ax.getUser(found.ID));
+    if (still.length) throw new Error(`AxTraxNG did not apply the user update (${still.join(', ')})`);
     changes.push(...diff);
   }
 

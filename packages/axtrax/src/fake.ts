@@ -129,6 +129,10 @@ export class FakeAxtrax {
         const u = b as unknown as EmployeeInfoDT;
         if (!this.users.has(u.ID)) return err('User not found');
         if (u.UserAccGrp && !this.groups.has(u.UserAccGrp.ID)) return err('Access group not found');
+        // Like the real server (lab, 2026-10-01): a partial body, or a validity window that is missing or empty,
+        // is answered without error but changes nothing.
+        const window = !u.bValidDate || (!!u.dtStartDate && !!u.dtStopDate && u.dtStartDate < u.dtStopDate);
+        if (!u.tFirstName || !u.tLastName || !window) return ok(this.userView(u.ID));
         this.users.set(u.ID, { ...this.users.get(u.ID), ...u, UserCards: [] } as EmployeeInfoDT);
         return ok(this.userView(u.ID));
       }
