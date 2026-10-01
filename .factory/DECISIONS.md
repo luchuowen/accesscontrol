@@ -29,3 +29,11 @@
   stay in 1..65535 (John's 1xxxx/2xxxx/3xxxx scheme fits).
 - REST service starts ~2 min after boot; clients must retry token acquisition.
 - Cloud lab DB owner role has BYPASSRLS (migrations/seed only); app role never.
+- Directory tables (staff_users, bridges) are invisible to the app role; it uses narrow SECURITY DEFINER `app_*`
+  functions (0003), EXECUTE revoked from PUBLIC. tenants/partners are read-only to the app role.
+- Payments serialise per member (`for update`); access_states writes take a per-site advisory lock so seq order =
+  commit order (bridge cursor never skips). Sites are locked in id order.
+- TaifaPay webhook trusts only its own GET of the transaction; unreadable records → 502 + audit (provider retries).
+- Bridge: acks deduped per member and retried; events paged with 10-min overlap; hourly full resync (cursor 0);
+  Tamper Guard every 10 min. Group reader updates are best-effort (members still converge).
+- Rate limits: per-IP (last X-Forwarded-For hop, Caddy) for all attempts; per-account for failures only.
