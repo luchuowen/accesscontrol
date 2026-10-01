@@ -2,7 +2,7 @@ import { nextPeriod } from '@lango/core';
 import type { Sql, Tx } from '@lango/db';
 import { withTenant } from '@lango/db';
 import { DateTime } from 'luxon';
-import { rebuildAccessState } from './access';
+import { rebuildAccessState } from './access.js';
 
 export interface IncomingPayment {
   provider: string; // 'taifapay' | 'manual-test' | …

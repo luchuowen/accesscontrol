@@ -1,4 +1,4 @@
-import { handleAck } from '@/server/bridge-api';
+import { handleAck } from '@lango/server';
 import { db } from '@/server/db';
 
 export const dynamic = 'force-dynamic';

@@ -4,7 +4,8 @@
     { "path": "packages/core" },
     { "path": "packages/axtrax" },
     { "path": "packages/protocol" },
-    { "path": "apps/bridge" },
-    { "path": "packages/db" }
+    { "path": "packages/db" },
+    { "path": "packages/server" },
+    { "path": "apps/bridge" }
   ]
 }

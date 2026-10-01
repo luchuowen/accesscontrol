@@ -5,9 +5,10 @@ import { AxtraxClient, demoSeed, FakeAxtrax } from '@lango/axtrax';
 import { Bridge, Journal } from '@lango/bridge';
 import { connect, migrate, type Sql, withTenant } from '@lango/db';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { rebuildAccessState } from './access';
-import { handleAck, handleEvents, handleSync } from './bridge-api';
-import { recordPayment } from './payments';
+import { rebuildAccessState } from './access.js';
+import { handleAck, handleEvents, handleSync } from './bridge-api.js';
+import { recordPayment } from './payments.js';
+import { handleTaifaWebhook, TaifaPay } from './taifapay.js';
 
 /**
  * Walking skeleton, end to end: payment → entitlement → AccessState → bridge long-poll → AxTraxNG (fake)
@@ -137,6 +138,55 @@ describe('walking skeleton: pay → door', () => {
     await bridge.cycle(0);
     const [{ n }] = (await owner`select count(*)::int as n from access_events`) as unknown as [{ n: number }];
     expect(n).toBe(fake.events.length);
+  });
+
+  it('TaifaPay webhook: KES 10 test payment via STK intent is verified by re-query, then applied', async () => {
+    const [p] =
+      await owner`insert into products (tenant_id, kind, name, price_kes, duration_unit, duration_count, zone_keys)
+      values (${tenantId}, 'day_pass', 'Test', 10, 'day', 1, '{gym}') returning id`;
+    const [m] = await owner`select id from members where member_no = 21001`;
+    const [i] =
+      await owner`insert into payment_intents (tenant_id, member_id, product_id, amount_kes, phone, provider, created_by)
+      values (${tenantId}, ${m?.id}, ${p?.id}, 10, '0700000001', 'taifapay', 'test') returning id`;
+    const truth = { status: 'complete', amount: 10, accountReference: '21001', externalReference: i?.id };
+    const fakeFetch = (async (u: string) =>
+      new Response(
+        JSON.stringify(String(u).endsWith('/auth/token') ? { access_token: 't', expires_in: '3599' } : truth),
+        { status: 200 },
+      )) as typeof fetch;
+    const client = new TaifaPay({ env: 'sandbox', clientId: 'c', clientSecret: 's' }, fakeFetch);
+    const body = JSON.stringify({
+      eventType: 'transaction.completed',
+      data: { transactionId: 'TP-0001', status: 'complete', amount: 10, externalReference: i?.id },
+    });
+    const res = await handleTaifaWebhook(
+      app,
+      new Request('http://x/api/webhooks/taifapay/demo-club', { method: 'POST', body }),
+      'demo-club',
+      client,
+    );
+    expect(await res.json()).toMatchObject({ status: 'applied', memberNo: 21001, product: 'Test' });
+    const [it] = await owner`select status, provider_ref from payment_intents where id = ${i?.id}`;
+    expect(it).toMatchObject({ status: 'completed', provider_ref: 'TP-0001' });
+  });
+
+  it('TaifaPay webhook: a forged "completed" event is ignored when TaifaPay says otherwise', async () => {
+    const fakeFetch = (async (u: string) =>
+      new Response(
+        JSON.stringify(
+          String(u).endsWith('/auth/token')
+            ? { access_token: 't', expires_in: '3599' }
+            : { status: 'failed', amount: 5000 },
+        ),
+        { status: 200 },
+      )) as typeof fetch;
+    const client = new TaifaPay({ env: 'sandbox', clientId: 'c2', clientSecret: 's' }, fakeFetch);
+    const body = JSON.stringify({
+      eventType: 'transaction.completed',
+      data: { transactionId: 'TP-FORGED', status: 'complete', amount: 5000, accountReference: '21001' },
+    });
+    const res = await handleTaifaWebhook(app, new Request('http://x', { method: 'POST', body }), 'demo-club', client);
+    expect(await res.json()).toEqual({ ignored: 'not completed' });
   });
 
   it('RLS: another tenant sees none of this tenant’s members or payments', async () => {

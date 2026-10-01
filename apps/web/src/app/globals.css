@@ -1,0 +1,29 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+  --color-ink-950: #070b14;
+  --color-ink-900: #0c1220;
+  --color-ink-800: #141c2e;
+  --color-ink-700: #1f2a40;
+  --color-ink-500: #5b6680;
+  --color-ink-300: #a3adc2;
+  --color-ink-100: #e7ebf3;
+  --color-ink-50: #f5f7fb;
+  --color-brand-500: #10b981;
+  --color-brand-600: #059669;
+  --color-brand-50: #ecfdf5;
+  --color-gold-500: #d4a73a;
+}
+
+@layer base {
+  body { @apply bg-ink-50 text-ink-900 antialiased; font-feature-settings: "ss01", "cv11"; }
+}
+
+@utility card { @apply rounded-2xl bg-white ring-1 ring-ink-100 shadow-[0_1px_2px_rgba(12,18,32,0.04)]; }
+@utility label { @apply text-[11px] font-medium uppercase tracking-[0.08em] text-ink-500; }
+@utility btn { @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium transition; }
+@utility btn-primary { @apply btn bg-ink-900 text-white hover:bg-ink-800; }
+@utility btn-ghost { @apply btn bg-white text-ink-900 ring-1 ring-ink-100 hover:bg-ink-50; }
+@utility input { @apply w-full rounded-xl border-0 bg-white px-3.5 py-2.5 text-sm ring-1 ring-ink-100 placeholder:text-ink-300 focus:ring-2 focus:ring-ink-900 outline-none; }
