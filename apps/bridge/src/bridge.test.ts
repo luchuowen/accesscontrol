@@ -63,3 +63,12 @@ it('Tamper Guard reports a manual change exactly once', async () => {
   expect(uploads.filter((x) => x.includes('/drift'))).toHaveLength(1);
   expect(await bridge.guard()).toEqual([]);
 });
+
+it('a corrupt journal is set aside and the bridge starts clean', async () => {
+  const { writeFileSync, readdirSync } = await import('node:fs');
+  const dir = mkdtempSync(join(tmpdir(), 'lbj-'));
+  writeFileSync(join(dir, 'j.json'), "{'broken");
+  const j = new Journal(join(dir, 'j.json'));
+  expect(j.data.cursor).toBe(0);
+  expect(readdirSync(dir).some((f) => f.startsWith('j.json.corrupt-'))).toBe(true);
+});

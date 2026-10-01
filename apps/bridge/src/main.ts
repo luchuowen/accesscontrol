@@ -13,6 +13,22 @@ const cloud = env('LANGO_CLOUD');
 const credFile = `${dataDir}/bridge.json`;
 mkdirSync(dataDir, { recursive: true });
 
+// Single instance: two bridges writing one journal would corrupt it.
+const lock = `${dataDir}/bridge.lock`;
+if (existsSync(lock)) {
+  const pid = Number(readFileSync(lock, 'utf8'));
+  try {
+    if (pid && pid !== process.pid) {
+      process.kill(pid, 0);
+      console.error(`another bridge (pid ${pid}) is running; exiting`);
+      process.exit(0);
+    }
+  } catch {
+    /* stale lock */
+  }
+}
+writeFileSync(lock, String(process.pid));
+
 /** First run: exchange the one-time pairing code for credentials; afterwards reuse them. */
 async function credentials(): Promise<{ bridgeId: string; secret: string }> {
   if (existsSync(credFile)) return JSON.parse(readFileSync(credFile, 'utf8'));

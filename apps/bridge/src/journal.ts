@@ -17,21 +17,22 @@ export interface JournalData {
 export class Journal {
   data: JournalData;
   constructor(private readonly file: string) {
-    this.data = existsSync(file)
-      ? (JSON.parse(readFileSync(file, 'utf8')) as JournalData)
-      : {
-          cursor: 0,
-          timezone: 'Africa/Nairobi',
-          zones: {},
-          states: {},
-          applied: {},
-          lastEventTo: null,
-          pendingAcks: [],
-        };
+    this.data = Journal.empty();
+    if (!existsSync(file)) return;
+    try {
+      const raw = readFileSync(file, 'utf8').replace(/^﻿/, '');
+      this.data = { ...Journal.empty(), ...(JSON.parse(raw) as JournalData) };
+    } catch {
+      // A damaged journal must never stop the doors being managed: keep it for inspection, resync from the cloud.
+      renameSync(file, `${file}.corrupt-${Date.now()}`);
+    }
+  }
+  static empty(): JournalData {
+    return { cursor: 0, timezone: 'Africa/Nairobi', zones: {}, states: {}, applied: {}, lastEventTo: null, pendingAcks: [] };
   }
   save() {
     mkdirSync(dirname(this.file), { recursive: true });
-    writeFileSync(`${this.file}.tmp`, JSON.stringify(this.data));
-    renameSync(`${this.file}.tmp`, this.file); // atomic replace
+    writeFileSync(`${this.file}.${process.pid}.tmp`, JSON.stringify(this.data));
+    renameSync(`${this.file}.${process.pid}.tmp`, this.file); // atomic replace
   }
 }
