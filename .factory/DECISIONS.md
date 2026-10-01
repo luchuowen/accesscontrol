@@ -21,3 +21,11 @@
 - Future-dated plans: set next segment's group now; panel enforces dtStartDate (offline-safe).
 - Tamper Guard = periodic idempotent converge; any change it makes is drift or a scheduled switch.
 - AxTraxNG NG is EOL 31 Dec 2026 (support to Dec 2027); AxTraxPro adapter is the next adapter.
+- VERIFIED on real AxTraxNG 27.7.1.20 + REST 2.0 (lab, 2026-10-01): token via `POST /token` form (operator
+  Administrator; TTL 259199 s); naive local ISO dates round-trip exactly; a partial `UpdateUser` ({ID, dtStopDate})
+  returns no error but changes nothing → always GET-merge-PUT; empty `AccessGroup/Add` works; default groups
+  Master=1, Unauthorized=1000000; department General=1; time zones Never=1, Always=2.
+- Wiegand-26 (eCardType 1) card codes must be ≤ 65535 ("card N is not valid") → member numbers used as card codes
+  stay in 1..65535 (John's 1xxxx/2xxxx/3xxxx scheme fits).
+- REST service starts ~2 min after boot; clients must retry token acquisition.
+- Cloud lab DB owner role has BYPASSRLS (migrations/seed only); app role never.
