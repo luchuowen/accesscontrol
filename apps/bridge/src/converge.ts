@@ -88,7 +88,9 @@ export async function converge(ax: AxtraxClient, s: AccessState, map: ZoneMap, n
 
   const status: 1 | 2 = want.cardsActive ? 1 : 2;
   for (const c of s.credentials) {
-    const card = await ax.getCardByCode(c.cardCode, c.siteCode, c.cardType);
+    const found0 = await ax.getCardByCode(c.cardCode, c.siteCode, c.cardType);
+    // Real AxTraxNG answers "not found" with an empty card (ID 0, code 0), not null.
+    const card = found0 && found0.ID > 0 && found0.iCardCode === c.cardCode ? found0 : null;
     if (!card) {
       await ax.addCard({
         ID: 0,
@@ -111,7 +113,7 @@ export async function converge(ax: AxtraxClient, s: AccessState, map: ZoneMap, n
   }
   // Credentials enrolled on site (biometrics, extra tags) follow the member's state too.
   const after = await ax.getUser(found.ID);
-  for (const card of after.UserCards ?? ([] as CardInfoDT[])) {
+  for (const card of (after.UserCards ?? ([] as CardInfoDT[])).filter((x) => x.ID > 0 && x.iCardCode > 0)) {
     if (
       card.wStatus !== status &&
       !s.credentials.some((c) => c.cardCode === card.iCardCode && c.siteCode === card.iSiteCode)
