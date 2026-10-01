@@ -1,0 +1,21 @@
+{
+  "effortLevel": "medium",
+  "permissions": {
+    "deny": [
+      "Bash(git push --force*)", "Bash(git push -f*)", "Bash(git reset --hard*)", "Bash(git rebase*)",
+      "Bash(git commit --amend*)", "Read(.env)", "Read(.env.*)", "Read(**/secrets/**)", "Edit(.env*)"
+    ],
+    "ask": ["Edit(.factory/manifest.json)", "Edit(.claude/settings.json)", "Edit(packages/db/src/schema/**)"],
+    "allow": [
+      "Bash(bash scripts/factory-check.sh*)", "Bash(node scripts/gates.mjs)", "Bash(pnpm -s *)", "Bash(pnpm install*)",
+      "Bash(pnpm vitest*)", "Bash(pnpm tsc*)", "Bash(pnpm biome*)", "Bash(git status*)", "Bash(git diff*)",
+      "Bash(git log*)", "Bash(git add*)", "Bash(git commit*)", "Bash(git switch*)", "Bash(git checkout -b*)",
+      "Bash(ls*)", "Bash(cat*)", "Bash(rg*)", "Bash(psql*)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [{ "matcher": "Edit|Write|MultiEdit", "hooks": [{ "type": "command", "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard.sh\"" }] }],
+    "Stop": [{ "hooks": [{ "type": "command", "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/stop-gate.sh\"", "timeout": 180 }] }],
+    "SessionStart": [{ "matcher": "compact|resume", "hooks": [{ "type": "command", "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/session-context.sh\"" }] }]
+  }
+}

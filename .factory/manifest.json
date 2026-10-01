@@ -1,0 +1,56 @@
+{
+  "playbook_version": "2.1.0",
+  "applied_migrations": ["init-2.1.0"],
+  "project": "lango",
+  "checks": {
+    "typecheck": "pnpm -s tsc -b --pretty false",
+    "lint": "pnpm -s biome check .",
+    "test": "pnpm -s vitest run",
+    "guards": "node scripts/gates.mjs"
+  },
+  "gates": [
+    {
+      "name": "no-float-money",
+      "pattern": "parseFloat\\(|toFixed\\(",
+      "paths": ["packages/core/src", "apps/web/src/server"],
+      "exclude": []
+    },
+    {
+      "name": "axtrax-calls-only-in-adapter",
+      "pattern": "/api/(User|Card|AccessGroup)/",
+      "paths": ["apps", "packages"],
+      "exclude": ["packages/axtrax/", "docs/"]
+    },
+    {
+      "name": "no-rls-bypass",
+      "pattern": "row_security\\s*=\\s*off|BYPASSRLS",
+      "paths": ["apps", "packages"],
+      "exclude": ["packages/db/migrations/"]
+    },
+    {
+      "name": "no-focused-tests",
+      "pattern": "\\b(it|test|describe)\\.only\\(",
+      "paths": ["apps", "packages"],
+      "exclude": []
+    }
+  ],
+  "protected": [".factory/manifest.json", "docs/Software_Factory_Playbook.md", "packages/db/migrations/meta/"],
+  "append_only_dirs": ["packages/db/migrations/", ".factory/history/"],
+  "critical_paths": [
+    "packages/core/src/money",
+    "packages/core/src/period",
+    "packages/core/src/access-state",
+    "apps/web/src/server/payments",
+    "apps/web/src/server/auth",
+    "apps/web/src/server/tenancy",
+    "apps/web/src/app/api/bridge",
+    "apps/web/src/app/api/webhooks",
+    "packages/db/src/schema",
+    "packages/db/migrations",
+    "apps/bridge/src",
+    "packages/protocol/src"
+  ],
+  "source_globs": ["apps/**/*.ts", "apps/**/*.tsx", "packages/**/*.ts", "packages/**/*.sql"],
+  "caps": { "CLAUDE.md": 80, ".factory/DECISIONS.md": 250 },
+  "domain_reviewer": "access-review"
+}
