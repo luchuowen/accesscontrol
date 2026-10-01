@@ -2,15 +2,23 @@ import { randomUUID } from 'node:crypto';
 import { ArrowLeft, CheckCircle2, Clock, CreditCard, ShieldAlert } from 'lucide-react';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
+import { Notice } from '@/components/notice';
 import { Badge, Empty } from '@/components/ui';
 import { member, products } from '@/lib/data';
 import { date, dateTime, daysLeft, kes } from '@/lib/format';
 import { requireSession } from '@/lib/session';
 import { grantOverride, linkCard, recordDeskPayment, requestMpesa } from '../../actions';
 
-export default async function MemberPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function MemberPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ n?: string }>;
+}) {
   const s = await requireSession();
   const { id } = await params;
+  const { n } = await searchParams;
   const d = await member(s.tid, id);
   if (!d) notFound();
   const plans = (await products(s.tid)).filter((p) => p.active);
@@ -26,6 +34,7 @@ export default async function MemberPage({ params }: { params: Promise<{ id: str
       <Link href="/members" className="mb-6 inline-flex items-center gap-1.5 text-sm text-ink-500 hover:text-ink-900">
         <ArrowLeft size={15} /> Members
       </Link>
+      <Notice code={n} />
       <div className="grid gap-4 lg:grid-cols-3">
         <section className="card p-6 lg:col-span-2">
           <div className="flex flex-wrap items-start justify-between gap-4">
@@ -178,7 +187,15 @@ export default async function MemberPage({ params }: { params: Promise<{ id: str
             </ul>
             <input type="hidden" name="memberId" value={d.m.id} />
             <div className="mt-4 flex gap-2">
-              <input name="cardCode" placeholder="Card number" className="input" />
+              <input
+                name="cardCode"
+                type="number"
+                min={1}
+                max={65535}
+                required
+                placeholder="Card number"
+                className="input"
+              />
               <button type="submit" className="btn-ghost">
                 Link
               </button>

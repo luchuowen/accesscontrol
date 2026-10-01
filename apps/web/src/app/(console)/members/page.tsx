@@ -1,14 +1,19 @@
 import { Plus, Search } from 'lucide-react';
 import Link from 'next/link';
+import { Notice } from '@/components/notice';
 import { Badge, PageHeader } from '@/components/ui';
 import { members } from '@/lib/data';
 import { date, daysLeft } from '@/lib/format';
 import { requireSession } from '@/lib/session';
 import { createMember } from '../actions';
 
-export default async function Members({ searchParams }: { searchParams: Promise<{ q?: string; new?: string }> }) {
+export default async function Members({
+  searchParams,
+}: {
+  searchParams: Promise<{ q?: string; new?: string; n?: string }>;
+}) {
   const s = await requireSession();
-  const { q = '', new: showNew } = await searchParams;
+  const { q = '', new: showNew, n } = await searchParams;
   const rows = await members(s.tid, q);
   return (
     <>
@@ -21,12 +26,13 @@ export default async function Members({ searchParams }: { searchParams: Promise<
           </Link>
         }
       />
+      <Notice code={n} />
       {showNew && (
         <form action={createMember} className="card mb-6 grid gap-4 p-6 md:grid-cols-5">
           <input name="firstName" required placeholder="First name" className="input" />
           <input name="lastName" required placeholder="Last name" className="input" />
           <input name="phone" placeholder="Phone (07…)" className="input" />
-          <input name="memberNo" type="number" placeholder="Member no. (auto)" className="input" />
+          <input name="memberNo" type="number" min={1} max={65535} placeholder="Member no. (auto)" className="input" />
           <button type="submit" className="btn-primary">
             Create &amp; enrol
           </button>

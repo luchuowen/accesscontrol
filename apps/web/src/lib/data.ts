@@ -64,9 +64,7 @@ export async function dashboard(tenantId: string): Promise<Dashboard> {
     const [st] = await tx<{ pending: number; failed: number }[]>`
       select count(*) filter (where applied_version is distinct from version and error is null)::int as pending,
              count(*) filter (where error is not null)::int as failed from access_states`;
-    const [br] = await db()<
-      { last: Date | null }[]
-    >`select max(last_seen_at) as last from bridges where tenant_id = ${tenantId}`;
+    const [br] = await tx<{ last: Date | null }[]>`select max(last_seen_at) as last from app_tenant_bridges()`;
     const recent = await tx<
       {
         at: Date;
@@ -258,10 +256,9 @@ export async function accessOverview(tenantId: string) {
     const zones = await tx<
       { id: string; site_id: string; key: string; name: string; reader_ids: number[] }[]
     >`select * from zones order by name`;
-    const bridges = await db()<
+    const bridges = await tx<
       { id: string; site_id: string; pair_code: string | null; last_seen_at: Date | null; adapter: string }[]
-    >`
-      select id, site_id, pair_code, last_seen_at, adapter from bridges where tenant_id = ${tenantId}`;
+    >`select * from app_tenant_bridges()`;
     const [st] = await tx<{ total: number; synced: number; failed: number }[]>`
       select count(*)::int as total, count(*) filter (where applied_version = version)::int as synced, count(*) filter (where error is not null)::int as failed from access_states`;
     const events = await tx<

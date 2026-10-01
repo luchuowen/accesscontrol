@@ -163,6 +163,12 @@ export class FakeAxtrax {
         this.groups.set(g.ID, g);
         return ok(g);
       }
+      case 'PUT /api/AccessGroup/UpdateAccessGroup': {
+        const g = b as unknown as AccessGroupDT;
+        if (!this.groups.has(g.ID)) return err('Access group not found');
+        this.groups.set(g.ID, { ...this.groups.get(g.ID), ...g } as AccessGroupDT);
+        return ok(this.groups.get(g.ID));
+      }
       case 'GET /api/ReaderInfo/GetAll':
         return ok(this.readers);
       case 'GET /api/Door/GetAll':

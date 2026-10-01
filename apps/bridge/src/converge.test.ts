@@ -85,4 +85,12 @@ describe('converge', () => {
       /belongs to another/,
     );
   });
+  it('keeps combo groups in step with the zone map (a reader moved out of a zone stops opening)', async () => {
+    const paid = { ...base, segments: [{ from: '2026-10-01T00:00:00', until: '2026-10-31T23:59:59', zones: ['gym'] }] };
+    await converge(ax, paid, zones, now('2026-10-01T08:00'));
+    expect(fake.swipe(21001, 0, 11, '2026-10-01T08:05:00')).toBe(true);
+    await converge(ax, paid, { ...zones, gym: [12] }, now('2026-10-01T08:10'));
+    expect(fake.swipe(21001, 0, 11, '2026-10-01T08:15:00')).toBe(false);
+    expect(fake.swipe(21001, 0, 12, '2026-10-01T08:15:00')).toBe(true);
+  });
 });

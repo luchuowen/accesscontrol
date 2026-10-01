@@ -56,12 +56,20 @@ const bridge = new Bridge(
   new Journal(`${dataDir}/journal.json`),
 );
 
+// Tamper Guard re-reads every member from AxTraxNG, so it runs every 10 minutes, not every cycle.
+const GUARD_MS = 10 * 60_000;
+const RESYNC_MS = 60 * 60_000;
 let lastGuard = 0;
+let lastResync = Date.now();
 for (;;) {
+  if (Date.now() - lastResync > RESYNC_MS) {
+    lastResync = Date.now();
+    bridge.requestFullResync();
+  }
   const t0 = Date.now();
   await bridge.cycle(25).catch((e) => console.error(`cycle: ${(e as Error).message}`));
   if (Date.now() - t0 < 2000) await new Promise((r) => setTimeout(r, 5000)); // back off when offline
-  if (Date.now() - lastGuard > 60_000) {
+  if (Date.now() - lastGuard > GUARD_MS) {
     lastGuard = Date.now();
     for (const d of await bridge.guard().catch(() => []))
       console.log(`guard member ${d.memberNo}: ${d.changes.join(', ')}`);

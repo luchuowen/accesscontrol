@@ -2,11 +2,11 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AxtraxClient, demoSeed, FakeAxtrax } from '@lango/axtrax';
-import { Bridge, Journal } from '@lango/bridge';
+import { Bridge, Journal, sign } from '@lango/bridge';
 import { connect, migrate, type Sql, withTenant } from '@lango/db';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { rebuildAccessState } from './access.js';
-import { handleAck, handleDrift, handleEvents, handleSync } from './bridge-api.js';
+import { handleAck, handleDrift, handleEvents, handlePair, handleSync } from './bridge-api.js';
 import { recordPayment } from './payments.js';
 import { handleTaifaWebhook, TaifaPay } from './taifapay.js';
 
@@ -221,5 +221,87 @@ describe('walking skeleton: pay → door', () => {
       }),
     );
     expect(res.status).toBe(401);
+  });
+  it('three M-Pesa payments landing at once stack into three consecutive periods', async () => {
+    const [m] = await owner`insert into members (tenant_id, member_no, first_name, last_name) values
+      (${tenantId}, 21050, 'Concurrent', 'Payer') returning id`;
+    await Promise.all(
+      [1, 2, 3].map((i) =>
+        recordPayment(app, tenantId, {
+          provider: 'taifapay',
+          providerTxnId: `TP-RACE-${i}`,
+          amountKes: 5000,
+          accountRef: '21050',
+          paidAt: new Date(),
+        }),
+      ),
+    );
+    const ents = await owner<{ starts_at: Date; ends_at: Date }[]>`
+      select starts_at, ends_at from entitlements where member_id = ${m?.id} order by starts_at`;
+    expect(ents).toHaveLength(3);
+    for (let i = 1; i < ents.length; i++) {
+      const gap = (ents[i]?.starts_at.getTime() ?? 0) - (ents[i - 1]?.ends_at.getTime() ?? 0);
+      expect(gap).toBeGreaterThan(0); // no overlap
+      expect(gap).toBeLessThanOrEqual(1000); // no gap: next period starts the second after the last ends
+    }
+  });
+
+  it('TaifaPay webhook: an envelope saying "completed" around a failed transaction is ignored', async () => {
+    const fakeFetch = (async (u: string) =>
+      new Response(
+        JSON.stringify(
+          String(u).endsWith('/auth/token')
+            ? { access_token: 't', expires_in: '3599' }
+            : { status: 'completed', data: { transactionId: 'TP-ENV-1', status: 'failed', amount: 5000 } },
+        ),
+        { status: 200 },
+      )) as typeof fetch;
+    const client = new TaifaPay({ env: 'sandbox', clientId: 'c3', clientSecret: 's' }, fakeFetch);
+    const body = JSON.stringify({ data: { transactionId: 'TP-ENV-1' } });
+    const res = await handleTaifaWebhook(app, new Request('http://x', { method: 'POST', body }), 'demo-club', client);
+    expect(await res.json()).toEqual({ ignored: 'not completed' });
+  });
+
+  it('a failed apply keeps the last applied version (the doors still hold it) and records the error', async () => {
+    const [b] = await owner`select id from bridges limit 1`;
+    const [st] = await owner<{ version: number; applied_version: number }[]>`
+      select s.version, s.applied_version from access_states s join members m on m.id = s.member_id where m.member_no = 21001`;
+    const raw = JSON.stringify({
+      results: [{ memberNo: 21001, version: st?.version, ok: false, error: 'panel offline' }],
+    });
+    const ts = String(Date.now());
+    const res = await handleAck(
+      app,
+      new Request('http://cloud.test/api/bridge/ack', {
+        method: 'POST',
+        body: raw,
+        headers: {
+          authorization: `Bridge ${b?.id}:${sign('test-secret', 'POST', '/api/bridge/ack', ts, raw)}`,
+          'x-lango-timestamp': ts,
+        },
+      }),
+    );
+    expect(res.status).toBe(200);
+    const [after] = await owner`
+      select s.applied_version, s.error from access_states s join members m on m.id = s.member_id where m.member_no = 21001`;
+    expect(after).toEqual({ applied_version: st?.applied_version, error: 'panel offline' });
+  });
+
+  it('pairing: a code works once, rotates the secret, and expired codes are refused', async () => {
+    const [s] = await owner`select id from sites limit 1`;
+    const [b] = await owner`insert into bridges (tenant_id, site_id, secret, pair_code, pair_expires_at)
+      values (${tenantId}, ${s?.id}, 'old', 'ABCDE-FGHJK', now() + interval '1 day') returning id`;
+    await owner`insert into bridges (tenant_id, site_id, secret, pair_code, pair_expires_at)
+      values (${tenantId}, ${s?.id}, 'old', 'MNPQR-STVWX', now() - interval '1 minute')`;
+    const pair = (code: string) =>
+      handlePair(app, new Request('http://x/api/bridge/pair', { method: 'POST', body: JSON.stringify({ code }) }));
+    const ok = await pair('abcde fghjk');
+    expect(ok.status).toBe(200);
+    const j = (await ok.json()) as { bridgeId: string; secret: string };
+    expect(j.bridgeId).toBe(b?.id);
+    const [row] = await owner`select secret, pair_code from bridges where id = ${b?.id}`;
+    expect(row).toEqual({ secret: j.secret, pair_code: null });
+    expect((await pair('ABCDE-FGHJK')).status).toBe(404);
+    expect((await pair('MNPQR-STVWX')).status).toBe(404);
   });
 });

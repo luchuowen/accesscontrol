@@ -3,6 +3,7 @@ import { connect, migrate, withTenant } from '@lango/db';
 import { DateTime } from 'luxon';
 import { rebuildAccessState } from './access.js';
 import { hashPassword } from './auth.js';
+import { newPairCode } from './bridge-api.js';
 import { recordPayment } from './payments.js';
 
 /**
@@ -79,8 +80,8 @@ export async function seed(o: SeedOptions) {
       await owner`insert into tenants (partner_id, slug, name) values (${p?.id}, ${slug}, ${o.name ?? 'Demo Club'}) returning id`;
     const tenantId = t?.id as string;
     const [s] = await owner`insert into sites (tenant_id, name) values (${tenantId}, 'Main Clubhouse') returning id`;
-    const pair = randomBytes(4).toString('hex').toUpperCase();
-    await owner`insert into bridges (tenant_id, site_id, secret, pair_code) values (${tenantId}, ${s?.id}, ${randomBytes(32).toString('hex')}, ${pair})`;
+    const pair = newPairCode();
+    await owner`insert into bridges (tenant_id, site_id, secret, pair_code, pair_expires_at) values (${tenantId}, ${s?.id}, ${randomBytes(32).toString('hex')}, ${pair}, now() + interval '30 days')`;
     const r = o.readers ?? { gym: [11], sauna: [12], pool: [13], spa: [14] };
     for (const [key, name] of [
       ['gym', 'Gym'],

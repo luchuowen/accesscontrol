@@ -15,7 +15,7 @@ export async function rebuildAccessState(tx: Tx, tenantId: string, memberId: str
   const [m] = await tx<
     { member_no: number; first_name: string; last_name: string; phone: string | null; status: string }[]
   >`
-    select member_no, first_name, last_name, phone, status from members where id = ${memberId}`;
+    select member_no, first_name, last_name, phone, status from members where id = ${memberId} for update`; // serialise per member; entitlements below are read after the lock
   if (!m) throw new Error(`member ${memberId} not found`);
   const creds = await tx<{ site_code: number; card_code: bigint; card_type: number }[]>`
     select site_code, card_code, card_type from credentials where member_id = ${memberId} order by card_code`;
@@ -48,6 +48,8 @@ export async function rebuildAccessState(tx: Tx, tenantId: string, memberId: str
     if (cur && JSON.stringify(curBody) === JSON.stringify(body)) continue;
     const version = (cur?.version ?? 0) + 1;
     const doc = { ...body, version };
+    await tx`
+      select pg_advisory_xact_lock(hashtext(${site.id}))`; // seq order = commit order per site (bridge cursor never skips)
     await tx`
       insert into access_states (tenant_id, site_id, member_id, version, doc)
       values (${tenantId}, ${site.id}, ${memberId}, ${version}, ${tx.json(doc as never)})

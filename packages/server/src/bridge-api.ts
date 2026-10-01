@@ -1,4 +1,4 @@
-import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { Sql } from '@lango/db';
 import { withTenant } from '@lango/db';
 import { type AccessState, AckRequest, DriftRequest, EventsRequest, type SyncResponse } from '@lango/protocol';
@@ -18,14 +18,14 @@ export async function authBridge(sql: Sql, req: Request, raw: string): Promise<B
   const m = /^Bridge ([0-9a-f-]{36}):([0-9a-f]{64})$/.exec(req.headers.get('authorization') ?? '');
   const ts = req.headers.get('x-lango-timestamp') ?? '';
   if (!m || !/^\d{10,16}$/.test(ts) || Math.abs(Date.now() - Number(ts)) > 5 * 60_000) return null;
-  const [b] = await sql<BridgeRow[]>`select id, tenant_id, site_id, secret from bridges where id = ${m[1] as string}`;
+  const [b] = await sql<BridgeRow[]>`select * from app_bridge_auth(${m[1] as string})`;
   if (!b) return null;
   const path = new URL(req.url).pathname;
   const h = createHash('sha256').update(raw).digest('hex');
   const want = createHmac('sha256', b.secret).update(`${req.method}|${path}|${ts}|${h}`).digest();
   const got = Buffer.from(m[2] as string, 'hex');
   if (got.length !== want.length || !timingSafeEqual(got, want)) return null;
-  await sql`update bridges set last_seen_at = now() where id = ${b.id}`;
+  await sql`select app_bridge_touch(${b.id})`;
   return b;
 }
 
@@ -67,12 +67,14 @@ export async function handleAck(sql: Sql, req: Request): Promise<Response> {
   const raw = await req.text();
   const b = await authBridge(sql, req, raw);
   if (!b) return json(401, { error: 'unauthorized' });
-  const body = AckRequest.safeParse(JSON.parse(raw || '{}'));
+  const body = AckRequest.safeParse(safeJson(raw));
   if (!body.success) return json(400, { error: body.error.message });
   await withTenant(sql, b.tenant_id, async (tx) => {
     for (const r of body.data.results) {
-      await tx`update access_states s set applied_version = ${r.ok ? r.version : null}, applied_at = case when ${r.ok} then now() else applied_at end,
-                 error = ${r.ok ? null : (r.error ?? 'failed')}
+      // A failure keeps the last applied version (the doors still hold that state); it only records the error.
+      await tx`update access_states s set applied_version = case when ${r.ok} then ${r.version}::int else s.applied_version end,
+                 applied_at = case when ${r.ok} then now() else s.applied_at end,
+                 error = ${r.ok ? null : (r.error ?? 'failed').slice(0, 500)}
                from members m where s.member_id = m.id and m.member_no = ${r.memberNo} and s.site_id = ${b.site_id}
                  and s.version = ${r.version}`;
     }
@@ -85,7 +87,7 @@ export async function handleEvents(sql: Sql, req: Request): Promise<Response> {
   const raw = await req.text();
   const b = await authBridge(sql, req, raw);
   if (!b) return json(401, { error: 'unauthorized' });
-  const body = EventsRequest.safeParse(JSON.parse(raw || '{}'));
+  const body = EventsRequest.safeParse(safeJson(raw));
   if (!body.success) return json(400, { error: body.error.message });
   const n = await withTenant(sql, b.tenant_id, async (tx) => {
     const [t] = await tx<{ timezone: string }[]>`select timezone from tenants where id = ${b.tenant_id}`;
@@ -105,16 +107,48 @@ export async function handleEvents(sql: Sql, req: Request): Promise<Response> {
 
 /** POST /api/bridge/pair {code} — one-time pairing: exchanges the code shown in the console for credentials. */
 export async function handlePair(sql: Sql, req: Request): Promise<Response> {
-  const body = (await req.json().catch(() => ({}))) as { code?: string; machine?: string; version?: string };
-  const code = String(body.code ?? '')
-    .trim()
-    .toUpperCase();
-  if (!/^[0-9A-F]{8}$/.test(code)) return json(400, { error: 'invalid pairing code' });
-  const [b] = await sql<{ id: string; secret: string }[]>`
-    update bridges set pair_code = null, version = ${String(body.version ?? '')}, last_seen_at = now()
-    where pair_code = ${code} returning id, secret`;
-  if (!b) return json(404, { error: 'unknown or already used pairing code' });
-  return json(200, { bridgeId: b.id, secret: b.secret });
+  const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? 'local';
+  if (!rateLimit(`pair:${ip}`, 10, 60_000)) return json(429, { error: 'too many attempts, wait a minute' });
+  const body = (await req.json().catch(() => ({}))) as { code?: string; version?: string };
+  const code = normalisePairCode(String(body.code ?? ''));
+  if (!code) return json(400, { error: 'invalid pairing code' });
+  const secret = randomBytes(32).toString('hex'); // fresh secret at pairing time; never reused
+  const [b] = await sql<
+    { id: string }[]
+  >`select * from app_bridge_pair(${code}, ${secret}, ${String(body.version ?? '').slice(0, 40)})`;
+  if (!b) return json(404, { error: 'unknown, expired or already used pairing code' });
+  return json(200, { bridgeId: b.id, secret });
+}
+
+const PAIR_ALPHABET = '23456789ABCDEFGHJKMNPQRSTVWXYZ'; // no 0/O/1/I/L/U
+/** 10 characters from a 30-symbol alphabet (~49 bits), shown as XXXXX-XXXXX. */
+export function newPairCode(): string {
+  const b = randomBytes(10);
+  const c = [...b].map((x) => PAIR_ALPHABET[x % PAIR_ALPHABET.length]).join('');
+  return `${c.slice(0, 5)}-${c.slice(5)}`;
+}
+export function normalisePairCode(raw: string): string | null {
+  const c = raw.toUpperCase().replace(/[^0-9A-Z]/g, '');
+  return /^[2-9A-HJKMNP-TV-Z]{10}$/.test(c) ? `${c.slice(0, 5)}-${c.slice(5)}` : null;
+}
+
+const hits = new Map<string, number[]>();
+/** Small in-process sliding-window limiter (per instance) for unauthenticated endpoints. */
+export function rateLimit(key: string, max: number, windowMs: number): boolean {
+  const now = Date.now();
+  const recent = (hits.get(key) ?? []).filter((t) => now - t < windowMs);
+  recent.push(now);
+  hits.set(key, recent);
+  if (hits.size > 10_000) hits.clear();
+  return recent.length <= max;
+}
+
+function safeJson(raw: string): unknown {
+  try {
+    return JSON.parse(raw || '{}');
+  } catch {
+    return null;
+  }
 }
 
 /** POST /api/bridge/drift — Tamper Guard found AxTraxNG edited outside Lango and reverted it. */
@@ -122,7 +156,7 @@ export async function handleDrift(sql: Sql, req: Request): Promise<Response> {
   const raw = await req.text();
   const b = await authBridge(sql, req, raw);
   if (!b) return json(401, { error: 'unauthorized' });
-  const body = DriftRequest.safeParse(JSON.parse(raw || '{}'));
+  const body = DriftRequest.safeParse(safeJson(raw));
   if (!body.success) return json(400, { error: body.error.message });
   await withTenant(sql, b.tenant_id, async (tx) => {
     for (const d of body.data.drift) {

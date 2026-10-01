@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { Sql } from '@lango/db';
 import { withTenant } from '@lango/db';
 import { decrypt } from './crypto.js';
@@ -20,7 +21,7 @@ export class TaifaPay {
   ) {}
 
   private async token(): Promise<string> {
-    const k = `${this.c.env}:${this.c.clientId}`;
+    const k = createHash('sha256').update(`${this.c.env}|${this.c.clientId}|${this.c.clientSecret}`).digest('hex'); // secret is part of the key
     const hit = tokens.get(k);
     if (hit && hit.exp > Date.now() + 60_000) return hit.token;
     const r = await this.f(`${base(this.c.env)}/auth/token`, {
@@ -97,6 +98,38 @@ export const normalStatus = (s: unknown) => {
   return v === 'complete' || v === 'completed' || v === 'success' ? 'completed' : v === 'failed' ? 'failed' : 'pending';
 };
 
+/**
+ * The transaction object from `GET /transactions/{id}`: the body itself, or its `data` / `transaction` member.
+ * Fields are read from that one object only (no deep search), so an envelope's own `status` can't be mistaken for it.
+ */
+export function transactionRecord(truth: unknown): {
+  id?: string;
+  status: unknown;
+  amount: unknown;
+  accountReference?: string;
+  externalReference?: string;
+  phone: string | null;
+  paidAt?: string;
+} | null {
+  if (!truth || typeof truth !== 'object') return null;
+  const o = truth as Record<string, unknown>;
+  const inner = [o.data, o.transaction].find((x) => x && typeof x === 'object' && !Array.isArray(x)) as
+    | Record<string, unknown>
+    | undefined;
+  const r = inner && ('amount' in inner || 'status' in inner) ? inner : o;
+  if (!('status' in r) || !('amount' in r)) return null;
+  const str = (v: unknown) => (typeof v === 'string' && v ? v : undefined);
+  return {
+    id: str(r.transactionId) ?? str(r.id),
+    status: r.status,
+    amount: r.amount,
+    accountReference: str(r.accountReference),
+    externalReference: str(r.externalReference) ?? str(r.externalId),
+    phone: str(r.phoneNumber) ?? str(r.msisdn) ?? null,
+    paidAt: str(r.completedAt) ?? str(r.updatedAt),
+  };
+}
+
 /** Find a value at any depth (TaifaPay response schemas are not published; be tolerant). */
 export function pick(o: unknown, ...keys: string[]): unknown {
   if (!o || typeof o !== 'object') return undefined;
@@ -145,40 +178,43 @@ export async function handleTaifaWebhook(
   const client = verifyClient ?? (await tenantTaifa(sql, t.id));
   if (!client) return new Response('tenant has no TaifaPay credentials', { status: 409 });
   const truth = await client.transaction(txId);
-  if (normalStatus(pick(truth, 'status')) !== 'completed') return ok({ ignored: 'not completed' });
-  const amount = Number(pick(truth, 'amount'));
-  const accountRef = String(pick(truth, 'accountReference') ?? evt.data?.accountReference ?? '');
-  const externalRef = String(pick(truth, 'externalReference', 'externalId') ?? evt.data?.externalReference ?? '');
-  const phone = (pick(truth, 'phoneNumber', 'msisdn', 'phone') as string | undefined) ?? null;
-  // Intents carry member + product; resolve them to an account reference the matcher understands.
+  // Trust only TaifaPay's own record of this transaction (never fields from the unsigned webhook body).
+  const rec = transactionRecord(truth);
+  if (!rec) return ok({ ignored: 'unrecognised transaction response' });
+  if (rec.id && rec.id !== txId) return ok({ ignored: 'transaction id mismatch' });
+  if (normalStatus(rec.status) !== 'completed') return ok({ ignored: 'not completed' });
+  const amount = Number(rec.amount);
+  if (!Number.isSafeInteger(amount) || amount <= 0) return ok({ ignored: 'invalid amount' });
+  // Intents carry member + product; they only count when TaifaPay itself echoes our id and the amount matches.
   let productId: string | null = null;
-  let ref = accountRef;
-  if (/^[0-9a-f-]{36}$/.test(externalRef)) {
+  let intentId: string | null = null;
+  let ref = rec.accountReference ?? '';
+  const externalRef = rec.externalReference ?? '';
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(externalRef)) {
     const [it] = await withTenant(
       sql,
       t.id,
-      (tx) => tx<{ product_id: string; member_no: number }[]>`
-      select i.product_id, m.member_no from payment_intents i join members m on m.id = i.member_id where i.id = ${externalRef}`,
+      (tx) => tx<{ product_id: string; member_no: number; amount_kes: number }[]>`
+      select i.product_id, m.member_no, i.amount_kes from payment_intents i join members m on m.id = i.member_id where i.id = ${externalRef}`,
     );
-    if (it) {
+    if (it && it.amount_kes === amount) {
       productId = it.product_id;
+      intentId = externalRef;
       ref = String(it.member_no);
-      await withTenant(
-        sql,
-        t.id,
-        (tx) => tx`update payment_intents set status = 'completed', provider_ref = ${txId} where id = ${externalRef}`,
-      );
     }
   }
+  const paid = rec.paidAt ? new Date(rec.paidAt) : new Date();
   const r = await recordPayment(sql, t.id, {
     provider: 'taifapay',
     providerTxnId: txId,
     amountKes: amount,
     accountRef: ref.split('-')[0] ?? ref,
-    phone,
+    phone: rec.phone,
     externalRef,
     productId,
-    paidAt: new Date(),
+    intentId,
+    channel: 'mpesa',
+    paidAt: Number.isNaN(paid.getTime()) ? new Date() : paid,
     raw: { webhook: evt, verified: truth },
   });
   return ok(r);

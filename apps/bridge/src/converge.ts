@@ -5,6 +5,7 @@ import type { AccessState, ZoneMap } from '@lango/protocol';
 import { DateTime } from 'luxon';
 
 const NAIVE = "yyyy-MM-dd'T'HH:mm:ss";
+const NEVER = '2000-01-01T00:00:00';
 export const toLocal = (d: DateTime | null) => (d ? d.toFormat(NAIVE) : null);
 const norm = (s: string | null | undefined) => (s ? s.slice(0, 19) : null);
 
@@ -18,17 +19,30 @@ export interface ConvergeResult {
 export async function ensureGroup(ax: AxtraxClient, zones: string[], map: ZoneMap): Promise<number> {
   if (zones.length === 0) return UNAUTHORIZED_GROUP_ID;
   const name = comboGroupName(zones);
-  const existing = (await ax.accessGroups()).find((g) => g.tDesc === name);
-  if (existing) return existing.ID;
   // Only readers that really exist on this AxTraxNG server (a mis-mapped zone must not break the member).
   const known = new Set((await ax.readers()).map((r) => r.ID));
   const readers = [...new Set(zones.flatMap((z) => map[z] ?? []))].filter((r) => known.has(r)).sort((a, b) => a - b);
-  const g = await ax.addAccessGroup({
-    ID: 0,
-    tDesc: name,
-    TimezoneReaders: readers.map((IdReader) => ({ IdReader, IdTimeZone: TZ_ALWAYS })),
-  });
-  return g.ID;
+  const want = readers.map((IdReader) => ({ IdReader, IdTimeZone: TZ_ALWAYS }));
+  const existing = (await ax.accessGroups()).find((g) => g.tDesc === name);
+  if (!existing) return (await ax.addAccessGroup({ ID: 0, tDesc: name, TimezoneReaders: want })).ID;
+  // Keep the group in step with the zone map: a reader moved out of a zone must stop opening for it.
+  const have = (existing.TimezoneReaders ?? [])
+    .map((t) => `${t.IdReader}:${t.IdTimeZone}`)
+    .sort()
+    .join(',');
+  if (
+    have !==
+    want
+      .map((t) => `${t.IdReader}:${t.IdTimeZone}`)
+      .sort()
+      .join(',')
+  ) {
+    await ax.updateAccessGroup({
+      ...existing,
+      TimezoneReaders: want.map((t) => ({ ...t, IdAccessGroup: existing.ID })),
+    });
+  }
+  return existing.ID;
 }
 
 /**
@@ -55,9 +69,9 @@ export async function converge(ax: AxtraxClient, s: AccessState, map: ZoneMap, n
       tLastName: s.lastName,
       UserAccGrp: { ID: groupId },
       UserDepartment: { ID: 1 },
-      bValidDate: want.validUntil !== null,
-      dtStartDate: toLocal(want.validFrom),
-      dtStopDate: toLocal(want.validUntil),
+      bValidDate: true,
+      dtStartDate: toLocal(want.validFrom) ?? NEVER,
+      dtStopDate: toLocal(want.validUntil) ?? NEVER,
       UserCards: [],
     });
     changes.push('user created');
@@ -68,9 +82,9 @@ export async function converge(ax: AxtraxClient, s: AccessState, map: ZoneMap, n
     tFirstName: s.firstName,
     tLastName: s.lastName,
     ...(s.mobile ? { tMobile: s.mobile } : {}),
-    bValidDate: want.validUntil !== null,
-    dtStartDate: toLocal(want.validFrom),
-    dtStopDate: toLocal(want.validUntil),
+    bValidDate: true, // dates are always enforced; a member who never paid gets a validity window in the past
+    dtStartDate: toLocal(want.validFrom) ?? NEVER,
+    dtStopDate: toLocal(want.validUntil) ?? NEVER,
     UserAccGrp: { ...cur.UserAccGrp, ID: groupId },
   };
   const diff: string[] = [];

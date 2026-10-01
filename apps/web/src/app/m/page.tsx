@@ -29,7 +29,9 @@ export default async function MemberPortal({ searchParams }: { searchParams: Pro
         <p className="mt-1 text-sm text-ink-300">Check your access and renew with M-Pesa before you arrive.</p>
         {sp.e && (
           <div className="mt-4 rounded-xl bg-rose-500/15 p-3 text-sm text-rose-200">
-            We couldn&apos;t find that membership. Check your number and phone.
+            {sp.e === '2'
+              ? 'Too many attempts. Wait a few minutes and try again.'
+              : 'We couldn\u2019t find an active membership with those details. Check your number and phone.'}
           </div>
         )}
         <form action={memberLogin} className="mt-6 space-y-3">
@@ -117,6 +119,13 @@ export default async function MemberPortal({ searchParams }: { searchParams: Pro
       {sp.pay === 'unavailable' && (
         <div className="mt-4 rounded-xl bg-amber-500/15 p-3 text-sm text-amber-100">
           Online payment isn&apos;t switched on for this club yet. Pay at reception.
+        </div>
+      )}
+      {(sp.pay === 'failed' || sp.pay === 'wait') && (
+        <div className="mt-4 rounded-xl bg-amber-500/15 p-3 text-sm text-amber-100">
+          {sp.pay === 'wait'
+            ? 'A payment request was just sent. Give it a few minutes before trying again.'
+            : 'We couldn\u2019t reach M-Pesa just now. Try again in a minute or pay at reception.'}
         </div>
       )}
       <h2 className="mt-8 text-xs font-medium uppercase tracking-widest text-ink-300">Renew or add</h2>

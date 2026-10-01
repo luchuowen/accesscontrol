@@ -27,7 +27,7 @@ export default async function Login({ searchParams }: { searchParams: Promise<{ 
           <p className="mt-1 text-sm text-ink-500">Use the email your club administrator registered.</p>
           {e && (
             <div className="mt-6 rounded-xl bg-rose-50 p-3 text-sm text-rose-700 ring-1 ring-rose-200">
-              Email or password is incorrect.
+              {e === '2' ? 'Too many attempts. Wait a few minutes and try again.' : 'Email or password is incorrect.'}
             </div>
           )}
           <label className="mt-6 block">

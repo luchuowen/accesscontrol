@@ -91,6 +91,9 @@ export class AxtraxClient {
   addAccessGroup(g: Partial<AccessGroupDT>) {
     return this.call<AccessGroupDT>('POST', 'AccessGroup/Add', g);
   }
+  updateAccessGroup(g: AccessGroupDT) {
+    return this.call<AccessGroupDT>('PUT', 'AccessGroup/UpdateAccessGroup', g);
+  }
   readers() {
     return this.call<ReaderInfoDT[]>('GET', 'ReaderInfo/GetAll');
   }

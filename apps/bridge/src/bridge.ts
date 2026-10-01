@@ -119,24 +119,51 @@ export class Bridge {
 
   async pushAcks() {
     if (!this.j.data.pendingAcks.length) return;
-    await this.cloud('POST', '/api/bridge/ack', { results: this.j.data.pendingAcks });
-    this.j.data.pendingAcks = [];
+    // Only the latest result per member matters; this also bounds the queue during a long outage.
+    const latest = new Map<number, AckResult>();
+    for (const a of this.j.data.pendingAcks) {
+      const prev = latest.get(a.memberNo);
+      if (!prev || prev.version <= a.version) latest.set(a.memberNo, a);
+    }
+    const batch = [...latest.values()];
+    this.j.data.pendingAcks = batch;
+    for (let i = 0; i < batch.length; i += 500)
+      await this.cloud('POST', '/api/bridge/ack', { results: batch.slice(i, i + 500) });
+    // Keep anything queued while uploading (none today: the loop is single-threaded), drop what was sent.
+    const sent = new Set(batch);
+    this.j.data.pendingAcks = this.j.data.pendingAcks.filter((a) => !sent.has(a));
     this.j.save();
   }
 
-  /** Read access events since the last window (with overlap) and upload them. */
-  async pumpEvents(): Promise<number> {
+  /** Ask the cloud for every state again (cursor 0); versions already applied are not re-written. */
+  requestFullResync() {
+    this.j.data.cursor = 0;
+    this.j.save();
+  }
+
+  /**
+   * Read access events since the last window and upload them. Windows overlap by 10 minutes (the cloud
+   * dedupes by AxTraxNG event id) so events written late by a panel coming back online are not missed.
+   * A full page means there may be more: the next window starts at the last event read.
+   */
+  async pumpEvents(limit = 5000): Promise<number> {
     const to = this.now();
-    const from = this.j.data.lastEventTo
-      ? DateTime.fromISO(this.j.data.lastEventTo, { zone: to.zone }).minus({ minutes: 2 })
-      : to.minus({ hours: 1 });
     const fmt = "yyyy-MM-dd'T'HH:mm:ss";
-    const evs = await this.ax.accessEvents(from.toFormat(fmt), to.toFormat(fmt));
-    const users = new Map<number, number>();
+    const from = this.j.data.lastEventTo
+      ? DateTime.fromISO(this.j.data.lastEventTo, { zone: to.zone }).minus({ minutes: 10 })
+      : to.minus({ hours: 1 });
+    const evs = await this.ax.accessEvents(from.toFormat(fmt), to.toFormat(fmt), limit);
+    const users = new Map<number, number | null>();
     const events: AccessEvent[] = [];
     for (const e of evs) {
       if (e.IdEmpNum && !users.has(e.IdEmpNum))
-        users.set(e.IdEmpNum, (await this.ax.getUser(e.IdEmpNum)).EmpNumCompany);
+        users.set(
+          e.IdEmpNum,
+          await this.ax.getUser(e.IdEmpNum).then(
+            (u) => u.EmpNumCompany ?? null,
+            () => null,
+          ),
+        );
       events.push({
         id: e.ID,
         at: e.dtEventReal.slice(0, 19),
@@ -148,8 +175,15 @@ export class Bridge {
         granted: isGranted(e.iEventType),
       });
     }
-    if (events.length) await this.cloud('POST', '/api/bridge/events', { events });
-    this.j.data.lastEventTo = to.toFormat(fmt);
+    for (let i = 0; i < events.length; i += 1000)
+      await this.cloud('POST', '/api/bridge/events', { events: events.slice(i, i + 1000) });
+    const full = evs.length >= limit;
+    const lastAt = events.reduce((m, e) => (e.at > m ? e.at : m), '');
+    // When the page was full, continue from the newest event read (+10 min overlap covers the boundary).
+    this.j.data.lastEventTo =
+      full && lastAt
+        ? DateTime.fromISO(lastAt, { zone: to.zone }).plus({ minutes: 10 }).toFormat(fmt)
+        : to.toFormat(fmt);
     this.j.save();
     return events.length;
   }
@@ -164,9 +198,13 @@ export class Bridge {
     await this.applyPending();
     try {
       await this.pushAcks();
+    } catch (e) {
+      this.log(`acks: ${(e as Error).message} (kept for retry)`);
+    }
+    try {
       await this.pumpEvents();
     } catch (e) {
-      this.log(`upload: ${(e as Error).message}`);
+      this.log(`events: ${(e as Error).message}`);
     }
   }
 }
