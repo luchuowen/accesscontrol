@@ -25,9 +25,9 @@ job files dropped into `lab/queue/`, writing output to `lab/results/`:
 
 ## Deploy the cloud app
 
-1. `bash scripts/package-cloud.sh /path/lango-app.tar.xz` (Next standalone + migrations + bundled migrate/seed).
-2. Copy to `lab/deploy/lango-app.tar.xz`; queue an `.upload` to `/tmp/lango-app.tar.xz` and `deploy/setup-cloud.sh`
-   as a `.cloud.sh` job. The script is idempotent: migrations always run, seed runs once
+1. `bash scripts/package-cloud.sh /path/lango-app-vN.tar.xz` (Next standalone + migrations + bundled migrate/seed).
+2. Copy to `lab/deploy/lango-app-vN.tar.xz` (new N every time); queue an `.upload` to `/tmp/lango-app.tar.xz` and
+   `deploy/setup-cloud.sh` as a `.cloud.sh` job. The script is idempotent: migrations always run, seed runs once
    (`/etc/lango.seeded`), secrets live in `/etc/lango.env` (root, 600).
 
 ## Windows VM facts (from the silent install)
@@ -45,3 +45,17 @@ job files dropped into `lab/queue/`, writing output to `lab/results/`:
 - Proof 1 passed: KES 10 payment → AxTraxNG user 21002 valid 2026-10-02 00:00–23:59, group `LG: gym`, card active,
   confirmed by the bridge ack 3.1 s after the payment was recorded. Lapsed members move to Unauthorized with cards
   inactive. Leftover group `LG: probe` (from the API probe) cannot be deleted through the REST API.
+
+## Update the Site Bridge
+Bundle `apps/bridge/src/main.ts` with esbuild (node22 ESM), gzip+base64 it into a `.ps1` job that stops the task, writes
+`lango-bridge.mjs`, checks its SHA-256, removes `bridge.lock` and starts the task (pattern: `lab/hold/5x-*.ps1`).
+Every `.ps1` job reboots the Windows VM; the REST service answers ~2 min after boot.
+
+## Proof 2 (2026-10-02, after two review passes)
+- Cloud v4 (migration 0003) + bridge `437815aa`: KES 10 renewal for 21002 extended 2 Oct → 3 Oct 23:59 (renewal
+  from current end), applied in AxTraxNG 3.75 s after the payment; 34/34 states applied, 0 errors.
+- App role: `staff_users` permission denied; login works through `app_staff_login`.
+- Real AxTraxNG: `PUT AccessGroup/UpdateAccessGroup` works; `GetAccessGroups` includes `TimezoneReaders`.
+- Found and fixed: users created with no validity dates (never paid) stored 1900-01-01 / bValidDate false, and later
+  updates did not stick, so the Tamper Guard reported them every pass. Never-paid members now get a past one-day
+  window (2000-01-01 00:00–23:59) and the bridge re-reads after every user update and fails loudly if it did not land.
