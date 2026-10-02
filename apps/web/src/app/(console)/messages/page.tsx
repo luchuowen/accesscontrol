@@ -2,6 +2,7 @@ import { withTenant } from '@lango/db';
 import { can, clubSms, type NotifySettings, platformSmsConfig, quietHours } from '@lango/server';
 import { BellRing, Megaphone, MessageSquare, Moon } from 'lucide-react';
 import Link from 'next/link';
+import { MoneyInput } from '@/components/money-input';
 import { SubmitButton } from '@/components/submit-button';
 import { Badge, PageHeader } from '@/components/ui';
 import { dateTime } from '@/lib/format';
@@ -264,13 +265,11 @@ export default async function Messages({ searchParams }: { searchParams: Promise
                     />
                     <span>
                       Then top up automatically: M-Pesa prompt to the alert phone for KES{' '}
-                      <input
+                      <MoneyInput
                         name="autoTopupKes"
-                        type="number"
-                        min={100}
-                        step={100}
+                        prefix={false}
                         defaultValue={n.autoTopupKes ?? 1000}
-                        className="input inline-block w-24 px-2 py-0.5"
+                        className="inline-flex h-8 w-24 align-middle"
                       />
                     </span>
                   </label>

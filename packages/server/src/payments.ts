@@ -113,10 +113,11 @@ async function applyPayment(tx: Tx, tenantId: string, paymentId: string, p: Inco
           select distinct service_id from entitlements where member_id = ${member.id} and service_id is not null`;
         const mine = same.filter((x) => had.some((h) => h.service_id === x.service_id));
         if (mine.length === 1) pick = mine[0];
-        else return unmatched(`KES ${p.amountKes} matches ${same.length} prices; staff to choose`);
+        else
+          return unmatched(`KES ${p.amountKes.toLocaleString('en-KE')} matches ${same.length} prices; staff to choose`);
       }
     }
-    if (!pick) return unmatched(`no price of KES ${p.amountKes}`);
+    if (!pick) return unmatched(`no price of KES ${p.amountKes.toLocaleString('en-KE')}`);
     sold = [{ product: pick, price: p.amountKes }];
   }
 

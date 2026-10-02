@@ -1,5 +1,6 @@
 import { decrypt, platformBilling, platformEmailConfig, platformSmsConfig, SourceCodeSms } from '@lango/server';
 import { redirect } from 'next/navigation';
+import { MoneyInput } from '@/components/money-input';
 import { SubmitButton } from '@/components/submit-button';
 import { Badge } from '@/components/ui';
 import { dateTime, kes } from '@/lib/format';
@@ -434,12 +435,11 @@ export default async function PlatformSettings({ searchParams }: { searchParams:
                 </label>
                 <label>
                   <span className={label}>Warn when Source Code credit is below</span>
-                  <input
+                  <MoneyInput
                     name="lowCredit"
-                    inputMode="numeric"
-                    defaultValue={cfg?.lowCredit ?? ''}
-                    placeholder="e.g. 2000"
-                    className={input}
+                    defaultValue={cfg?.lowCredit}
+                    placeholder="e.g. 2,000"
+                    className="h-11"
                   />
                 </label>
               </div>

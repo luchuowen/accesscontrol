@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { Checklist } from '@/components/checklist';
 import { CopyField } from '@/components/copy-field';
+import { MoneyInput } from '@/components/money-input';
 import { SubmitButton } from '@/components/submit-button';
 import { Badge, PageHeader } from '@/components/ui';
 import { dateTime, kes } from '@/lib/format';
@@ -314,14 +315,7 @@ export default async function Settings({
           </div>
           {can(s, 'sms.buy') && (
             <form action={buySms} className="mt-3 flex flex-wrap gap-2">
-              <input
-                name="amountKes"
-                inputMode="numeric"
-                required
-                defaultValue={1000}
-                className="input w-28 py-2"
-                aria-label="Amount (KES)"
-              />
+              <MoneyInput name="amountKes" required defaultValue={1000} className="h-10 w-36" />
               <input
                 name="phone"
                 inputMode="tel"

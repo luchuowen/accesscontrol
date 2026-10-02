@@ -315,7 +315,7 @@ export async function dispatchSms(
       if (alert) {
         const [club2] = await tx<{ name: string }[]>`select name from tenants where id = ${t.id}`;
         const body = n.autoTopup
-          ? `${club2?.name}: SMS balance is ${balance}. An M-Pesa prompt for KES ${n.autoTopupKes ?? 1000} SMS credit is on its way to this phone.`
+          ? `${club2?.name}: SMS balance is ${balance}. An M-Pesa prompt for KES ${(n.autoTopupKes ?? 1000).toLocaleString('en-KE')} SMS credit is on its way to this phone.`
           : `${club2?.name}: SMS balance is ${balance}, below your alert level of ${threshold}. Buy SMS credit in Lango > Settings.`;
         await tx`insert into sms_messages (tenant_id, phone, body, kind) values (${t.id}, ${alert}, ${body}, 'system')`;
       }

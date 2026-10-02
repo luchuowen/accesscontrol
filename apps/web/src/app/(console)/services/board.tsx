@@ -31,6 +31,7 @@ import {
 } from 'lucide-react';
 import { useActionState, useEffect, useRef, useState, useTransition } from 'react';
 import { useFormStatus } from 'react-dom';
+import { MoneyInput } from '@/components/money-input';
 import type { ServiceRow } from '@/lib/data';
 import { kes } from '@/lib/format';
 import { addServices, savePrice, saveService, setOnSale } from './actions';
@@ -221,13 +222,13 @@ export function ServicesBoard({ services, areas, edit }: { services: ServiceRow[
   );
 }
 
-function Save({ children = 'Save', small }: { children?: React.ReactNode; small?: boolean }) {
+function Save({ children = 'Save', small, quiet }: { children?: React.ReactNode; small?: boolean; quiet?: boolean }) {
   const { pending } = useFormStatus();
   return (
     <button
       type="submit"
       disabled={pending}
-      className={`inline-flex items-center justify-center gap-1.5 rounded-[10px] bg-[#047857] font-semibold text-white transition hover:bg-[#065F46] disabled:opacity-60 ${small ? 'h-10 px-3 text-[12.5px]' : 'h-11 w-full text-sm'}`}
+      className={`inline-flex items-center justify-center gap-1.5 rounded-[10px] font-semibold transition disabled:opacity-60 ${quiet ? 'border border-[#E5E8EE] bg-white text-ink-900 hover:bg-slate-50' : 'bg-[#047857] text-white hover:bg-[#065F46]'} ${small ? 'h-10 px-3 text-[12.5px]' : 'h-11 w-full text-sm'}`}
     >
       {pending && <Loader2 size={14} className="animate-spin" />}
       {children}
@@ -258,7 +259,7 @@ function Panel({ s, areas, onClose }: { s: ServiceRow; areas: Area[]; onClose: (
       <aside
         role="dialog"
         aria-label={`Edit ${s.name}`}
-        className="fixed inset-y-0 right-0 z-40 flex w-full max-w-[420px] flex-col gap-5 overflow-y-auto border-l border-[#E7EBF3] bg-white p-5 shadow-[-24px_0_48px_-24px_rgba(11,22,41,0.25)] motion-safe:animate-[pop_.2s_ease-out]"
+        className="fixed inset-y-0 right-0 z-40 flex w-full max-w-[448px] flex-col gap-5 overflow-y-auto border-l border-[#E7EBF3] bg-white p-5 shadow-[-24px_0_48px_-24px_rgba(11,22,41,0.25)] motion-safe:animate-[pop_.2s_ease-out]"
       >
         <button
           type="button"
@@ -415,34 +416,29 @@ function PriceRow({ serviceId, p }: { serviceId: string; p?: ServiceRow['prices'
     <form key={key} action={action} className="flex flex-col gap-1">
       <input type="hidden" name="serviceId" value={serviceId} />
       {p && <input type="hidden" name="priceId" value={p.id} />}
-      <div className="grid grid-cols-[52px_minmax(0,1fr)_minmax(0,1.1fr)_auto] gap-1.5">
+      <div className="grid grid-cols-[minmax(0,1.3fr)_auto_44px_minmax(0,1fr)_auto] items-center gap-1.5">
+        <MoneyInput name="price" required defaultValue={p?.price_kes} className="h-10" />
+        <span className="text-[12px] text-ink-500">for</span>
         <input
           aria-label="Length"
           name="count"
-          type="number"
-          min={1}
+          inputMode="numeric"
+          maxLength={3}
           defaultValue={p?.duration_count ?? 1}
-          className={field}
+          className={`${field} px-1 text-center tabular-nums`}
         />
-        <select aria-label="Unit" name="unit" defaultValue={p?.duration_unit ?? 'month'} className={field}>
+        <select aria-label="Unit" name="unit" defaultValue={p?.duration_unit ?? 'month'} className={`${field} px-2`}>
           {UNITS.map((u) => (
             <option key={u} value={u}>
               {u}s
             </option>
           ))}
         </select>
-        <input
-          aria-label="Price in KES"
-          name="price"
-          inputMode="numeric"
-          required
-          defaultValue={p?.price_kes}
-          placeholder="KES"
-          className={`${field} tabular-nums`}
-        />
         {p ? (
           <span className="flex gap-1">
-            <Save small>Save</Save>
+            <Save small quiet>
+              Save
+            </Save>
             <button
               type="button"
               aria-label="Stop selling this price"
