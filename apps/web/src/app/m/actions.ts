@@ -142,7 +142,8 @@ export async function memberPay(form: FormData) {
     >`select member_no, phone from members where id = ${who.memberId} and status = 'active' and phone is not null`;
     const [p] = await tx<
       { price_kes: number; name: string }[]
-    >`select price_kes, name from products where id = ${productId} and active`;
+    >`select price_kes, name from products where id = ${productId} and active
+      and (products.service_id is null or exists (select 1 from services sv where sv.id = products.service_id and sv.active and sv.deleted_at is null and sv.sold_to <> 'walkins'))`;
     if (!m || !p) return null;
     const [i] = await tx<
       { id: string }[]

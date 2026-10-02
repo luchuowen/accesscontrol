@@ -219,11 +219,16 @@ export async function products(tenantId: string) {
         zone_keys: string[];
         active: boolean;
         sold: number;
+        /** On sale: the price and its service are both on sale and the service isn't deleted. */
+        on_sale: boolean;
+        /** Members can buy it (not a walk-in-only service). */
+        for_members: boolean;
       }[]
     >`
-    select p.*, (select count(*)::int from payments x where x.product_id = p.id and x.status = 'applied') as sold
+    select p.*, (select count(*)::int from payments x where x.product_id = p.id and x.status = 'applied') as sold,
+      p.active and coalesce(s.active and s.deleted_at is null, true) as on_sale,
+      coalesce(s.sold_to, 'both') <> 'walkins' as for_members
     from products p left join services s on s.id = p.service_id
-    where coalesce(s.sold_to, 'both') <> 'walkins'
     order by p.active desc, p.price_kes`,
   );
 }

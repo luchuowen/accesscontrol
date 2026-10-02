@@ -1116,6 +1116,51 @@ describe('walking skeleton: pay → door', () => {
     expect(gym?.id).toBeTruthy();
   });
 
+  it('paybill never sells a service that is off sale, walk-in only or new to the member; a late walk-in payment is held', async () => {
+    const pay = (ref: string, tx: string, extra: Record<string, unknown> = {}) =>
+      recordPayment(app, tenantId, {
+        provider: 'test',
+        providerTxnId: tx,
+        amountKes: 4321,
+        accountRef: ref,
+        paidAt: new Date(),
+        ...extra,
+      });
+    const [sv] =
+      await owner`insert into services (tenant_id, name, zone_keys, active) values (${tenantId}, 'Lockers', '{sauna}', false) returning id`;
+    const [pr] =
+      await owner`insert into products (tenant_id, service_id, name, price_kes, duration_unit, duration_count, zone_keys)
+      values (${tenantId}, ${sv?.id}, 'Lockers · 1 month', 4321, 'month', 1, '{sauna}') returning id`;
+    await owner`insert into members (tenant_id, member_no, first_name, last_name) values (${tenantId}, 28911, 'Off', 'Sale')`;
+    // The service is switched off (its price still on): not sold.
+    expect((await pay('28911', 'GATE-1')).status).toBe('unmatched');
+    // On sale, but walk-ins only: not sold to a member.
+    await owner`update services set active = true, sold_to = 'walkins' where id = ${sv?.id}`;
+    expect((await pay('28911', 'GATE-2')).status).toBe('unmatched');
+    // Sold to everyone: a new member paying that exact amount gets it.
+    await owner`update services set sold_to = 'both' where id = ${sv?.id}`;
+    expect(await pay('28911', 'GATE-3')).toMatchObject({ status: 'applied', product: 'Lockers · 1 month' });
+    // Someone who paid 4,321 for the gym before (its price has changed since) is not moved onto lockers by it.
+    const [gymPrice] = await owner`select id from products where name = 'Gym · 1 month'`;
+    await owner`insert into members (tenant_id, member_no, first_name, last_name) values (${tenantId}, 28912, 'Old', 'Price')`;
+    await pay('28912', 'GATE-4a', { lines: [{ productId: gymPrice?.id as string, priceKes: 4321 }] });
+    expect((await pay('28912', 'GATE-4')).status).toBe('unmatched');
+
+    // A walk-in prompt paid after the visit was cancelled: the band stays shut, the money is held.
+    const [band] =
+      await owner`insert into members (tenant_id, member_no, first_name, last_name) values (${tenantId}, 11911, 'Wristband', '11') returning id`;
+    const [it] =
+      await owner`insert into payment_intents (tenant_id, member_id, product_id, amount_kes, phone, provider, created_by, status)
+      values (${tenantId}, ${band?.id}, ${pr?.id}, 4321, '254700000000', 'taifapay', 'test', 'expired') returning id`;
+    const lines = [{ productId: pr?.id as string, priceKes: 4321 }];
+    await owner`insert into day_passes (tenant_id, band_id, visitor_name, lines, total_kes, channel, status, intent_id, created_by)
+      values (${tenantId}, ${band?.id}, 'Late Payer', ${owner.json(lines as never)}, 4321, 'mpesa', 'cancelled', ${it?.id}, 'test')`;
+    const late = await pay('11911', 'GATE-5', { intentId: it?.id, lines });
+    expect(late.status).toBe('unmatched');
+    const [open] = await owner`select count(*)::int as n from entitlements where member_id = ${band?.id}`;
+    expect(open?.n).toBe(0);
+  });
+
   it('walk-in wristbands start fresh for every visitor (never pushed to tomorrow)', async () => {
     const [band] =
       await owner`insert into members (tenant_id, member_no, first_name, last_name) values (${tenantId}, 11901, 'Wristband', '01') returning id`;

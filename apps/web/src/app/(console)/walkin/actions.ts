@@ -176,11 +176,13 @@ export async function dayPassStatus(id: string): Promise<{ status: string; band:
 export async function cancelDayPass(id: string) {
   const s = await requireSession();
   if (!UUID.test(id)) return;
-  await withTenant(
-    db(),
-    s.tid,
-    (tx) => tx`update day_passes set status = 'cancelled' where id = ${id} and status = 'awaiting_payment'`,
-  );
+  await withTenant(db(), s.tid, async (tx) => {
+    const [dp] = await tx<{ intent_id: string | null }[]>`
+      update day_passes set status = 'cancelled' where id = ${id} and status = 'awaiting_payment' returning intent_id`;
+    // A late payment for this prompt is then held for staff (refund or assign), never applied to the band.
+    if (dp?.intent_id)
+      await tx`update payment_intents set status = 'expired' where id = ${dp.intent_id} and status = 'pending'`;
+  });
   revalidatePath('/members');
 }
 

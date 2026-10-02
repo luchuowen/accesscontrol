@@ -20,7 +20,7 @@ export default async function Payments({ searchParams }: { searchParams: Promise
   const rows = full
     ? all
     : all.filter((r) => new Date(r.paid_at.getTime() + 3 * 3600_000).toISOString().slice(0, 10) === today);
-  const onSale = plans.filter((p) => p.active);
+  const onSale = plans.filter((p) => p.on_sale);
   const canAssign = can(s, 'payments.assign');
   const applied = rows.filter((r) => r.status === 'applied');
   const unmatched = rows.filter((r) => r.status === 'unmatched');

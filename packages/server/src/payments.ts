@@ -81,6 +81,16 @@ async function applyPayment(tx: Tx, tenantId: string, paymentId: string, p: Inco
   >`select id, status from members where member_no = ${memberNo} for update`;
   if (!member) return unmatched(`no member ${memberNo}`);
   if (member.status !== 'active') return unmatched(`member ${memberNo} is ${member.status}`);
+  // A walk-in prompt paid after the visit was cancelled or the band was released (15 minutes) never opens the band:
+  // it may already be on someone else's wrist. Staff refund it or assign it.
+  if (p.intentId) {
+    const [dp] = await tx<{ status: string; late: boolean }[]>`
+      select status, created_at < now() - interval '15 minutes' as late from day_passes where intent_id = ${p.intentId}`;
+    if (dp && (dp.status !== 'awaiting_payment' || dp.late))
+      return unmatched(
+        `walk-in pass ${dp.status === 'cancelled' ? 'was cancelled' : 'timed out'} before the M-Pesa payment arrived; refund or assign`,
+      );
+  }
   // What was bought: explicit lines (prompt / desk / walk-in) → one known price → the member's usual price at this
   // amount → the only price at this amount in the club. Anything else is held for staff, never guessed.
   let sold: { product: Product; price: number }[] = [];
@@ -101,21 +111,36 @@ async function applyPayment(tx: Tx, tenantId: string, paymentId: string, p: Inco
     const [usual] = await tx<Product[]>`
       select pr.* from payment_lines l join payments pm on pm.id = l.payment_id join products pr on pr.id = l.product_id
       where pm.member_id = ${member.id} and pm.status = 'applied' and pr.active and pr.price_kes = ${p.amountKes}
+        and (pr.service_id is null or exists (select 1 from services sv where sv.id = pr.service_id and sv.active and sv.deleted_at is null and sv.sold_to <> 'walkins'))
       order by pm.paid_at desc limit 1`;
     let pick = usual;
     if (!pick) {
-      const same = await tx<
-        Product[]
-      >`select * from products where active and price_kes = ${p.amountKes} order by created_at`;
-      if (same.length === 1) pick = same[0];
-      else if (same.length > 1) {
-        const had = await tx<{ service_id: string }[]>`
-          select distinct service_id from entitlements where member_id = ${member.id} and service_id is not null`;
-        const mine = same.filter((x) => had.some((h) => h.service_id === x.service_id));
-        if (mine.length === 1) pick = mine[0];
-        else
-          return unmatched(`KES ${p.amountKes.toLocaleString('en-KE')} matches ${same.length} prices; staff to choose`);
-      }
+      // Only prices members can buy now: on sale, service on sale and not deleted, not walk-in only.
+      const same = await tx<Product[]>`
+        select pr.* from products pr where pr.active and pr.price_kes = ${p.amountKes}
+          and (pr.service_id is null or exists (select 1 from services sv where sv.id = pr.service_id and sv.active and sv.deleted_at is null and sv.sold_to <> 'walkins'))
+        order by pr.created_at`;
+      const had = await tx<{ service_id: string }[]>`
+        select distinct service_id from entitlements where member_id = ${member.id} and service_id is not null`;
+      // Paying what they used to pay for another service (its price has since changed) is not a new purchase.
+      const [old] = await tx<{ label: string }[]>`
+        select l.label from payment_lines l join payments pm on pm.id = l.payment_id
+        where pm.member_id = ${member.id} and pm.status = 'applied' and l.price_kes = ${p.amountKes}
+          and l.service_id is distinct from ${same[0]?.service_id ?? null}
+        order by pm.paid_at desc limit 1`;
+      const mine = same.filter((x) => had.some((h) => h.service_id === x.service_id));
+      if (mine.length === 1) pick = mine[0];
+      else if (mine.length > 1)
+        return unmatched(
+          `KES ${p.amountKes.toLocaleString('en-KE')} matches ${mine.length} of their services; staff to choose`,
+        );
+      else if (same.length === 1 && old)
+        return unmatched(
+          `KES ${p.amountKes.toLocaleString('en-KE')} is what they paid for ${old.label}, but now matches ${same[0]?.name}; staff to choose`,
+        );
+      else if (same.length === 1) pick = same[0];
+      else if (same.length > 1)
+        return unmatched(`KES ${p.amountKes.toLocaleString('en-KE')} matches ${same.length} prices; staff to choose`);
     }
     if (!pick) return unmatched(`no price of KES ${p.amountKes.toLocaleString('en-KE')}`);
     sold = [{ product: pick, price: p.amountKes }];

@@ -512,21 +512,44 @@ const NEW = '__new__';
 type Line = { price: string; count: string; unit: string };
 const blank = (): Line => ({ price: '', count: '1', unit: 'month' });
 const commas = (d: string) => (d ? Number(d).toLocaleString('en-KE') : '');
+const lineLabel = (l: Line) => {
+  const n = Number(l.count) || 1;
+  return l.unit === 'day' && n === 1 ? 'Day pass' : `${n} ${l.unit}${n === 1 ? '' : 's'}`;
+};
+const POPULAR = [
+  'Gym',
+  'Swimming pool',
+  'Sauna',
+  'Steam room',
+  'Spa',
+  'Group classes',
+  'Squash court',
+  'Locker',
+  'Parking',
+  'Hot desk',
+  'Meeting room',
+];
+const ITEMS = CATALOG.flatMap(([, items]) => items);
 
 /**
- * Add service, in one step: choose the service from a list (or "Add a new service" and type its name), enter its
- * prices (amount first, then for how long) and press Add service. Done.
+ * Add service, design B "Live card" (approved 2 Oct 2026): popular services as picture tiles ("More…" opens the full
+ * list or a new name), prices typed amount-first, and a card on the left that shows exactly what the desk will sell
+ * as you type, so a missing zero stands out. One press of Add service and it is on sale.
  */
 export function AddServices({ have }: { have: string[] }) {
   const ref = useRef<HTMLDialogElement>(null);
   const [pick, setPick] = useState('');
+  const [more, setMore] = useState(false);
   const [own, setOwn] = useState('');
   const [lines, setLines] = useState<Line[]>([blank()]);
   const [err, setErr] = useState('');
   const [pending, start] = useTransition();
   const lower = have.map((h) => h.toLowerCase());
+  const free = (n: string) => !lower.includes(n.toLowerCase());
+  const tiles = POPULAR.filter(free).slice(0, 7);
   const open = () => {
     setPick('');
+    setMore(tiles.length === 0);
     setOwn('');
     setLines([blank()]);
     setErr('');
@@ -535,6 +558,8 @@ export function AddServices({ have }: { have: string[] }) {
   const close = () => ref.current?.close();
   const set = (i: number, patch: Partial<Line>) => setLines(lines.map((l, j) => (j === i ? { ...l, ...patch } : l)));
   const name = pick === NEW ? own.trim() : pick;
+  const icon = ITEMS.find((i) => i.name === pick)?.icon ?? 'layers';
+  const priced = lines.filter((l) => l.price);
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     setErr('');
@@ -553,140 +578,230 @@ export function AddServices({ have }: { have: string[] }) {
         ref={ref}
         aria-labelledby="add-service-title"
         onClick={(e) => e.target === ref.current && close()}
-        className="m-auto w-full max-w-[520px] overflow-visible rounded-[20px] bg-white p-0 text-ink-900 shadow-[0_30px_80px_-20px_rgba(11,22,41,0.55)] backdrop:bg-[#0B1629]/45 backdrop:backdrop-blur-[3px] open:animate-[pop_.28s_cubic-bezier(.2,.9,.3,1.2)] max-sm:mb-0 max-sm:max-w-none max-sm:rounded-b-none motion-reduce:open:animate-none"
+        className="m-auto w-full max-w-[860px] overflow-hidden rounded-[20px] bg-white p-0 text-ink-900 shadow-[0_30px_80px_-20px_rgba(11,22,41,0.55)] backdrop:bg-[#0B1629]/45 backdrop:backdrop-blur-[3px] open:animate-[pop_.28s_cubic-bezier(.2,.9,.3,1.2)] max-sm:mb-0 max-sm:max-w-none max-sm:rounded-b-none motion-reduce:open:animate-none"
       >
-        <form onSubmit={submit} className="flex flex-col gap-5 p-6">
-          <div className="flex items-start justify-between gap-3">
-            <h2 id="add-service-title" className="text-[19px] font-semibold tracking-tight">
-              Add service
-            </h2>
+        <div className="grid md:grid-cols-[290px_minmax(0,1fr)]">
+          <div className="relative flex flex-col gap-4 overflow-hidden bg-[radial-gradient(120%_120%_at_0%_0%,#163257_0%,#0B1629_60%)] p-6 text-white max-md:hidden">
+            <span className="pointer-events-none absolute inset-0 bg-[radial-gradient(70%_60%_at_100%_100%,rgba(16,185,129,0.22),transparent_70%)]" />
+            <div className="relative">
+              <h2 id="add-service-title" className="text-[20px] font-semibold tracking-tight">
+                Add service
+              </h2>
+              <p className="mt-1.5 text-[13px] leading-relaxed text-[#A3B3C9]">
+                Anything your club sells. Members and walk-ins can buy it as soon as you add it.
+              </p>
+            </div>
+            <div className="relative mt-auto rounded-2xl border border-white/10 bg-white/[0.06] p-4">
+              <div className="flex items-center gap-2.5">
+                <span className="grid h-9 w-9 place-items-center rounded-[10px] bg-white/10 text-[#7EE2B8]">
+                  <Ico name={icon} size={18} />
+                </span>
+                <span className="truncate text-[17px] font-semibold">{name || 'Choose a service'}</span>
+              </div>
+              {priced.length ? (
+                <ul className="mt-3 text-[13px]">
+                  {priced.map((l, i) => (
+                    <li
+                      key={`c${i}`}
+                      className="flex justify-between gap-3 border-t border-white/10 py-2 text-[#C7D2E1]"
+                    >
+                      <span>{lineLabel(l)}</span>
+                      <b className="tabular-nums text-white">KES {commas(l.price)}</b>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="mt-2.5 text-[12.5px] text-[#7F90AA]">Prices appear here as you type them.</p>
+              )}
+            </div>
+          </div>
+
+          <form onSubmit={submit} className="relative flex flex-col gap-4 p-6">
             <button
               type="button"
               onClick={close}
               aria-label="Close"
-              className="-mr-2 -mt-1 grid h-9 w-9 place-items-center rounded-[10px] text-ink-500 hover:bg-slate-100"
+              className="absolute right-3 top-3 grid h-9 w-9 place-items-center rounded-[10px] text-ink-500 hover:bg-slate-100"
             >
               <X size={18} />
             </button>
-          </div>
-
-          <label className="flex flex-col gap-1.5">
-            <span className={label}>Service</span>
-            <select value={pick} onChange={(e) => setPick(e.target.value)} required className={`${field} h-11`}>
-              <option value="" disabled>
-                Select a service
-              </option>
-              {CATALOG.map(([cat, items]) => (
-                <optgroup key={cat} label={cat}>
-                  {items
-                    .filter((i) => !lower.includes(i.name.toLowerCase()))
-                    .map((i) => (
-                      <option key={i.name} value={i.name}>
-                        {i.name}
-                      </option>
-                    ))}
-                </optgroup>
-              ))}
-              <option value={NEW}>+ Add a new service…</option>
-            </select>
-            {pick === NEW && (
-              <input
-                value={own}
-                onChange={(e) => setOwn(e.target.value)}
-                maxLength={60}
-                required
-                autoFocus
-                placeholder="Service name, e.g. Boxing ring"
-                className={`${field} h-11`}
-              />
-            )}
-          </label>
-
-          <fieldset className="flex flex-col gap-2">
-            <legend className={`${label} mb-1.5`}>Prices</legend>
-            {lines.map((l, i) => (
-              <div
-                key={`l${i}`}
-                className="grid grid-cols-[minmax(0,1.4fr)_auto_52px_minmax(0,1fr)_32px] items-center gap-2"
-              >
-                <span className="flex h-11 items-center overflow-hidden rounded-[10px] border border-[#E5E8EE] focus-within:border-[#047857] focus-within:ring-4 focus-within:ring-emerald-500/10">
-                  <span className="flex h-full items-center border-r border-[#EEF1F6] bg-slate-50 px-2.5 text-[12px] font-semibold text-ink-500">
-                    KES
-                  </span>
-                  <input
-                    aria-label="Amount in KES"
-                    inputMode="numeric"
-                    required
-                    value={commas(l.price)}
-                    onChange={(e) =>
-                      set(i, { price: e.target.value.replace(/\D/g, '').replace(/^0+/, '').slice(0, 8) })
-                    }
-                    placeholder="Amount"
-                    className="h-full min-w-0 flex-1 px-2.5 text-[14px] tabular-nums outline-none placeholder:text-slate-400"
-                  />
-                </span>
-                <span className="text-[12.5px] text-ink-500">for</span>
-                <input
-                  aria-label="How many"
-                  inputMode="numeric"
-                  value={l.count}
-                  onChange={(e) => set(i, { count: e.target.value.replace(/\D/g, '').slice(0, 3) })}
-                  className={`${field} h-11 px-1 text-center tabular-nums`}
-                />
-                <select
-                  aria-label="Hours, days, weeks, months or years"
-                  value={l.unit}
-                  onChange={(e) => set(i, { unit: e.target.value })}
-                  className={`${field} h-11 px-2`}
-                >
-                  {UNITS.map((u) => (
-                    <option key={u} value={u}>
-                      {l.count === '1' ? u : `${u}s`}
-                    </option>
-                  ))}
-                </select>
-                {lines.length > 1 ? (
+            <h2 className="text-[19px] font-semibold tracking-tight md:hidden">Add service</h2>
+            <div className="flex flex-col gap-2">
+              <span className={label}>Service</span>
+              {!more ? (
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                  {tiles.map((n) => {
+                    const it = ITEMS.find((i) => i.name === n);
+                    const on = pick === n;
+                    return (
+                      <button
+                        key={n}
+                        type="button"
+                        onClick={() => setPick(n)}
+                        aria-pressed={on}
+                        className={`flex flex-col items-center gap-1.5 rounded-xl border-[1.5px] px-1.5 py-2.5 text-[12px] font-semibold transition ${on ? 'border-[#047857] bg-emerald-50/50 text-ink-900' : 'border-[#E5E8EE] text-ink-700 hover:border-slate-300'}`}
+                      >
+                        <span className={`${tile} h-7 w-7`}>
+                          <Ico name={it?.icon ?? 'layers'} size={15} />
+                        </span>
+                        <span className="text-center leading-tight">{n}</span>
+                      </button>
+                    );
+                  })}
                   <button
                     type="button"
-                    aria-label="Remove this price"
-                    onClick={() => setLines(lines.filter((_, j) => j !== i))}
-                    className="grid h-9 w-8 place-items-center rounded-lg text-slate-400 hover:bg-rose-50 hover:text-rose-600"
+                    onClick={() => {
+                      setMore(true);
+                      setPick('');
+                    }}
+                    className="flex flex-col items-center gap-1.5 rounded-xl border-[1.5px] border-[#E5E8EE] px-1.5 py-2.5 text-[12px] font-semibold text-ink-700 hover:border-slate-300"
                   >
-                    <Trash2 size={15} />
+                    <span className={`${tile} h-7 w-7`}>
+                      <Plus size={15} />
+                    </span>
+                    More…
                   </button>
-                ) : (
-                  <span />
-                )}
-              </div>
-            ))}
-            <button
-              type="button"
-              onClick={() => setLines([...lines, { ...blank(), unit: 'day' }])}
-              className="inline-flex w-fit items-center gap-1.5 text-[13px] font-semibold text-[#047857] hover:underline"
-            >
-              <Plus size={14} /> Add another price
-            </button>
-          </fieldset>
+                </div>
+              ) : (
+                <>
+                  <select
+                    value={pick}
+                    onChange={(e) => setPick(e.target.value)}
+                    required
+                    aria-label="Service"
+                    className={`${field} h-11`}
+                  >
+                    <option value="" disabled>
+                      Select a service
+                    </option>
+                    {CATALOG.map(([cat, items]) => (
+                      <optgroup key={cat} label={cat}>
+                        {items
+                          .filter((i) => free(i.name))
+                          .map((i) => (
+                            <option key={i.name} value={i.name}>
+                              {i.name}
+                            </option>
+                          ))}
+                      </optgroup>
+                    ))}
+                    <option value={NEW}>+ Add a new service…</option>
+                  </select>
+                  {pick === NEW && (
+                    <input
+                      value={own}
+                      onChange={(e) => setOwn(e.target.value)}
+                      maxLength={60}
+                      required
+                      autoFocus
+                      placeholder="Service name, e.g. Boxing ring"
+                      className={`${field} h-11`}
+                    />
+                  )}
+                  {tiles.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMore(false);
+                        setPick('');
+                      }}
+                      className="w-fit text-[12.5px] font-semibold text-ink-500 hover:text-ink-900"
+                    >
+                      ← Back to popular services
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
 
-          {err && <p className="rounded-[10px] bg-rose-50 px-3 py-2 text-[12.5px] text-rose-800">{err}</p>}
-          <div className="flex justify-end gap-2">
-            <button
-              type="button"
-              onClick={close}
-              className="h-11 rounded-xl border border-[#E5E8EE] px-4 text-sm font-semibold hover:bg-slate-50"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={pending || !name}
-              className="inline-flex h-11 items-center gap-2 rounded-xl bg-[#047857] px-5 text-sm font-semibold text-white hover:bg-[#065F46] disabled:opacity-50"
-            >
-              {pending && <Loader2 size={15} className="animate-spin" />}
-              Add service
-            </button>
-          </div>
-        </form>
+            <fieldset className="flex flex-col gap-2">
+              <legend className={`${label} mb-2`}>Prices</legend>
+              {lines.map((l, i) => (
+                <div
+                  key={`l${i}`}
+                  className="grid grid-cols-[minmax(0,1.4fr)_auto_50px_minmax(0,1fr)_30px] items-center gap-2"
+                >
+                  <span className="flex h-11 items-center overflow-hidden rounded-[10px] border border-[#E5E8EE] focus-within:border-[#047857] focus-within:ring-4 focus-within:ring-emerald-500/10">
+                    <span className="flex h-full items-center border-r border-[#EEF1F6] bg-slate-50 px-2.5 text-[12px] font-semibold text-ink-500">
+                      KES
+                    </span>
+                    <input
+                      aria-label="Amount in KES"
+                      inputMode="numeric"
+                      required
+                      value={commas(l.price)}
+                      onChange={(e) =>
+                        set(i, {
+                          price: e.target.value.replace(/\D/g, '').replace(/^0+/, '').slice(0, 8),
+                        })
+                      }
+                      placeholder="Amount"
+                      className="h-full min-w-0 flex-1 px-2.5 text-[14px] font-semibold tabular-nums outline-none placeholder:font-normal placeholder:text-slate-400"
+                    />
+                  </span>
+                  <span className="text-[12.5px] text-ink-500">for</span>
+                  <input
+                    aria-label="How many"
+                    inputMode="numeric"
+                    value={l.count}
+                    onChange={(e) => set(i, { count: e.target.value.replace(/\D/g, '').slice(0, 3) })}
+                    className={`${field} h-11 px-1 text-center tabular-nums`}
+                  />
+                  <select
+                    aria-label="Hours, days, weeks, months or years"
+                    value={l.unit}
+                    onChange={(e) => set(i, { unit: e.target.value })}
+                    className={`${field} h-11 px-2`}
+                  >
+                    {UNITS.map((u) => (
+                      <option key={u} value={u}>
+                        {l.count === '1' ? u : `${u}s`}
+                      </option>
+                    ))}
+                  </select>
+                  {lines.length > 1 ? (
+                    <button
+                      type="button"
+                      aria-label="Remove this price"
+                      onClick={() => setLines(lines.filter((_, j) => j !== i))}
+                      className="grid h-9 w-8 place-items-center rounded-lg text-slate-400 hover:bg-rose-50 hover:text-rose-600"
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  ) : (
+                    <span />
+                  )}
+                </div>
+              ))}
+              <button
+                type="button"
+                onClick={() => setLines([...lines, { ...blank(), unit: 'day' }])}
+                className="inline-flex w-fit items-center gap-1.5 text-[13px] font-semibold text-[#047857] hover:underline"
+              >
+                <Plus size={14} /> Add another price
+              </button>
+            </fieldset>
+
+            {err && <p className="rounded-[10px] bg-rose-50 px-3 py-2 text-[12.5px] text-rose-800">{err}</p>}
+            <div className="mt-1 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={close}
+                className="h-11 rounded-xl border border-[#E5E8EE] px-4 text-sm font-semibold hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={pending || !name}
+                className="inline-flex h-11 items-center gap-2 rounded-xl bg-[#047857] px-5 text-sm font-semibold text-white hover:bg-[#065F46] disabled:opacity-50"
+              >
+                {pending && <Loader2 size={15} className="animate-spin" />}
+                Add service
+              </button>
+            </div>
+          </form>
+        </div>
       </dialog>
     </>
   );

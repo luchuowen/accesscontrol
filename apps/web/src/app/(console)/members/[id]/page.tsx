@@ -25,7 +25,7 @@ export default async function MemberPage({
   const { n } = await searchParams;
   const d = await member(s.tid, id);
   if (!d) notFound();
-  const plans = (await products(s.tid)).filter((p) => p.active);
+  const plans = (await products(s.tid)).filter((p) => p.on_sale && p.for_members);
   const now = Date.now();
   const current = d.ents.filter((e) => e.starts_at.getTime() <= now && e.ends_at.getTime() >= now);
   const until = d.ents.length ? new Date(Math.max(...d.ents.map((e) => e.ends_at.getTime()))) : null;

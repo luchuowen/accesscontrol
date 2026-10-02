@@ -129,7 +129,8 @@ export async function recordDeskPayment(form: FormData) {
   if (!productId || !UUID.test(nonce)) back(memberId, 'invalid');
   const found = await withTenant(db(), s.tid, async (tx) => {
     const [m] = await tx<{ member_no: number }[]>`select member_no from members where id = ${memberId}`;
-    const [p] = await tx<{ price_kes: number }[]>`select price_kes from products where id = ${productId} and active`;
+    const [p] = await tx<{ price_kes: number }[]>`
+      select price_kes from products where id = ${productId} and active and (products.service_id is null or exists (select 1 from services sv where sv.id = products.service_id and sv.active and sv.deleted_at is null and sv.sold_to <> 'walkins'))`;
     return m && p ? { memberNo: m.member_no, price: p.price_kes } : null;
   });
   if (!found) back(memberId, 'invalid');
@@ -218,7 +219,8 @@ export async function requestMpesa(form: FormData) {
   const intent = await withTenant(db(), s.tid, async (tx) => {
     const [m] = await tx<{ member_no: number }[]>`select member_no from members where id = ${memberId}`;
     const [p] = await tx<{ price_kes: number; name: string }[]>`
-      select price_kes, name from products where id = ${productId} and active`;
+      select price_kes, name from products where id = ${productId} and active
+        and (products.service_id is null or exists (select 1 from services sv where sv.id = products.service_id and sv.active and sv.deleted_at is null and sv.sold_to <> 'walkins'))`;
     if (!m || !p) return null;
     const [i] = await tx<{ id: string }[]>`
       insert into payment_intents (tenant_id, member_id, product_id, amount_kes, phone, provider, created_by)

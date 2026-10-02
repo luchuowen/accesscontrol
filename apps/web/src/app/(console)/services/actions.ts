@@ -120,6 +120,10 @@ export async function deleteService(id: string): Promise<Result> {
                    and (exists (select 1 from payments x where x.product_id = p.id)
                      or exists (select 1 from payment_lines l where l.product_id = p.id)
                      or exists (select 1 from entitlements e where e.product_id = p.id)
+                     or exists (select 1 from payment_intents i, jsonb_array_elements(coalesce(i.lines, '[]'::jsonb)) x
+                                where x->>'productId' = p.id::text)
+                     or exists (select 1 from day_passes d, jsonb_array_elements(coalesce(d.lines, '[]'::jsonb)) x
+                                where x->>'productId' = p.id::text)
                      or exists (select 1 from payment_intents i where i.product_id = p.id)))`;
     if (used) {
       await tx`update products set active = false where service_id = ${sid}`;
@@ -201,10 +205,18 @@ export async function savePrice(_prev: Result, form: FormData): Promise<Result> 
       select 1 from products where service_id = ${serviceId} and active and duration_unit = ${p.unit}
         and duration_count = ${p.count} and id is distinct from ${priceId}`;
     if (same) return 'There’s already a price for that length. Change that one instead.';
-    if (priceId)
-      await tx`update products set price_kes = ${p.price}, duration_unit = ${p.unit}, duration_count = ${p.count},
-                 name = ${priceName(sv.name, p)} where id = ${priceId} and service_id = ${serviceId}`;
-    else
+    const [old] = priceId
+      ? await tx<{ duration_unit: string; duration_count: number }[]>`
+          select duration_unit, duration_count from products where id = ${priceId} and service_id = ${serviceId}`
+      : [];
+    if (old && old.duration_unit === p.unit && old.duration_count === p.count)
+      await tx`update products set price_kes = ${p.price} where id = ${priceId}`;
+    else if (old) {
+      // A new length is a new price: prompts already sent for the old one still give what was promised.
+      await tx`update products set active = false where id = ${priceId}`;
+      await tx`insert into products (tenant_id, service_id, name, price_kes, duration_unit, duration_count, zone_keys)
+               values (${s.tid}, ${serviceId}, ${priceName(sv.name, p)}, ${p.price}, ${p.unit}, ${p.count}, ${sv.zone_keys})`;
+    } else
       await tx`insert into products (tenant_id, service_id, name, price_kes, duration_unit, duration_count, zone_keys)
                values (${s.tid}, ${serviceId}, ${priceName(sv.name, p)}, ${p.price}, ${p.unit}, ${p.count}, ${sv.zone_keys})`;
     await tx`insert into audit_log (tenant_id, actor, action, entity, data)
