@@ -51,7 +51,7 @@ export default async function MemberPortal({
       const st = await memberOtpStatus(db(), club.toLowerCase(), Number.parseInt(no, 10));
       const minutes = Math.max(1, Math.ceil((st.resendAt - Date.now()) / 60_000));
       return (
-        <AuthShell>
+        <AuthShell audience="members">
           <div className="text-center">
             <CodeTimer expiresAt={st.expiresAt} />
             <h1 className="text-[26px] font-semibold tracking-tight text-ink-900">Enter your code</h1>
@@ -91,7 +91,7 @@ export default async function MemberPortal({
       );
     }
     return (
-      <AuthShell>
+      <AuthShell audience="members">
         <AuthHeading
           title={step === 'phone' ? 'Confirm your phone' : 'Your membership'}
           sub={

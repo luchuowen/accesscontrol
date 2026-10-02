@@ -5,7 +5,13 @@ import { LangoMark } from './logo';
  * Every sign-in screen (sign in, code, forgot, reset, invitation): the NAVAC CRM split card. Navy story panel on
  * the left, the form on the right. On a phone the card fills the screen and the story panel is left out.
  */
-export function AuthShell({ children }: { children: React.ReactNode }) {
+export function AuthShell({
+  children,
+  audience = 'staff',
+}: {
+  children: React.ReactNode;
+  audience?: 'staff' | 'members';
+}) {
   return (
     <div className="auth-bg grid min-h-screen place-items-center sm:p-6">
       <div className="grid min-h-screen w-full overflow-hidden bg-white sm:min-h-0 sm:max-w-[520px] sm:rounded-[20px] sm:shadow-[0_30px_80px_rgba(15,23,41,.18)] lg:min-h-[620px] lg:max-w-[1040px] lg:grid-cols-2">
@@ -15,7 +21,7 @@ export function AuthShell({ children }: { children: React.ReactNode }) {
             <span className="text-lg font-semibold">Lango</span>
           </div>
           <div className="my-auto py-8">
-            <AuthCarousel />
+            <AuthCarousel audience={audience} />
           </div>
           <div className="text-[11px] tracking-[0.08em] text-[#6B7A90]">© {new Date().getFullYear()} NAVAC GLOBAL</div>
         </div>

@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 
-const SLIDES = [
+const STAFF = [
   {
     eyebrow: 'MEMBERSHIP + ACCESS',
     title: 'Paid members get access immediately.',
@@ -22,7 +22,31 @@ const SLIDES = [
   },
 ] as const;
 
-function Icon({ kind }: { kind: (typeof SLIDES)[number]['icon'] }) {
+/** For members on the portal: their own access, renewing, and receipts (approved 2 Oct). */
+const MEMBERS = [
+  {
+    eyebrow: 'YOUR ACCESS',
+    title: 'See your membership anytime.',
+    body: 'Check which areas you can use and when your membership ends.',
+    icon: 'door',
+  },
+  {
+    eyebrow: 'M-PESA',
+    title: 'Renew in seconds.',
+    body: 'Pay with M-Pesa from your phone and your access updates right away.',
+    icon: 'receipt',
+  },
+  {
+    eyebrow: 'RECEIPTS',
+    title: 'Every payment on record.',
+    body: 'You get an SMS receipt for every payment you make.',
+    icon: 'shield',
+  },
+] as const;
+
+type Slide = (typeof STAFF)[number] | (typeof MEMBERS)[number];
+
+function Icon({ kind }: { kind: Slide['icon'] }) {
   const p = {
     width: 52,
     height: 52,
@@ -58,7 +82,8 @@ function Icon({ kind }: { kind: (typeof SLIDES)[number]['icon'] }) {
 }
 
 /** The three things Lango does, turning every 6 seconds (paused on hover, and still for reduced motion). */
-export function AuthCarousel() {
+export function AuthCarousel({ audience = 'staff' }: { audience?: 'staff' | 'members' }) {
+  const SLIDES: readonly Slide[] = audience === 'members' ? MEMBERS : STAFF;
   const [i, setI] = useState(0);
   const [paused, setPaused] = useState(false);
   useEffect(() => {
@@ -66,7 +91,7 @@ export function AuthCarousel() {
     const t = setInterval(() => setI((n) => (n + 1) % SLIDES.length), 6000);
     return () => clearInterval(t);
   }, [paused]);
-  const s = SLIDES[i] ?? SLIDES[0];
+  const s = (SLIDES[i] ?? SLIDES[0]) as Slide;
   return (
     <div
       className="flex flex-col items-center text-center"
