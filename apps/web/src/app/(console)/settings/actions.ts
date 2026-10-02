@@ -1,7 +1,16 @@
 'use server';
 import { randomBytes } from 'node:crypto';
 import { withTenant } from '@lango/db';
-import { encrypt, hashPassword, TaifaAuthError, TaifaPay, verifyPassword } from '@lango/server';
+import {
+  encrypt,
+  hashPassword,
+  msisdn,
+  platformSms,
+  rateLimit,
+  TaifaAuthError,
+  TaifaPay,
+  verifyPassword,
+} from '@lango/server';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { requireSession } from '@/lib/session';
@@ -112,4 +121,50 @@ export async function changePassword(form: FormData) {
   if (!row?.h || !(await verifyPassword(current, row.h))) redirect('/settings?pw=wrong');
   await db()`select app_set_password(${s.uid}, ${await hashPassword(next)})`;
   redirect('/settings?pw=ok');
+}
+
+/** Club SMS switches: on/off, receipts, expiry reminders (N days before + last day), welcome message. */
+export async function saveNotifications(form: FormData) {
+  const s = await requireSession();
+  if (s.role !== 'owner') redirect('/settings?sms=forbidden');
+  const notifications = {
+    enabled: form.get('enabled') === 'on',
+    receipts: form.get('receipts') === 'on',
+    reminders: form.get('reminders') === 'on',
+    reminderDays: Math.min(14, Math.max(1, Number(form.get('reminderDays') ?? 3) || 3)),
+    welcome: form.get('welcome') === 'on',
+  };
+  await withTenant(db(), s.tid, async (tx) => {
+    await tx`insert into tenant_settings (tenant_id, data) values (${s.tid}, ${tx.json({ notifications } as never)})
+             on conflict (tenant_id) do update set data = tenant_settings.data || excluded.data`;
+    await tx`insert into audit_log (tenant_id, actor, action, data) values (${s.tid}, ${s.uid}, 'settings.notifications', ${tx.json(notifications as never)})`;
+  });
+  revalidatePath('/settings');
+  redirect('/settings?sms=saved');
+}
+
+/** Send one SMS now to a number the owner types, to prove delivery end to end. */
+export async function sendTestSms(form: FormData) {
+  const s = await requireSession();
+  if (!['owner', 'manager'].includes(s.role)) redirect('/settings?sms=forbidden');
+  const to = msisdn(String(form.get('phone') ?? ''));
+  if (!to) redirect('/settings?sms=number');
+  if (!rateLimit(`sms-test:${s.tid}`, 5, 10 * 60_000)) redirect('/settings?sms=wait');
+  const client = await platformSms(db());
+  if (!client) redirect('/settings?sms=platform');
+  const [t] = await db()<{ name: string }[]>`select name from tenants where id = ${s.tid}`;
+  const body = `${t?.name}: this is a test message from Lango. SMS receipts and reminders are working.`;
+  let r: Awaited<ReturnType<typeof client.send>>;
+  try {
+    r = await client.send(to, body);
+  } catch (e) {
+    r = { ok: false, code: 'network', desc: (e as Error).message, retry: true };
+  }
+  await withTenant(db(), s.tid, async (tx) => {
+    await tx`insert into sms_messages (tenant_id, phone, body, kind, status, provider_ref, error, attempts, sent_at)
+             values (${s.tid}, ${to}, ${body}, 'test', ${r.ok ? 'sent' : 'failed'}, ${r.messageId ?? null},
+                     ${r.ok ? null : `${r.code} ${r.desc}`.slice(0, 300)}, 1, ${r.ok ? new Date() : null})`;
+  });
+  revalidatePath('/settings');
+  redirect(`/settings?sms=${r.ok ? 'test-sent' : 'test-failed'}`);
 }

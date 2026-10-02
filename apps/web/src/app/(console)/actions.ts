@@ -2,6 +2,7 @@
 import { withTenant } from '@lango/db';
 import {
   assignPayment,
+  clubNotify,
   importMembers,
   initiatedTransactionId,
   newPairCode,
@@ -58,6 +59,17 @@ export async function createMember(form: FormData) {
                on conflict (tenant_id, site_code, card_code) do nothing`;
       await tx`insert into audit_log (tenant_id, actor, action, entity, data) values (${s.tid}, ${s.uid}, 'member.created', ${newId}, ${tx.json({ memberNo } as never)})`;
       await rebuildAccessState(tx, s.tid, newId);
+      const notify = await clubNotify(tx, s.tid);
+      if (phone && notify.enabled && notify.welcome) {
+        const [t] = await tx<{ name: string; slug: string; paybill: string | null }[]>`
+          select t.name, t.slug, ts.data->'channels'->>'paybill' as paybill
+          from tenants t left join tenant_settings ts on ts.tenant_id = t.id where t.id = ${s.tid}`;
+        const portal = (process.env.PUBLIC_URL ?? '').replace(/\/$/, '');
+        const pay = t?.paybill ? ` Pay by M-Pesa Paybill ${t.paybill}, account ${memberNo}.` : '';
+        const body = `Welcome to ${t?.name}, ${first}. Your member number is ${memberNo}.${pay} Check or renew your plan at ${portal}/m (club code ${t?.slug}).`;
+        await tx`insert into sms_messages (tenant_id, member_id, phone, body, kind, dedupe_key)
+                 values (${s.tid}, ${newId}, ${phone}, ${body}, 'welcome', ${`welcome:${newId}`})`;
+      }
       return newId;
     });
   } catch (e) {

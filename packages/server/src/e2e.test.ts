@@ -9,6 +9,7 @@ import { rebuildAccessState } from './access.js';
 import { handleAck, handleDrift, handleEvents, handleInventory, handlePair, handleSync } from './bridge-api.js';
 import { importMembers, onboardingChecklist, planImport } from './onboarding.js';
 import { assignPayment, recordPayment } from './payments.js';
+import { dispatchSms, msisdn, queueReminders, SourceCodeSms } from './sms.js';
 import { handleTaifaWebhook, reconcileTaifaPay, TaifaAuthError, TaifaPay } from './taifapay.js';
 
 /**
@@ -516,5 +517,57 @@ describe('walking skeleton: pay → door', () => {
       app`select app_create_club(${clubOwner?.id}, 'x-club', 'X', 'Africa/Nairobi', 'x@x.test', 'X', 'h', 'BCDEF-23456', 's')`,
     ).rejects.toThrow(/not a partner admin/);
     expect(await app`select * from app_partner_clubs(${clubOwner?.id})`).toHaveLength(0);
+  });
+  it('SMS: nothing is sent while a club has SMS off; once on, receipts and reminders go out once each', async () => {
+    expect([msisdn('0712 345 678'), msisdn('+254 112 345678'), msisdn('712345678'), msisdn('020 222 2222')]).toEqual([
+      '254712345678',
+      '254112345678',
+      '254712345678',
+      null,
+    ]);
+    const sent: { mobile: string; message: string }[] = [];
+    const fakeFetch = (async (_u: string, i: RequestInit) => {
+      const b = JSON.parse(String(i.body));
+      if (b.mobile === '254700000666')
+        return new Response(JSON.stringify({ status_code: '1003', status_desc: 'Invalid mobile number' }));
+      sent.push({ mobile: b.mobile, message: b.message });
+      return new Response(JSON.stringify({ status_code: '1000', status_desc: 'Success', message_id: sent.length }));
+    }) as typeof fetch;
+    const client = new SourceCodeSms('key', 'NAVAC', fakeFetch);
+
+    // SMS off (default): a payment queues nothing, and stray queued rows are skipped, never sent.
+    await recordPayment(app, tenantId, {
+      provider: 'taifapay',
+      providerTxnId: 'TP-SMS-0',
+      amountKes: 600,
+      accountRef: '21001',
+      paidAt: new Date(),
+    });
+    await owner`insert into sms_messages (tenant_id, phone, body, kind) values (${tenantId}, '254700000001', 'stray', 'receipt')`;
+    expect(await dispatchSms(app, client, () => {})).toBe(0);
+    expect(sent).toHaveLength(0);
+
+    await owner`insert into tenant_settings (tenant_id, data) values (${tenantId}, '{"notifications":{"enabled":true,"reminderDays":3}}')
+      on conflict (tenant_id) do update set data = tenant_settings.data || excluded.data`;
+    await recordPayment(app, tenantId, {
+      provider: 'taifapay',
+      providerTxnId: 'TP-SMS-1',
+      amountKes: 600,
+      accountRef: '21001',
+      paidAt: new Date(),
+    });
+    const [m] = await owner`insert into members (tenant_id, member_no, first_name, last_name, phone) values
+      (${tenantId}, 21077, 'Bad', 'Number', '0700000666') returning id`;
+    await owner`insert into entitlements (tenant_id, member_id, zone_key, starts_at, ends_at, source)
+      values (${tenantId}, ${m?.id}, 'gym', now() - interval '20 days', now() + interval '2 days', 'override')`;
+    expect(await queueReminders(app, 'https://lango.test')).toBeGreaterThanOrEqual(1);
+    expect(await queueReminders(app, 'https://lango.test')).toBe(0); // never twice for the same end date
+    expect(await dispatchSms(app, client, () => {})).toBeGreaterThanOrEqual(1);
+    expect(sent.some((x) => x.mobile === '254700000001' && /received for Sauna/.test(x.message))).toBe(true);
+    const [bad] = await owner`select status, error from sms_messages where phone = '0700000666'`;
+    expect(bad).toMatchObject({ status: 'failed' }); // permanent error: not retried
+    const n = sent.length;
+    expect(await dispatchSms(app, client, () => {})).toBe(0);
+    expect(sent).toHaveLength(n);
   });
 });

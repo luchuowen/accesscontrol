@@ -1,6 +1,6 @@
 'use server';
 import { randomBytes } from 'node:crypto';
-import { hashPassword, newPairCode, signSession } from '@lango/server';
+import { encrypt, hashPassword, newPairCode, SourceCodeSms, signSession } from '@lango/server';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { requirePartner, sessionCookie, sessionSecret } from '@/lib/session';
@@ -71,4 +71,33 @@ export async function createClub(_prev: CreateClubState, form: FormData): Promis
     console.error('create club failed', (e as Error).message);
     return { error: 'The club could not be created. Try again, or use a different club code.' };
   }
+}
+
+/** Platform SMS account (Source Code): key checked against Source Code before it is stored, encrypted. */
+export async function savePlatformSms(form: FormData) {
+  const s = await requirePartner();
+  const apiKey = String(form.get('apiKey') ?? '').trim();
+  const sender =
+    String(form.get('sender') ?? 'NAVAC')
+      .trim()
+      .slice(0, 11) || 'NAVAC';
+  const [cur] = await db()<{ data: { apiKey?: string } | null }[]>`select app_platform_get('sms') as data`;
+  let stored = cur?.data?.apiKey ?? null;
+  if (apiKey) {
+    let ok = false;
+    try {
+      ok = (await new SourceCodeSms(apiKey, sender).profile()).ok;
+    } catch {
+      redirect('/partner/settings?sms=unreachable');
+    }
+    if (!ok) redirect('/partner/settings?sms=rejected');
+    stored = encrypt(apiKey);
+  }
+  if (!stored) redirect('/partner/settings?sms=missing');
+  try {
+    await db()`select app_platform_set(${s.uid}, 'sms', ${db().json({ apiKey: stored, sender } as never)})`;
+  } catch {
+    redirect('/partner/settings?sms=forbidden');
+  }
+  redirect('/partner/settings?sms=ok');
 }

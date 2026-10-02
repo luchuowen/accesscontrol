@@ -6,18 +6,19 @@ import { Checklist } from '@/components/checklist';
 import { CopyField } from '@/components/copy-field';
 import { SubmitButton } from '@/components/submit-button';
 import { Badge, PageHeader } from '@/components/ui';
+import { dateTime } from '@/lib/format';
 import { requireSession } from '@/lib/session';
 import { db } from '@/server/db';
-import { changePassword, saveChannels, saveTaifaPay, setStaffActive } from './actions';
+import { changePassword, saveChannels, saveNotifications, saveTaifaPay, sendTestSms, setStaffActive } from './actions';
 import { AddStaffForm } from './team-form';
 
 export default async function Settings({
   searchParams,
 }: {
-  searchParams: Promise<{ taifa?: string; ch?: string; team?: string; pw?: string }>;
+  searchParams: Promise<{ taifa?: string; ch?: string; team?: string; pw?: string; sms?: string }>;
 }) {
   const s = await requireSession();
-  const { taifa, ch, team, pw } = await searchParams;
+  const { taifa, ch, team, pw, sms } = await searchParams;
   const [row] = await withTenant(
     db(),
     s.tid,
@@ -26,6 +27,13 @@ export default async function Settings({
         {
           data: {
             taifapay?: { env: string; clientId: string };
+            notifications?: {
+              enabled?: boolean;
+              receipts?: boolean;
+              reminders?: boolean;
+              reminderDays?: number;
+              welcome?: boolean;
+            };
             channels?: {
               paybill?: string | null;
               till?: string | null;
@@ -44,6 +52,17 @@ export default async function Settings({
   const webhook = `${base}/api/webhooks/taifapay/${t?.slug}`;
   const tp = row?.data.taifapay;
   const channels = row?.data.channels ?? {};
+  const notify = row?.data.notifications ?? {};
+  const [platform] = await db()<
+    { data: { sender?: string; apiKey?: string } | null }[]
+  >`select app_platform_get('sms') as data`;
+  const smsSender = platform?.data?.apiKey ? (platform.data.sender ?? 'NAVAC') : null;
+  const recentSms = await withTenant(
+    db(),
+    s.tid,
+    (tx) => tx<{ id: string; created_at: Date; kind: string; body: string; status: string; error: string | null }[]>`
+      select id, created_at, kind, body, status, error from sms_messages order by created_at desc limit 8`,
+  );
   const checklist = await onboardingChecklist(db(), s.tid);
   const staff = await withTenant(
     db(),
@@ -68,6 +87,13 @@ export default async function Settings({
     'pw:ok': ['green', 'Password changed.'],
     'pw:short': ['red', 'Use at least 10 characters.'],
     'pw:wrong': ['red', 'Your current password is not right.'],
+    'sms:saved': ['green', 'SMS settings saved.'],
+    'sms:forbidden': ['red', 'Only the club owner can change this.'],
+    'sms:number': ['red', 'Enter a Kenyan mobile number, e.g. 0712 345 678.'],
+    'sms:wait': ['amber', 'A few test messages were just sent. Wait a few minutes.'],
+    'sms:platform': ['amber', 'SMS is not connected on the platform yet. Ask NAVAC to connect it.'],
+    'sms:test-sent': ['green', 'Test SMS sent. It should arrive within a minute.'],
+    'sms:test-failed': ['red', 'The test SMS was not accepted. See the list below for the reason.'],
   };
   const m = taifa
     ? msg[taifa]
@@ -77,7 +103,9 @@ export default async function Settings({
         ? other[`team:${team}`]
         : pw
           ? other[`pw:${pw}`]
-          : undefined;
+          : sms
+            ? other[`sms:${sms}`]
+            : undefined;
   const owner = s.role === 'owner';
   return (
     <>
@@ -285,15 +313,115 @@ export default async function Settings({
               <MessageSquare size={18} />
             </div>
             <div className="flex-1">
-              <div className="font-medium">SMS · Source Code</div>
-              <div className="text-xs text-ink-500">Receipts, expiry reminders, announcements</div>
+              <div className="font-medium">SMS notifications</div>
+              <div className="text-xs text-ink-500">
+                Sent as {smsSender ?? 'NAVAC'} through Source Code · receipts, expiry reminders, welcome
+              </div>
             </div>
-            <Badge>coming next</Badge>
+            {!smsSender ? (
+              <Badge tone="amber">platform not connected</Badge>
+            ) : notify.enabled ? (
+              <Badge tone="green">on</Badge>
+            ) : (
+              <Badge>off</Badge>
+            )}
           </div>
-          <p className="mt-6 text-sm text-ink-500">
-            Payment receipts and expiry reminders are queued and will be delivered through the NAVAC Source Code account
-            as soon as it is connected.
-          </p>
+          {owner ? (
+            <form action={saveNotifications} className="mt-6 space-y-3 text-sm">
+              <label className="flex items-center gap-2.5 font-medium">
+                <input
+                  type="checkbox"
+                  name="enabled"
+                  defaultChecked={!!notify.enabled}
+                  className="h-4 w-4 accent-ink-900"
+                />
+                Send SMS to members
+              </label>
+              <div className="space-y-2.5 rounded-xl bg-ink-50/60 p-3">
+                <label className="flex items-center gap-2.5">
+                  <input
+                    type="checkbox"
+                    name="receipts"
+                    defaultChecked={notify.receipts !== false}
+                    className="h-4 w-4 accent-ink-900"
+                  />
+                  Payment receipt with the new end date
+                </label>
+                <label className="flex flex-wrap items-center gap-2.5">
+                  <input
+                    type="checkbox"
+                    name="reminders"
+                    defaultChecked={notify.reminders !== false}
+                    className="h-4 w-4 accent-ink-900"
+                  />
+                  Renewal reminder
+                  <input
+                    name="reminderDays"
+                    type="number"
+                    min={1}
+                    max={14}
+                    defaultValue={notify.reminderDays ?? 3}
+                    className="input w-16 py-1"
+                  />
+                  days before, and on the last day
+                </label>
+                <label className="flex items-center gap-2.5">
+                  <input
+                    type="checkbox"
+                    name="welcome"
+                    defaultChecked={!!notify.welcome}
+                    className="h-4 w-4 accent-ink-900"
+                  />
+                  Welcome message with the member number (new members only)
+                </label>
+              </div>
+              <SubmitButton pendingText="Saving…" className="btn-ghost w-full">
+                Save SMS settings
+              </SubmitButton>
+            </form>
+          ) : (
+            <p className="mt-6 text-sm text-ink-500">SMS is {notify.enabled ? 'on' : 'off'} for this club.</p>
+          )}
+          {smsSender && ['owner', 'manager'].includes(s.role) && (
+            <form action={sendTestSms} className="mt-4 flex gap-2 border-t border-ink-100 pt-4">
+              <input
+                name="phone"
+                inputMode="tel"
+                required
+                placeholder="Send a test SMS to 07…"
+                className="input py-2"
+              />
+              <SubmitButton pendingText="Sending…" className="btn-ghost py-2">
+                Send test
+              </SubmitButton>
+            </form>
+          )}
+          {recentSms.length > 0 && (
+            <ul className="mt-4 divide-y divide-ink-100 border-t border-ink-100 text-xs">
+              {recentSms.map((m) => (
+                <li key={m.id} className="flex items-center gap-3 py-2">
+                  <span className="w-24 shrink-0 text-ink-500">{dateTime(m.created_at)}</span>
+                  <span className="w-16 shrink-0 capitalize text-ink-500">{m.kind}</span>
+                  <span className="flex-1 truncate" title={m.error ?? m.body}>
+                    {m.body}
+                  </span>
+                  <Badge
+                    tone={
+                      m.status === 'sent'
+                        ? 'green'
+                        : m.status === 'failed'
+                          ? 'red'
+                          : m.status === 'queued'
+                            ? 'blue'
+                            : 'gray'
+                    }
+                  >
+                    {m.status}
+                  </Badge>
+                </li>
+              ))}
+            </ul>
+          )}
         </section>
         <section className="card p-6">
           <div className="flex items-center gap-3">

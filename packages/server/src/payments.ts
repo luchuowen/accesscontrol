@@ -3,6 +3,7 @@ import type { Sql, Tx } from '@lango/db';
 import { withTenant } from '@lango/db';
 import { DateTime } from 'luxon';
 import { rebuildAccessState } from './access.js';
+import { clubNotify } from './sms.js';
 
 export const CHANNELS = ['mpesa', 'card', 'cash', 'bank', 'test'] as const;
 export type Channel = (typeof CHANNELS)[number];
@@ -109,9 +110,12 @@ async function applyPayment(tx: Tx, tenantId: string, paymentId: string, p: Inco
   const [who] = await tx<
     { phone: string | null; first_name: string }[]
   >`select phone, first_name from members where id = ${member.id}`;
-  if (who?.phone && p.provider !== 'seed') {
-    const body = `${t?.name}: KES ${p.amountKes.toLocaleString('en-KE')} received for ${product.name}, ${who.first_name}. Access active until ${end.toFormat('d LLL yyyy')}. Member no. ${memberNo}.`;
-    await tx`insert into sms_messages (tenant_id, member_id, phone, body, kind) values (${tenantId}, ${member.id}, ${who.phone}, ${body}, 'receipt')`;
+  const notify = await clubNotify(tx, tenantId);
+  if (who?.phone && p.provider !== 'seed' && notify.enabled && notify.receipts !== false) {
+    const body = `${t?.name}: KES ${p.amountKes.toLocaleString('en-KE')} received for ${product.name}, ${who.first_name}. Access active until ${end.toFormat('d LLL yyyy, HH:mm')}. Member no. ${memberNo}.`;
+    await tx`insert into sms_messages (tenant_id, member_id, phone, body, kind, dedupe_key)
+             values (${tenantId}, ${member.id}, ${who.phone}, ${body}, 'receipt', ${`receipt:${paymentId}`})
+             on conflict (tenant_id, dedupe_key) where dedupe_key is not null do nothing`;
   }
   return { status: 'applied', paymentId, memberNo, product: product.name, until: end.toFormat('yyyy-MM-dd HH:mm') };
 }
