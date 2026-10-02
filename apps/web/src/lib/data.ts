@@ -241,11 +241,13 @@ export async function payments(tenantId: string) {
         member_id: string | null;
         member: string | null;
         product: string | null;
+        recorded_by: string | null;
       }[]
     >`
     select p.id, p.paid_at, p.amount_kes, p.status, p.channel, p.provider, p.provider_txn_id, p.account_ref, p.member_id,
-           m.first_name || ' ' || m.last_name as member, pr.name as product
+           m.first_name || ' ' || m.last_name as member, pr.name as product, st.name as recorded_by
     from payments p left join members m on m.id = p.member_id left join products pr on pr.id = p.product_id
+    left join app_staff_names() st on st.id::text = p.recorded_by
     order by p.paid_at desc limit 200`,
   );
 }

@@ -67,7 +67,8 @@ export async function recordDeskPayment(form: FormData) {
   if (!memberId) redirect('/members');
   if (!can(s.role, ...FRONT_DESK)) back(memberId, 'forbidden');
   const productId = id(form, 'productId');
-  const channel = form.get('channel') === 'card' ? 'card' : 'cash';
+  // Desk payments are cash only; card and bank go through TaifaPay so they are matched and fee-bearing.
+  const channel = 'cash' as const;
   const nonce = String(form.get('nonce') ?? '');
   if (!productId || !UUID.test(nonce)) back(memberId, 'invalid');
   const found = await withTenant(db(), s.tid, async (tx) => {

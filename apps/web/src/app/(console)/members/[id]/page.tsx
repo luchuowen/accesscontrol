@@ -151,7 +151,7 @@ export default async function MemberPage({
           </form>
 
           <form action={recordDeskPayment} className="card p-6">
-            <div className="label">Take a payment at the desk</div>
+            <div className="label">Cash at the desk</div>
             <input type="hidden" name="memberId" value={d.m.id} />
             <input type="hidden" name="nonce" value={randomUUID()} />
             <select name="productId" className="input mt-4" required>
@@ -161,12 +161,9 @@ export default async function MemberPage({
                 </option>
               ))}
             </select>
-            <select name="channel" className="input mt-3">
-              <option value="cash">Cash</option>
-              <option value="card">Card (desk terminal)</option>
-            </select>
+            <input type="hidden" name="channel" value="cash" />
             <SubmitButton pendingText="Recording…" className="btn-ghost mt-4 w-full">
-              <CreditCard size={16} /> Record &amp; open doors
+              <CreditCard size={16} /> Record cash &amp; open doors
             </SubmitButton>
             <p className="mt-3 text-xs text-ink-500">
               Members can also pay by M-Pesa to the club paybill using account <b>{d.m.member_no}</b>; access updates
