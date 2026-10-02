@@ -1,7 +1,7 @@
 'use server';
 import { createHmac } from 'node:crypto';
 import { withTenant } from '@lango/db';
-import { clientIp, isLimited, rateLimit, recordFailure, tenantTaifa } from '@lango/server';
+import { clientIp, initiatedTransactionId, isLimited, rateLimit, recordFailure, tenantTaifa } from '@lango/server';
 import { cookies, headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { sessionSecret } from '@/lib/session';
@@ -81,13 +81,20 @@ export async function memberPay(form: FormData) {
   if (!intent) redirect('/m?pay=unavailable');
   let sent = true;
   try {
-    await client.stkPush({
+    const res = await client.stkPush({
       phone: intent.phone,
       amount: intent.amount,
       accountReference: intent.ref,
       description: intent.name.slice(0, 20),
       externalId: intent.id,
     });
+    const ref = initiatedTransactionId(res);
+    if (ref)
+      await withTenant(
+        db(),
+        who.tenantId,
+        (tx) => tx`update payment_intents set provider_ref = ${ref} where id = ${intent.id}`,
+      );
   } catch (err) {
     sent = false;
     console.error('stk push failed', err instanceof Error ? err.message : err);

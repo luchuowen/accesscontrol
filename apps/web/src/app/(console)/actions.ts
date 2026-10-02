@@ -1,6 +1,6 @@
 'use server';
 import { withTenant } from '@lango/db';
-import { rebuildAccessState, recordPayment, tenantTaifa } from '@lango/server';
+import { initiatedTransactionId, rebuildAccessState, recordPayment, tenantTaifa } from '@lango/server';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { requireSession } from '@/lib/session';
@@ -172,13 +172,20 @@ export async function requestMpesa(form: FormData) {
   if (!intent) back(memberId, 'invalid');
   let sent = true;
   try {
-    await client.stkPush({
+    const res = await client.stkPush({
       phone,
       amount: intent.amount,
       accountReference: intent.ref,
       description: intent.name.slice(0, 20),
       externalId: intent.id,
     });
+    const ref = initiatedTransactionId(res);
+    if (ref)
+      await withTenant(
+        db(),
+        s.tid,
+        (tx) => tx`update payment_intents set provider_ref = ${ref} where id = ${intent.id}`,
+      );
   } catch (err) {
     sent = false;
     console.error('stk push failed', err instanceof Error ? err.message : err);

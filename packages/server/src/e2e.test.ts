@@ -8,7 +8,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { rebuildAccessState } from './access.js';
 import { handleAck, handleDrift, handleEvents, handlePair, handleSync } from './bridge-api.js';
 import { recordPayment } from './payments.js';
-import { handleTaifaWebhook, TaifaAuthError, TaifaPay } from './taifapay.js';
+import { handleTaifaWebhook, reconcileTaifaPay, TaifaAuthError, TaifaPay } from './taifapay.js';
 
 /**
  * Walking skeleton, end to end: payment → entitlement → AccessState → bridge long-poll → AxTraxNG (fake)
@@ -187,7 +187,7 @@ describe('walking skeleton: pay → door', () => {
       data: { transactionId: 'TP-FORGED', status: 'complete', amount: 5000, accountReference: '21001' },
     });
     const res = await handleTaifaWebhook(app, new Request('http://x', { method: 'POST', body }), 'demo-club', client);
-    expect(await res.json()).toEqual({ ignored: 'not completed' });
+    expect(await res.json()).toMatchObject({ ignored: 'not completed', state: 'failed' });
   });
 
   it('Tamper Guard: a hand-made extension in AxTraxNG is reverted and reported to the owner', async () => {
@@ -259,7 +259,7 @@ describe('walking skeleton: pay → door', () => {
     const client = new TaifaPay({ env: 'sandbox', clientId: 'c3', clientSecret: 's' }, fakeFetch);
     const body = JSON.stringify({ data: { transactionId: 'TP-ENV-1' } });
     const res = await handleTaifaWebhook(app, new Request('http://x', { method: 'POST', body }), 'demo-club', client);
-    expect(await res.json()).toEqual({ ignored: 'not completed' });
+    expect(await res.json()).toMatchObject({ ignored: 'not completed', state: 'failed' });
   });
 
   it('a failed apply keeps the last applied version (the doors still hold it) and records the error', async () => {
@@ -332,5 +332,44 @@ describe('walking skeleton: pay → door', () => {
     const denied = (async () => new Response('{"message":"invalid client"}', { status: 401 })) as typeof fetch;
     const e2 = await new TaifaPay({ env: 'live', clientId: 'h2', clientSecret: 's' }, denied).verify().catch((e) => e);
     expect(e2).toBeInstanceOf(TaifaAuthError);
+  });
+  it('reconciliation settles a completed STK payment whose webhook never arrived, exactly once', async () => {
+    const [m] = await owner`select id from members where member_no = 21001`;
+    const [p] = await owner`select id from products where price_kes = 10 limit 1`;
+    const [i] =
+      await owner`insert into payment_intents (tenant_id, member_id, product_id, amount_kes, phone, provider, provider_ref, created_by, created_at)
+      values (${tenantId}, ${m?.id}, ${p?.id}, 10, '0700000001', 'taifapay', 'TP-LOST-1', 'test', now() - interval '2 minutes') returning id`;
+    // No TaifaPay keys are stored for this tenant in the test DB, so the poller must skip it…
+    expect(await reconcileTaifaPay(app, () => {})).toBe(0);
+    // …and once keys exist it uses them; here we drive the same settlement with a fake client via the webhook path.
+    const fakeFetch = (async (u: string) =>
+      new Response(
+        JSON.stringify(
+          String(u).endsWith('/auth/token')
+            ? { access_token: 't', expires_in: '3599' }
+            : {
+                transaction: {
+                  id: 'TP-LOST-1',
+                  status: 'COMPLETED',
+                  amount: 10,
+                  accountReference: '21001',
+                  externalReference: i?.id,
+                },
+              },
+        ),
+        { status: 200 },
+      )) as typeof fetch;
+    const client = new TaifaPay({ env: 'live', clientId: 'c9', clientSecret: 's' }, fakeFetch);
+    const hook = () =>
+      handleTaifaWebhook(
+        app,
+        new Request('http://x', { method: 'POST', body: JSON.stringify({ data: { transactionId: 'TP-LOST-1' } }) }),
+        'demo-club',
+        client,
+      );
+    expect(await (await hook()).json()).toMatchObject({ status: 'applied' });
+    expect(await (await hook()).json()).toMatchObject({ status: 'duplicate' });
+    const [it] = await owner`select status from payment_intents where id = ${i?.id}`;
+    expect(it).toEqual({ status: 'completed' });
   });
 });

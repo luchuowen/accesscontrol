@@ -114,9 +114,15 @@ export class TaifaPay {
   }
 }
 
+const channelOf = (m: string): 'mpesa' | 'card' | 'bank' =>
+  /card|visa|master/i.test(m) ? 'card' : /bank|pesalink|eft|rtgs/i.test(m) ? 'bank' : 'mpesa';
+
 export const normalStatus = (s: unknown) => {
   const v = String(s ?? '').toLowerCase();
-  return v === 'complete' || v === 'completed' || v === 'success' ? 'completed' : v === 'failed' ? 'failed' : 'pending';
+  if (v === 'complete' || v === 'completed' || v === 'success' || v === 'successful') return 'completed';
+  return v === 'failed' || v === 'cancelled' || v === 'canceled' || v === 'expired' || v === 'reversed'
+    ? 'failed'
+    : 'pending';
 };
 
 /**
@@ -125,6 +131,7 @@ export const normalStatus = (s: unknown) => {
  */
 export function transactionRecord(truth: unknown): {
   id?: string;
+  channel: 'mpesa' | 'card' | 'bank';
   status: unknown;
   amount: unknown;
   accountReference?: string;
@@ -148,6 +155,7 @@ export function transactionRecord(truth: unknown): {
     externalReference: str(r.externalReference) ?? str(r.externalId),
     phone: str(r.phoneNumber) ?? str(r.msisdn) ?? null,
     paidAt: str(r.completedAt) ?? str(r.updatedAt),
+    channel: channelOf(str(r.paymentMethod) ?? str(r.method) ?? str(r.channel) ?? str(r.gateway) ?? ''),
   };
 }
 
@@ -174,51 +182,37 @@ export async function tenantTaifa(sql: Sql, tenantId: string): Promise<TaifaPay 
   return new TaifaPay({ env: t.env, clientId: t.clientId, clientSecret: decrypt(t.clientSecret) });
 }
 
+type Settled = { status: number; body: Record<string, unknown> };
+
 /**
- * POST /api/webhooks/taifapay/{tenantSlug}. The signature scheme is undocumented, so we never trust the
- * body: the transaction is re-fetched from TaifaPay with the tenant's own credentials before anything is applied.
+ * Apply one TaifaPay transaction for a club, trusting only TaifaPay's own record of it (re-fetched with the
+ * club's credentials). Shared by the webhook and the reconciliation poller, so both behave identically and a
+ * payment is recorded exactly once whichever arrives first.
  */
-export async function handleTaifaWebhook(
+export async function settleTaifaTransaction(
   sql: Sql,
-  req: Request,
-  slug: string,
-  verifyClient?: TaifaPay,
-): Promise<Response> {
-  const ok = (b: unknown) =>
-    new Response(JSON.stringify(b), { status: 200, headers: { 'Content-Type': 'application/json' } });
-  const [t] = await sql<{ id: string; timezone: string }[]>`select id, timezone from tenants where slug = ${slug}`;
-  if (!t) return new Response('unknown tenant', { status: 404 });
-  let evt: { eventType?: string; data?: Record<string, unknown> };
-  try {
-    evt = JSON.parse(await req.text());
-  } catch {
-    return new Response('bad json', { status: 400 });
-  }
-  const txId = String(evt.data?.transactionId ?? '');
-  if (!txId || !/^[\w-]{6,80}$/.test(txId)) return new Response('missing transactionId', { status: 400 });
-  const client = verifyClient ?? (await tenantTaifa(sql, t.id));
-  if (!client) return new Response('tenant has no TaifaPay credentials', { status: 409 });
+  t: { id: string; timezone: string },
+  txId: string,
+  client: TaifaPay,
+  raw: unknown,
+): Promise<Settled> {
   const truth = await client.transaction(txId);
-  // Trust only TaifaPay's own record of this transaction (never fields from the unsigned webhook body).
   const rec = transactionRecord(truth);
-  // A response we cannot read must never be acknowledged as handled: answer 502 so TaifaPay retries,
-  // and leave a trail the owner can see.
-  const unreadable = async (why: string) => {
+  // A response we cannot read must never be acknowledged as handled: 502 so TaifaPay retries, plus an audit trail.
+  const unreadable = async (why: string): Promise<Settled> => {
     await withTenant(
       sql,
       t.id,
       (tx) => tx`insert into audit_log (tenant_id, actor, action, entity, data)
       values (${t.id}, 'taifapay', 'payment.unreadable', ${txId}, ${tx.json({ why, verified: truth } as never)})`,
     );
-    console.error(`taifapay ${slug} ${txId}: ${why}`);
-    return new Response(JSON.stringify({ error: why }), {
-      status: 502,
-      headers: { 'Content-Type': 'application/json' },
-    });
+    console.error(`taifapay ${t.id} ${txId}: ${why}`);
+    return { status: 502, body: { error: why } };
   };
   if (!rec) return unreadable('unrecognised transaction response');
-  if (rec.id && rec.id !== txId) return ok({ ignored: 'transaction id mismatch' });
-  if (normalStatus(rec.status) !== 'completed') return ok({ ignored: 'not completed' });
+  if (rec.id && rec.id !== txId) return { status: 200, body: { ignored: 'transaction id mismatch' } };
+  const state = normalStatus(rec.status);
+  if (state !== 'completed') return { status: 200, body: { ignored: 'not completed', state } };
   const amount = Number(rec.amount);
   if (!Number.isSafeInteger(amount) || amount <= 0)
     return unreadable(`unexpected amount ${String(rec.amount).slice(0, 40)}`);
@@ -243,18 +237,98 @@ export async function handleTaifaWebhook(
   // Naive provider timestamps are club-local; an explicit offset is respected. Never in the future.
   const parsed = rec.paidAt ? DateTime.fromISO(rec.paidAt, { zone: t.timezone }) : null;
   const paid = parsed?.isValid && parsed.toMillis() <= Date.now() + 60_000 ? parsed.toJSDate() : new Date();
+  // Paybill/till payments carry what the member typed as the account; accept "21002", "21002-OCT", " 21002 ".
+  const typed = ref.trim().split(/[-\s/]/)[0] ?? '';
   const r = await recordPayment(sql, t.id, {
     provider: 'taifapay',
     providerTxnId: txId,
     amountKes: amount,
-    accountRef: ref.split('-')[0] ?? ref,
+    accountRef: typed || ref,
     phone: rec.phone,
     externalRef,
     productId,
     intentId,
-    channel: 'mpesa',
+    channel: rec.channel,
     paidAt: paid,
-    raw: { webhook: evt, verified: truth },
+    raw: { event: raw, verified: truth },
   });
-  return ok(r);
+  return { status: 200, body: r as unknown as Record<string, unknown> };
+}
+
+/**
+ * POST /api/webhooks/taifapay/{tenantSlug}. The body is only a hint: the transaction is re-fetched from TaifaPay
+ * with the club's own credentials before anything is applied.
+ */
+export async function handleTaifaWebhook(
+  sql: Sql,
+  req: Request,
+  slug: string,
+  verifyClient?: TaifaPay,
+): Promise<Response> {
+  const [t] = await sql<{ id: string; timezone: string }[]>`select id, timezone from tenants where slug = ${slug}`;
+  if (!t) return new Response('unknown tenant', { status: 404 });
+  let evt: { eventType?: string; data?: Record<string, unknown> };
+  try {
+    evt = JSON.parse(await req.text());
+  } catch {
+    return new Response('bad json', { status: 400 });
+  }
+  const txId = String(evt.data?.transactionId ?? evt.data?.id ?? '');
+  if (!txId || !/^[\w-]{6,80}$/.test(txId)) return new Response('missing transactionId', { status: 400 });
+  const client = verifyClient ?? (await tenantTaifa(sql, t.id));
+  if (!client) return new Response('tenant has no TaifaPay credentials', { status: 409 });
+  const r = await settleTaifaTransaction(sql, t, txId, client, evt);
+  return new Response(JSON.stringify(r.body), { status: r.status, headers: { 'Content-Type': 'application/json' } });
+}
+
+/** The transaction id TaifaPay returns when an STK push or invoice is created (stored on the intent for polling). */
+export function initiatedTransactionId(res: unknown): string | null {
+  const r = (res ?? {}) as Record<string, unknown>;
+  const inner = [r.transaction, r.invoice, r.data].find((x) => x && typeof x === 'object') as
+    | Record<string, unknown>
+    | undefined;
+  const v = inner?.id ?? inner?.transactionId ?? r.id ?? r.transactionId;
+  return typeof v === 'string' && /^[\w-]{6,80}$/.test(v) ? v : null;
+}
+
+/**
+ * Safety net for missed webhooks (TaifaPay's own docs recommend polling as the fallback): look up every club's
+ * pending payment requests from the last 24 h and settle the ones TaifaPay reports as finished.
+ */
+export async function reconcileTaifaPay(sql: Sql, log: (m: string) => void = console.log): Promise<number> {
+  let settled = 0;
+  const tenants = await sql<{ id: string; timezone: string }[]>`select id, timezone from tenants`;
+  for (const t of tenants) {
+    const pending = await withTenant(
+      sql,
+      t.id,
+      (tx) => tx<{ id: string; provider_ref: string }[]>`
+        select id, provider_ref from payment_intents
+        where status = 'pending' and provider = 'taifapay' and provider_ref is not null
+          and created_at > now() - interval '24 hours' and created_at < now() - interval '45 seconds'
+        order by created_at limit 50`,
+    );
+    if (!pending.length) continue;
+    const client = await tenantTaifa(sql, t.id);
+    if (!client) continue;
+    for (const i of pending) {
+      try {
+        const r = await settleTaifaTransaction(sql, t, i.provider_ref, client, { source: 'reconcile' });
+        if (r.body.status === 'applied' || r.body.status === 'unmatched') settled++;
+        if (r.body.state === 'failed')
+          await withTenant(sql, t.id, (tx) => tx`update payment_intents set status = 'failed' where id = ${i.id}`);
+      } catch (e) {
+        log(`reconcile ${i.provider_ref}: ${(e as Error).message}`);
+      }
+    }
+  }
+  // Requests nobody completed within a day are closed so they stop being polled.
+  for (const t of tenants)
+    await withTenant(
+      sql,
+      t.id,
+      (tx) =>
+        tx`update payment_intents set status = 'expired' where status = 'pending' and created_at < now() - interval '24 hours'`,
+    );
+  return settled;
 }

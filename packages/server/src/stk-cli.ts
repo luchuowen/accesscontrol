@@ -1,5 +1,5 @@
 import { connect, withTenant } from '@lango/db';
-import { tenantTaifa } from './taifapay.js';
+import { initiatedTransactionId, tenantTaifa } from './taifapay.js';
 
 /**
  * Ops/lab tool: send a real M-Pesa prompt exactly as the console's "Send prompt to phone" does.
