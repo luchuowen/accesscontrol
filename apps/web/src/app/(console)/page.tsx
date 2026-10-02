@@ -1,9 +1,10 @@
 import { can } from '@lango/server';
+import { Plus } from 'lucide-react';
 import Link from 'next/link';
 import { ownerDashboard } from '@/lib/data';
 import { ago, kes } from '@/lib/format';
 import { requireSession } from '@/lib/session';
-import { LiveRefresh } from './_dash/live-refresh';
+import { LiveRefresh, RefreshButton } from './_dash/live-refresh';
 
 /**
  * Dashboard, design B "Business health" (approved 2 Oct 2026): live "in the club now", revenue, active members and
@@ -72,33 +73,59 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
       href: can(s, 'sms.buy') ? '/settings' : undefined,
     },
   ].filter(Boolean) as { tone: string; text: string; meta: string; href?: string }[];
+  const now = new Date();
+  const hour = Number(
+    new Intl.DateTimeFormat('en-GB', { hour: 'numeric', hour12: false, timeZone: d.timezone }).format(now),
+  );
+  const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
+  const today = new Intl.DateTimeFormat('en-GB', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+    timeZone: d.timezone,
+  }).format(now);
+  const first = s.name.split(/\s+/)[0] || s.name;
 
   return (
     <>
       <LiveRefresh />
-      <div className="mb-5 flex flex-wrap items-end justify-between gap-4">
+      <section className="mb-4 flex flex-wrap items-center justify-between gap-4 rounded-2xl bg-[linear-gradient(120deg,#0B1629_0%,#11284A_62%,#0E3A33_100%)] px-6 py-5 text-white">
         <div>
-          <h1 className="text-[26px] font-semibold tracking-tight text-ink-900">Dashboard</h1>
-          <p className="mt-1 text-sm text-ink-500">{d.tenantName}</p>
+          <h1 className="text-[22px] font-semibold tracking-tight">
+            {greeting}, {first} 👋
+          </h1>
+          <p className="mt-1 text-[13px] text-[#A3B3C9]">{today}</p>
         </div>
-        {full && (
-          <nav
-            className="flex gap-0.5 rounded-[10px] border border-[#E5E8EE] bg-white p-[3px] text-xs"
-            aria-label="Period"
-          >
-            {PERIODS.map((x) => (
-              <Link
-                key={x}
-                href={`/?p=${x}`}
-                aria-current={x === days ? 'page' : undefined}
-                className={`rounded-[7px] px-2.5 py-1.5 ${x === days ? 'bg-ink-950 text-white' : 'text-ink-500 hover:text-ink-900'}`}
-              >
-                {x} days
-              </Link>
-            ))}
-          </nav>
-        )}
-      </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {can(s, 'members.edit') && (
+            <Link
+              href="/members?new=1"
+              className="inline-flex h-9 items-center gap-1.5 rounded-[10px] bg-white px-3.5 text-[13px] font-semibold text-ink-950 hover:bg-slate-100"
+            >
+              <Plus size={15} /> Member
+            </Link>
+          )}
+          {full && (
+            <nav
+              className="flex gap-0.5 rounded-[10px] border border-white/20 bg-white/[0.08] p-[3px] text-xs"
+              aria-label="Period"
+            >
+              {PERIODS.map((x) => (
+                <Link
+                  key={x}
+                  href={`/?p=${x}`}
+                  aria-current={x === days ? 'page' : undefined}
+                  className={`rounded-[7px] px-2.5 py-1.5 ${x === days ? 'bg-white font-semibold text-ink-950' : 'text-[#C7D2E1] hover:text-white'}`}
+                >
+                  {x} days
+                </Link>
+              ))}
+            </nav>
+          )}
+          <RefreshButton />
+        </div>
+      </section>
       {denied && (
         <div className="mb-4 rounded-xl bg-amber-50 p-3 text-sm text-amber-900 ring-1 ring-amber-200">
           You don’t have access to that page.

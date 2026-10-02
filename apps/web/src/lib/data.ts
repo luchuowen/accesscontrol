@@ -313,6 +313,7 @@ export async function unmatchedPayments(tenantId: string) {
 /** The owner dashboard (design B, "Business health", approved 2 Oct 2026). One period: 7, 30 or 90 days. */
 export interface OwnerDashboard {
   tenantName: string;
+  timezone: string;
   days: number;
   live: { inside: number; busiestHour: number | null; todayByHour: number[] };
   revenue: { now: number; prev: number; mpesa: number; cash: number; spark: number[] };
@@ -413,6 +414,7 @@ export async function ownerDashboard(tenantId: string, days: number): Promise<Ow
     const renewed = ren?.renewed ?? 0;
     return {
       tenantName: t?.name ?? '',
+      timezone: tz,
       days,
       live: {
         inside: inside?.n ?? 0,
@@ -454,6 +456,26 @@ export async function ownerDashboard(tenantId: string, days: number): Promise<Ow
         syncFailed: st?.failed ?? 0,
         smsUnits: Number(sms?.units ?? 0),
       },
+    };
+  });
+}
+
+/** The few things that need someone's attention, for the bell in the top bar (same rules as the Dashboard list). */
+export async function consoleAlerts(tenantId: string) {
+  return T(tenantId, async (tx) => {
+    const [um] = await tx<{ n: number; kes: number }[]>`
+      select count(*)::int as n, coalesce(sum(amount_kes), 0)::int as kes from payments where status = 'unmatched'`;
+    const [st] = await tx<
+      { failed: number }[]
+    >`select count(*) filter (where error is not null)::int as failed from access_states`;
+    const [br] = await tx<{ last: Date | null }[]>`select max(last_seen_at) as last from app_tenant_bridges()`;
+    const [sms] = await tx<{ units: string | null }[]>`select sum(units) as units from sms_ledger`;
+    return {
+      unmatched: um?.n ?? 0,
+      unmatchedKes: um?.kes ?? 0,
+      bridgeLastSeen: br?.last ?? null,
+      syncFailed: st?.failed ?? 0,
+      smsUnits: Number(sms?.units ?? 0),
     };
   });
 }

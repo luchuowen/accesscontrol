@@ -1,11 +1,15 @@
 import type { ReactNode } from 'react';
+import { PageIcon } from '@/components/page-icon';
 
 export function PageHeader({ title, subtitle, actions }: { title: string; subtitle?: string; actions?: ReactNode }) {
   return (
-    <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
-      <div>
-        <h1 className="text-[26px] font-semibold tracking-tight text-ink-900">{title}</h1>
-        {subtitle && <p className="mt-1 text-sm text-ink-500">{subtitle}</p>}
+    <div className="mb-8 flex flex-wrap items-center justify-between gap-4">
+      <div className="flex min-w-0 items-center gap-3.5">
+        <PageIcon />
+        <div className="min-w-0">
+          <h1 className="text-[26px] font-semibold tracking-tight text-ink-900">{title}</h1>
+          {subtitle && <p className="mt-1 text-sm text-ink-500">{subtitle}</p>}
+        </div>
       </div>
       {actions && <div className="flex gap-2">{actions}</div>}
     </div>

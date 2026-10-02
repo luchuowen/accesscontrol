@@ -6,9 +6,9 @@ import {
   DoorOpen,
   Layers,
   LayoutDashboard,
-  LogOut,
   MessageSquare,
   Plug,
+  SlidersHorizontal,
   Users,
   UsersRound,
 } from 'lucide-react';
@@ -17,7 +17,7 @@ import { usePathname } from 'next/navigation';
 import { LangoMark } from '@/components/logo';
 
 /** Each page and the permissions that open it (any one is enough). Pages a role cannot use are not shown. */
-const ITEMS = [
+export const ITEMS = [
   { href: '/', label: 'Dashboard', icon: LayoutDashboard, any: [] },
   { href: '/members', label: 'Members', icon: Users, any: ['members.view'] },
   {
@@ -30,8 +30,21 @@ const ITEMS = [
   { href: '/access', label: 'Doors & access', icon: DoorOpen, any: ['doors.manage'] },
   { href: '/messages', label: 'Messages', icon: MessageSquare, any: ['messages.manage'] },
   { href: '/team', label: 'Team', icon: UsersRound, any: ['team.manage'] },
-  { href: '/settings', label: 'Settings', icon: Plug, any: ['settings.payments', 'sms.buy', 'messages.manage'] },
+  {
+    href: '/settings',
+    label: 'Settings',
+    icon: SlidersHorizontal,
+    any: ['settings.payments', 'sms.buy', 'messages.manage'],
+  },
 ];
+
+/** The page the path belongs to (longest matching item), for the top bar title and page header icon. */
+export function pageFor(path: string) {
+  if (path.startsWith('/account')) return { href: '/account', label: 'Your account', icon: CircleUserRound };
+  return ITEMS.filter((i) => (i.href === '/' ? path === '/' : path.startsWith(i.href))).sort(
+    (a, b) => b.href.length - a.href.length,
+  )[0];
+}
 
 export function Nav({
   tenant,
@@ -64,13 +77,15 @@ export function Nav({
               <ArrowLeftRight size={16} />
             </Link>
           )}
-          <Link href="/account" aria-label="Your account">
-            <CircleUserRound size={18} />
-          </Link>
         </div>
         <nav className="flex gap-4 overflow-x-auto px-4 pb-3 pt-2.5 text-[13px]">
-          {items.map(({ href, label }) => (
-            <Link key={href} href={href} className={`whitespace-nowrap ${on(href) ? 'text-white' : ''}`}>
+          {items.map(({ href, label, icon: Icon }) => (
+            <Link
+              key={href}
+              href={href}
+              className={`flex items-center gap-1.5 whitespace-nowrap ${on(href) ? 'text-white' : ''}`}
+            >
+              <Icon size={14} />
               {label}
             </Link>
           ))}
@@ -97,9 +112,7 @@ export function Nav({
           ))}
         </nav>
         <div className="mt-auto rounded-xl bg-white/5 p-3">
-          <Link href="/account" className="block text-sm text-white hover:underline">
-            {user}
-          </Link>
+          <div className="truncate text-sm text-white">{user}</div>
           <div className="text-[11px] text-ink-500">{partner ? `Partner · acting as ${roleLabel}` : roleLabel}</div>
           {switchClubs && (
             <Link href="/choose" className="mt-3 flex items-center gap-2 text-xs text-ink-300 hover:text-white">
@@ -119,14 +132,6 @@ export function Nav({
               <Plug size={14} /> SaaS console
             </Link>
           )}
-          <Link href="/account" className="mt-2 flex items-center gap-2 text-xs text-ink-300 hover:text-white">
-            <CircleUserRound size={14} /> Your account
-          </Link>
-          <form action="/logout" method="post" className="mt-2">
-            <button type="submit" className="flex items-center gap-2 text-xs text-ink-300 hover:text-white">
-              <LogOut size={14} /> Sign out
-            </button>
-          </form>
         </div>
       </aside>
     </>
