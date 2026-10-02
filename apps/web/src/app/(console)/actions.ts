@@ -11,6 +11,7 @@ import {
   recordPayment,
   tenantTaifa,
 } from '@lango/server';
+import { DateTime } from 'luxon';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { requireSession } from '@/lib/session';
@@ -405,4 +406,40 @@ export async function reissuePairCode() {
   });
   revalidatePath('/access');
   redirect('/access?n=pair-new');
+}
+
+/**
+ * "Remind all" on the Dashboard: one renewal SMS to every member whose plan ends in the next 7 days, at most once per
+ * end date (renewing moves the date, so the next cycle can be reminded again). Goes through the normal SMS queue.
+ */
+export async function remindEnding(_prev: { done?: string }, _form: FormData): Promise<{ done?: string }> {
+  const s = await requireSession();
+  if (!can(s, 'messages.manage')) return { done: 'Your role can’t send messages.' };
+  const queued = await withTenant(db(), s.tid, async (tx) => {
+    const [t] = await tx<{ name: string; slug: string; timezone: string; paybill: string | null }[]>`
+      select t.name, t.slug, t.timezone, ts.data->'channels'->>'paybill' as paybill
+      from tenants t left join tenant_settings ts on ts.tenant_id = t.id where t.id = ${s.tid}`;
+    const due = await tx<{ member_id: string; member_no: number; first_name: string; phone: string; ends: Date }[]>`
+      select m.id as member_id, m.member_no, m.first_name, m.phone, x.ends from members m
+      join (select member_id, max(ends_at) as ends from entitlements group by member_id) x on x.member_id = m.id
+      where m.status = 'active' and m.phone is not null and m.first_name <> 'Wristband'
+        and x.ends between now() and now() + interval '7 days'`;
+    const portal = (process.env.PUBLIC_URL ?? '').replace(/\/$/, '');
+    let n = 0;
+    for (const d of due) {
+      const end = DateTime.fromJSDate(d.ends, { zone: t?.timezone ?? 'Africa/Nairobi' });
+      const how = t?.paybill
+        ? `Renew on M-Pesa Paybill ${t.paybill}, account ${d.member_no}, or at ${portal}/m (club code ${t?.slug}).`
+        : `Renew at ${portal}/m (club code ${t?.slug}, member no. ${d.member_no}).`;
+      const body = `${t?.name}: ${d.first_name}, your access ends on ${end.toFormat('d LLL')}. ${how}`;
+      const r = await tx`insert into sms_messages (tenant_id, member_id, phone, body, kind, dedupe_key, send_before)
+        values (${s.tid}, ${d.member_id}, ${d.phone}, ${body}, 'reminder', ${`reminder:manual:${d.member_id}:${end.toISODate()}`}, ${d.ends})
+        on conflict (tenant_id, dedupe_key) where dedupe_key is not null do nothing returning id`;
+      n += r.length;
+    }
+    if (n)
+      await tx`insert into audit_log (tenant_id, actor, action, entity, data) values (${s.tid}, ${s.uid}, 'reminders.sent', 'dashboard', ${tx.json({ count: n } as never)})`;
+    return n;
+  });
+  return { done: queued ? `Reminder sent to ${queued}` : 'Already reminded' };
 }

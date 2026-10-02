@@ -320,13 +320,22 @@ export interface OwnerDashboard {
   daily: { day: string; mpesa: number; cash: number }[];
   members: { active: number; joined: number; lapsed: number; spark: number[] };
   renewals: { ended: number; renewed: number; lapsed: number };
-  endingSoon: { id: string; memberNo: number; name: string; endsAt: Date }[];
+  endingSoon: {
+    id: string;
+    memberNo: number;
+    name: string;
+    endsAt: Date;
+    plan: string | null;
+    priceKes: number | null;
+  }[];
   /** Members whose plan ends in the next 7 days, and what they would pay at their last plan's current price. */
   ending7: { count: number; expectedKes: number };
   /** Money in by plan for the period, biggest first (top 4). */
   plans: { name: string; kes: number }[];
   atRisk: { id: string; memberNo: number; name: string; daysAway: number }[];
   atRiskTotal: number;
+  /** Paid-up members not seen, by days away: 30+, 21–29, 14–20. */
+  riskTiers: { high: number; mid: number; watch: number };
   attention: {
     unmatched: number;
     unmatchedKes: number;
@@ -391,12 +400,26 @@ export async function ownerDashboard(tenantId: string, days: number): Promise<Ow
              count(*) filter (where exists (select 1 from entitlements e where e.member_id = ended.member_id
                                              and now() between e.starts_at and e.ends_at))::int as renewed
       from ended`;
-    const ending = await tx<{ id: string; member_no: number; first_name: string; last_name: string; ends: Date }[]>`
-      select m.id, m.member_no, m.first_name, m.last_name, max(e.ends_at) as ends
-      from members m join entitlements e on e.member_id = m.id
-      where m.first_name <> 'Wristband'
-      group by m.id having max(e.ends_at) between now() and now() + interval '7 days'
-      order by ends limit 6`;
+    const ending = await tx<
+      {
+        id: string;
+        member_no: number;
+        first_name: string;
+        last_name: string;
+        ends: Date;
+        plan: string | null;
+        price: number | null;
+      }[]
+    >`
+      select x.*, lp.name as plan, lp.price_kes as price from (
+        select m.id, m.member_no, m.first_name, m.last_name, max(e.ends_at) as ends
+        from members m join entitlements e on e.member_id = m.id
+        where m.first_name <> 'Wristband'
+        group by m.id having max(e.ends_at) between now() and now() + interval '7 days'
+        order by ends limit 5) x
+      left join lateral (select pr.name, pr.price_kes from payments p join products pr on pr.id = p.product_id
+                         where p.member_id = x.id and p.status = 'applied' order by p.paid_at desc limit 1) lp on true
+      order by x.ends`;
     const [e7] = await tx<{ n: number; kes: number }[]>`
       select count(*)::int as n, coalesce(sum(lp.price_kes), 0)::int as kes
       from (select m.id from members m join entitlements e on e.member_id = m.id
@@ -457,6 +480,8 @@ export async function ownerDashboard(tenantId: string, days: number): Promise<Ow
         memberNo: x.member_no,
         name: `${x.first_name} ${x.last_name}`,
         endsAt: x.ends,
+        plan: x.plan,
+        priceKes: x.price,
       })),
       ending7: { count: e7?.n ?? 0, expectedKes: e7?.kes ?? 0 },
       plans,
@@ -467,6 +492,11 @@ export async function ownerDashboard(tenantId: string, days: number): Promise<Ow
         daysAway: x.away,
       })),
       atRiskTotal: risk.length,
+      riskTiers: {
+        high: risk.filter((x) => x.away >= 30).length,
+        mid: risk.filter((x) => x.away >= 21 && x.away < 30).length,
+        watch: risk.filter((x) => x.away < 21).length,
+      },
       attention: {
         unmatched: um?.n ?? 0,
         unmatchedKes: um?.kes ?? 0,

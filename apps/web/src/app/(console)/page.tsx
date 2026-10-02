@@ -1,4 +1,5 @@
 import { can } from '@lango/server';
+import { Check, CreditCard, DoorOpen, type LucideIcon, MessageSquare, Monitor } from 'lucide-react';
 import Link from 'next/link';
 import { AddMember } from '@/components/add-member';
 import { nextMemberNo, ownerDashboard } from '@/lib/data';
@@ -6,6 +7,7 @@ import { ago, kes, kesShort } from '@/lib/format';
 import { requireSession } from '@/lib/session';
 import { LiveRefresh, RefreshButton } from './_dash/live-refresh';
 import { MoneyIn } from './_dash/money-in';
+import { RemindAll } from './_dash/remind-all';
 
 /**
  * Dashboard, design B "Business health" (approved 2 Oct 2026): live "in the club now", revenue, active members and
@@ -51,33 +53,43 @@ export default async function Dashboard({
   const change = pct(d.revenue.now, d.revenue.prev);
   const rate = d.renewals.ended ? Math.round((d.renewals.renewed / d.renewals.ended) * 100) : null;
   const bridgeOff = !d.attention.bridgeLastSeen || Date.now() - d.attention.bridgeLastSeen.getTime() > 10 * 60_000;
+  type Issue = { tone: 'red' | 'amber'; icon: LucideIcon; text: string; sub: string; cta: string; href?: string };
+  const units = d.attention.smsUnits;
   const attention = [
     d.attention.unmatched > 0 &&
       can(s, 'payments.assign') && {
-        tone: 'bg-rose-600',
+        tone: 'red',
+        icon: CreditCard,
         text: `${d.attention.unmatched} payment${d.attention.unmatched > 1 ? 's' : ''} not matched`,
-        meta: kes(d.attention.unmatchedKes),
+        sub: `${kes(d.attention.unmatchedKes)} held · no access given`,
+        cta: 'Review',
         href: '/payments',
       },
     bridgeOff && {
-      tone: 'bg-amber-500',
+      tone: 'amber',
+      icon: Monitor,
       text: d.attention.bridgeLastSeen ? `Door PC offline ${ago(d.attention.bridgeLastSeen)}` : 'Door PC not connected',
-      meta: '',
+      sub: 'Doors keep working offline',
+      cta: d.attention.bridgeLastSeen ? 'Check' : 'Set up',
       href: can(s, 'doors.manage') ? '/access' : undefined,
     },
     d.attention.syncFailed > 0 && {
-      tone: 'bg-rose-600',
+      tone: 'red',
+      icon: DoorOpen,
       text: `${d.attention.syncFailed} door update${d.attention.syncFailed > 1 ? 's' : ''} failed`,
-      meta: '',
+      sub: 'Some members may not open the doors',
+      cta: 'Fix',
       href: can(s, 'doors.manage') ? '/access' : undefined,
     },
-    d.attention.smsUnits < 100 && {
-      tone: 'bg-amber-500',
-      text: 'SMS credit low',
-      meta: `${d.attention.smsUnits} left`,
+    units < 100 && {
+      tone: units <= 0 ? 'red' : 'amber',
+      icon: MessageSquare,
+      text: units <= 0 ? 'SMS credit is out' : 'SMS credit low',
+      sub: units <= 0 ? '0 left · reminders paused' : `${units} left`,
+      cta: 'Top up',
       href: can(s, 'sms.buy') ? '/settings' : undefined,
     },
-  ].filter(Boolean) as { tone: string; text: string; meta: string; href?: string }[];
+  ].filter(Boolean) as Issue[];
   const now = new Date();
   const hour = Number(
     new Intl.DateTimeFormat('en-GB', { hour: 'numeric', hour12: false, timeZone: d.timezone }).format(now),
@@ -264,71 +276,168 @@ export default async function Dashboard({
       )}
 
       <div className="mt-3.5 grid gap-3.5 lg:grid-cols-3">
-        <Card>
-          <Label>Ending in 7 days</Label>
+        <Card className="flex flex-col">
+          <div className="flex items-center justify-between">
+            <Label>Ending in 7 days</Label>
+            {d.ending7.count > 0 && (
+              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-bold tabular-nums text-ink-900">
+                {d.ending7.count}
+              </span>
+            )}
+          </div>
           <ul className="mt-2">
-            {d.endingSoon.length === 0 && <li className="py-2 text-sm text-ink-500">None</li>}
+            {d.endingSoon.length === 0 && <li className="py-2 text-sm text-ink-500">Nobody this week</li>}
             {d.endingSoon.map((m) => {
               const left = Math.max(0, Math.ceil((m.endsAt.getTime() - Date.now()) / 86400_000));
+              const tone =
+                left <= 2
+                  ? { ring: '#E11D48', track: '#FEE2E2', text: 'text-rose-700' }
+                  : left <= 4
+                    ? { ring: '#F59E0B', track: '#FEF3C7', text: 'text-amber-700' }
+                    : { ring: '#10B981', track: '#D1FAE5', text: 'text-emerald-700' };
+              const initials = m.name
+                .split(/\s+/)
+                .slice(0, 2)
+                .map((w) => w[0]?.toUpperCase())
+                .join('');
+              const arc = (Math.max(left, 0.3) / 7) * 113.1;
               return (
-                <li
-                  key={m.id}
-                  className="flex items-center gap-2.5 border-t border-slate-100 py-2.5 text-[13px] first:border-t-0"
-                >
-                  <Link href={`/members/${m.id}`} className="min-w-0 flex-1 truncate hover:underline">
-                    {m.name} <span className="font-mono text-[11px] text-slate-400">#{m.memberNo}</span>
+                <li key={m.id} className="flex items-center gap-3 border-t border-slate-100 py-2.5 first:border-t-0">
+                  <span className="relative h-10 w-10 shrink-0" aria-hidden="true">
+                    <svg viewBox="0 0 40 40" className="absolute inset-0 h-10 w-10 -rotate-90">
+                      <circle cx="20" cy="20" r="18" fill="none" stroke={tone.track} strokeWidth="3" />
+                      <circle
+                        cx="20"
+                        cy="20"
+                        r="18"
+                        fill="none"
+                        stroke={tone.ring}
+                        strokeWidth="3"
+                        strokeLinecap="round"
+                        strokeDasharray={`${arc} 113.1`}
+                      />
+                    </svg>
+                    <span
+                      className={`absolute inset-[5px] grid place-items-center rounded-full bg-slate-50 text-[11px] font-bold ${tone.text}`}
+                    >
+                      {initials}
+                    </span>
+                  </span>
+                  <Link href={`/members/${m.id}`} className="group min-w-0 flex-1">
+                    <b className="block truncate text-[13.5px] font-semibold group-hover:underline">{m.name}</b>
+                    <small className="block truncate text-[11.5px] text-slate-400">
+                      {m.plan ? `${m.plan}${m.priceKes ? ` · ${kes(m.priceKes)}` : ''}` : `#${m.memberNo}`}
+                    </small>
                   </Link>
-                  <span
-                    className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${left <= 1 ? 'bg-rose-50 text-rose-700' : left <= 3 ? 'bg-amber-50 text-amber-700' : 'bg-slate-100 text-slate-600'}`}
-                  >
-                    {left <= 0 ? 'today' : `${left} d`}
+                  <span className="text-right leading-none">
+                    <b className={`block text-[17px] font-bold tabular-nums ${tone.text}`}>{left}</b>
+                    <small className="text-[10px] uppercase tracking-[0.06em] text-slate-400">
+                      {left === 0 ? 'today' : left === 1 ? 'day' : 'days'}
+                    </small>
                   </span>
                 </li>
               );
             })}
           </ul>
+          {d.ending7.count > 0 && (
+            <div className="mt-auto flex items-center justify-between gap-3 border-t border-dashed border-[#E7EBF3] pt-3">
+              <span className="text-xs text-ink-500">
+                <b className="font-semibold tabular-nums text-ink-900">{kes(d.ending7.expectedKes)}</b> due this week
+              </span>
+              {can(s, 'messages.manage') && <RemindAll />}
+            </div>
+          )}
         </Card>
         <Card>
-          <div className="flex items-baseline justify-between">
+          <div className="flex items-center justify-between">
             <Label>Not seen 14+ days</Label>
-            {d.atRiskTotal > 5 && <span className="text-xs text-ink-500">{d.atRiskTotal} total</span>}
+            <span className="text-xs text-ink-500">by days away</span>
           </div>
-          <ul className="mt-2">
-            {d.atRisk.length === 0 && <li className="py-2 text-sm text-ink-500">None</li>}
-            {d.atRisk.map((m) => (
-              <li
-                key={m.id}
-                className="flex items-center gap-2.5 border-t border-slate-100 py-2.5 text-[13px] first:border-t-0"
-              >
-                <Link href={`/members/${m.id}`} className="min-w-0 flex-1 truncate hover:underline">
-                  {m.name}
-                </Link>
-                <span className="font-mono text-[11.5px] text-slate-500">{m.daysAway} d</span>
-              </li>
+          <div className="mt-3 grid grid-cols-3 gap-2">
+            {[
+              ['30+ days', d.riskTiers.high, 'bg-rose-50', 'text-rose-700'],
+              ['21–29', d.riskTiers.mid, 'bg-amber-50', 'text-amber-700'],
+              ['14–20', d.riskTiers.watch, 'bg-slate-50', 'text-ink-900'],
+            ].map(([l, n, bg, fg]) => (
+              <div key={l as string} className={`rounded-xl px-2.5 py-2 ${n ? bg : 'bg-slate-50'}`}>
+                <b className={`block text-xl font-bold tabular-nums ${n ? fg : 'text-slate-300'}`}>{n}</b>
+                <span className="text-[11px] text-ink-500">{l}</span>
+              </div>
             ))}
-          </ul>
+          </div>
+          {d.atRisk.length === 0 ? (
+            <p className="mt-3.5 flex items-center gap-2 text-xs font-semibold text-emerald-700">
+              <Check size={15} /> No one at risk right now
+            </p>
+          ) : (
+            <ul className="mt-1.5">
+              {d.atRisk.map((m) => {
+                const level = m.daysAway >= 30 ? 3 : m.daysAway >= 21 ? 2 : 1;
+                const color = level === 3 ? 'bg-rose-600' : level === 2 ? 'bg-amber-500' : 'bg-slate-400';
+                return (
+                  <li key={m.id} className="flex items-center gap-3 border-t border-slate-100 py-2.5 first:border-t-0">
+                    <Link href={`/members/${m.id}`} className="group min-w-0 flex-1">
+                      <b className="block truncate text-[13.5px] font-semibold group-hover:underline">{m.name}</b>
+                      <small className="block text-[11.5px] text-slate-400">{m.daysAway} days away</small>
+                    </Link>
+                    <span className="flex w-14 gap-[3px]" aria-label={`${m.daysAway} days away`}>
+                      {[1, 2, 3].map((i) => (
+                        <i key={i} className={`h-1.5 flex-1 rounded-full ${i <= level ? color : 'bg-slate-200'}`} />
+                      ))}
+                    </span>
+                  </li>
+                );
+              })}
+              {d.atRiskTotal > d.atRisk.length && (
+                <li className="pt-2 text-xs text-ink-500">+{d.atRiskTotal - d.atRisk.length} more</li>
+              )}
+            </ul>
+          )}
         </Card>
         <Card>
-          <Label>Needs attention</Label>
-          <ul className="mt-2">
-            {attention.length === 0 && <li className="py-2 text-sm text-ink-500">All clear</li>}
-            {attention.map((a) => (
-              <li
-                key={a.text}
-                className="flex items-center gap-2.5 border-t border-slate-100 py-2.5 text-[13px] first:border-t-0"
-              >
-                <span className={`h-2 w-2 shrink-0 rounded-full ${a.tone}`} />
-                {a.href ? (
-                  <Link href={a.href} className="min-w-0 flex-1 truncate hover:underline">
-                    {a.text}
-                  </Link>
-                ) : (
-                  <span className="min-w-0 flex-1 truncate">{a.text}</span>
-                )}
-                {a.meta && <span className="font-mono text-[11.5px] text-slate-500">{a.meta}</span>}
-              </li>
-            ))}
-          </ul>
+          <div className="flex items-center justify-between">
+            <Label>Needs attention</Label>
+            {attention.length > 0 && (
+              <span className="rounded-full bg-rose-50 px-2 py-0.5 text-[11px] font-bold tabular-nums text-rose-700">
+                {attention.length}
+              </span>
+            )}
+          </div>
+          {attention.length === 0 ? (
+            <p className="mt-3.5 flex items-center gap-2 text-xs font-semibold text-emerald-700">
+              <Check size={15} /> All clear
+            </p>
+          ) : (
+            <ul className="mt-3 flex flex-col gap-2.5">
+              {attention.map((a) => {
+                const Icon = a.icon;
+                return (
+                  <li
+                    key={a.text}
+                    className="flex items-center gap-3 rounded-[14px] border border-[#E7EBF3] bg-[linear-gradient(180deg,#fff,#FBFCFE)] p-2.5"
+                  >
+                    <span
+                      className={`grid h-[38px] w-[38px] shrink-0 place-items-center rounded-[11px] ${a.tone === 'red' ? 'bg-rose-50 text-rose-700' : 'bg-amber-50 text-amber-700'}`}
+                    >
+                      <Icon size={18} />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <b className="block truncate text-[13.5px] font-semibold">{a.text}</b>
+                      <small className="block truncate text-[11.5px] text-slate-400">{a.sub}</small>
+                    </span>
+                    {a.href && (
+                      <Link
+                        href={a.href}
+                        className={`inline-flex h-[30px] shrink-0 items-center rounded-[9px] px-2.5 text-xs font-semibold ${a.cta === 'Top up' ? 'bg-[#047857] text-white hover:bg-[#065F46]' : 'border border-[#E7EBF3] bg-white text-ink-900 hover:bg-slate-50'}`}
+                      >
+                        {a.cta}
+                      </Link>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
         </Card>
       </div>
     </>
