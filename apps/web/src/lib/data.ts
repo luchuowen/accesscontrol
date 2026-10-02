@@ -697,6 +697,10 @@ export interface MemberListRow {
   lastVisit: Date | null;
   card: boolean;
   sync: 'synced' | 'pending' | 'failed';
+  /** Soonest running end (active/ending) or the last end (lapsed/inactive). */
+  endsAt: Date | null;
+  /** What renewing costs at their last prices: services ending in 7 days or ended in the last 30. */
+  renewKes: number;
 }
 export interface MembersBoard {
   rows: MemberListRow[];
@@ -714,7 +718,8 @@ export interface MembersBoard {
 }
 
 /**
- * Members page (design A, approved 2 Oct 2026): summary counts for the whole club, then the filtered list.
+ * Members page (design C "Money first", approved 2 Oct 2026): summary counts for the whole club, then the filtered
+ * list ordered by who needs action: ending soonest, recently lapsed, active, never paid, past members.
  * Status: active (any service running), ending (a running service ends within 7 days), lapsed (nothing running,
  * last end within 30 days), never (no access ever), inactive (lapsed longer ago). Wristbands are not members.
  */
@@ -743,6 +748,14 @@ export async function membersBoard(
           (select min(ends_at) from entitlements e where e.member_id = m.id and e.ends_at > now() and e.starts_at <= now()) as next_end,
           (select max(at) from access_events a where a.member_no = m.member_no and a.granted) as last_visit,
           exists (select 1 from credentials c where c.member_id = m.id) as card,
+          (select json_build_object(
+             'soon', coalesce(sum(y.price_kes) filter (where y.ends_at between now() and now() + interval '7 days'), 0),
+             'gone', coalesce(sum(y.price_kes) filter (where y.ends_at between now() - interval '30 days' and now()), 0))
+           from (
+             select distinct on (coalesce(l.service_id::text, l.label)) l.price_kes, l.ends_at
+             from payment_lines l join payments p on p.id = l.payment_id
+             where p.member_id = m.id and p.status = 'applied'
+             order by coalesce(l.service_id::text, l.label), l.ends_at desc) y) as renew,
           (select case when bool_or(s.error is not null) then 'failed'
                        when bool_and(s.applied_version is not distinct from s.version) then 'synced' else 'pending' end
              from access_states s where s.member_id = m.id) as sync
@@ -752,7 +765,10 @@ export async function membersBoard(
                        when next_end is not null then 'active'
                        when last_end is null then 'never'
                        when last_end >= now() - interval '30 days' then 'lapsed' else 'inactive' end as status
-        from base)`;
+        from base),
+      st2 as (
+        select *, case status when 'ending' then (renew->>'soon')::int when 'lapsed' then (renew->>'gone')::int else 0 end
+          as renew_kes from st)`;
     const where = tx`
       where (${q} = '' or lower(first_name || ' ' || last_name) like ${like} or member_no::text like ${like}
              or (${qDigits} <> '' and regexp_replace(coalesce(phone, ''), '\\D', '', 'g') like ${`%${qDigits}%`}))
@@ -772,8 +788,14 @@ export async function membersBoard(
           last_visit: Date | null;
           card: boolean;
           sync: string | null;
+          next_end: Date | null;
+          last_end: Date | null;
+          renew_kes: number;
         }[]
-      >`${status} select * from st ${where} order by member_no limit ${per} offset ${(page - 1) * per}`,
+      >`${status} select * from st2 ${where}
+        order by case status when 'ending' then 0 when 'lapsed' then 1 when 'active' then 2 when 'never' then 3 else 4 end,
+          case when status = 'ending' then next_end end, case when status = 'lapsed' then last_end end desc, member_no
+        limit ${per} offset ${(page - 1) * per}`,
       tx<{ n: number }[]>`${status} select count(*)::int as n from st ${where}`,
       tx<{ all: number; joined: number; active: number; ending: number; lapsed: number; never: number }[]>`
         ${status} select count(*)::int as all,
@@ -803,6 +825,8 @@ export async function membersBoard(
         lastVisit: r.last_visit,
         card: r.card,
         sync: (r.sync ?? 'synced') as MemberListRow['sync'],
+        endsAt: r.next_end ?? r.last_end,
+        renewKes: r.renew_kes,
       })),
       total: tot?.n ?? 0,
       counts: {

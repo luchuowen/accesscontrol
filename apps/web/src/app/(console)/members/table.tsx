@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { type MemberPreview, memberPreview } from './preview';
 
-/** Members table + side drawer (design A). Rows come from the server already filtered. */
+/** Members list + side drawer (design C). Rows come from the server already filtered. */
 export type Row = {
   id: string;
   no: number;
@@ -15,6 +15,8 @@ export type Row = {
   lastVisit: string | null;
   card: boolean;
   sync: 'synced' | 'pending' | 'failed';
+  endsAt: string | null;
+  renewKes: number;
 };
 
 const TZ = 'Africa/Nairobi';
@@ -28,17 +30,6 @@ const short = (d: Date) =>
     ...(d.getFullYear() !== new Date().getFullYear() ? { year: 'numeric' } : {}),
     timeZone: TZ,
   });
-function endLabel(iso: string) {
-  const d = new Date(iso);
-  const now = new Date();
-  if (d < now) return { text: `ended ${short(d)}`, tone: 'rose' as const };
-  const today = dayKey(d) === dayKey(now);
-  const soon = d.getTime() - now.getTime() <= 7 * DAY;
-  return {
-    text: today ? `${d.getHours() >= 18 ? 'Tonight' : 'Today'} ${hm(d)}` : short(d),
-    tone: soon ? ('amber' as const) : ('plain' as const),
-  };
-}
 function visit(iso: string | null) {
   if (!iso) return 'Never';
   const d = new Date(iso);
@@ -60,7 +51,6 @@ const initials = (n: string) =>
     .slice(0, 2)
     .map((w) => w[0]?.toUpperCase())
     .join('');
-const AV = ['bg-slate-100 text-ink-700'];
 export const STATUS: Record<Row['status'], { label: string; cls: string; dot: string }> = {
   active: { label: 'Active', cls: 'text-ink-700', dot: 'bg-emerald-500' },
   ending: { label: 'Ending soon', cls: 'text-ink-700', dot: 'bg-amber-500' },
@@ -73,99 +63,119 @@ const SYNC = {
   pending: { label: 'Pending', dot: 'bg-amber-500' },
   failed: { label: 'Failed', dot: 'bg-rose-500' },
 };
-const chip = {
-  rose: 'border-rose-200 bg-rose-50 text-rose-700',
-  amber: 'border-amber-200 bg-amber-50 text-amber-800',
-  plain: 'border-[#E5E8EE] bg-white text-ink-700',
-};
 
-export function MembersTable({ rows, canPay }: { rows: Row[]; canPay: boolean }) {
+const kes = (n: number) => `KES ${n.toLocaleString('en-KE')}`;
+/** Time left in words, from the row's soonest running end (or last end when nothing runs). */
+function timeLeft(r: Row): { text: string; cls: string } {
+  if (r.status === 'never') return { text: 'Not started', cls: 'text-ink-500' };
+  if (!r.endsAt) return { text: '—', cls: 'text-ink-500' };
+  const d = new Date(r.endsAt);
+  const ms = d.getTime() - Date.now();
+  if (ms <= 0) {
+    const days = Math.max(1, Math.floor(-ms / DAY));
+    return r.status === 'lapsed'
+      ? { text: days === 1 ? 'Ended yesterday' : `Ended ${days} days ago`, cls: 'font-semibold text-rose-700' }
+      : { text: `Ended ${short(d)}`, cls: 'text-ink-500' };
+  }
+  const tone = r.status === 'ending' ? 'font-semibold text-amber-700' : 'text-ink-500';
+  if (dayKey(d) === dayKey(new Date()))
+    return { text: d.getHours() >= 18 ? 'Ends tonight' : `Ends ${hm(d)}`, cls: tone };
+  const days = Math.ceil(ms / DAY);
+  return { text: days === 1 ? '1 day left' : `${days} days left`, cls: tone };
+}
+
+const GROUPS: { key: string; title: string; hint: string; has: Row['status'][]; dot?: string }[] = [
+  {
+    key: 'act',
+    title: 'Needs action',
+    hint: 'Ending this week or recently lapsed',
+    has: ['ending', 'lapsed'],
+    dot: 'bg-amber-500',
+  },
+  { key: 'on', title: 'Active', hint: 'Paid up', has: ['active'] },
+  { key: 'never', title: 'Never paid', hint: 'Added, no payment yet', has: ['never'] },
+  { key: 'past', title: 'Past members', hint: 'Ended more than 30 days ago', has: ['inactive'] },
+];
+
+/** Members list grouped by who needs action first (design C), with the side drawer. Rows arrive filtered and ordered. */
+export function MemberGroups({ rows, canPay, q }: { rows: Row[]; canPay: boolean; q: string }) {
   const [open, setOpen] = useState<string | null>(null);
+  const mark = (t: string) => {
+    const n = q.trim();
+    const i = n ? t.toLowerCase().indexOf(n.toLowerCase()) : -1;
+    if (i < 0) return t;
+    return (
+      <>
+        {t.slice(0, i)}
+        <mark className="rounded-[3px] bg-amber-100 px-px text-inherit">{t.slice(i, i + n.length)}</mark>
+        {t.slice(i + n.length)}
+      </>
+    );
+  };
   return (
     <>
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[860px] text-sm">
-          <thead className="text-left">
-            <tr className="border-b border-[#EEF1F6]">
-              {['Member', 'Phone', 'Services', 'Status', 'Last visit', 'Door'].map((h) => (
-                <th key={h} className="px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-500">
-                  {h}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-[#EEF1F6]">
-            {rows.map((r, i) => {
-              const st = STATUS[r.status];
-              return (
-                <tr
-                  key={r.id}
-                  onClick={() => setOpen(r.id)}
-                  className={`cursor-pointer transition hover:bg-slate-50 ${open === r.id ? 'bg-slate-50 shadow-[inset_3px_0_0_#0c1220]' : ''}`}
-                >
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-3">
-                      <span
-                        className={`grid h-9 w-9 shrink-0 place-items-center rounded-full text-[12px] font-bold ${AV[i % AV.length]}`}
-                      >
-                        {initials(r.name)}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setOpen(r.id);
-                        }}
-                        className="min-w-0 text-left"
-                      >
-                        <b className="block truncate font-semibold text-ink-900">{r.name}</b>
-                        <span className="font-mono text-[11.5px] text-slate-400">#{r.no}</span>
-                      </button>
-                    </div>
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3 tabular-nums text-ink-500">{phoneLabel(r.phone)}</td>
-                  <td className="px-4 py-3">
-                    {r.services.length === 0 ? (
-                      <span className="text-ink-500">None yet</span>
-                    ) : (
-                      <div className="flex flex-col gap-0.5">
-                        {(r.services.some((x) => new Date(x.ends).getTime() > Date.now())
-                          ? r.services.filter((x) => new Date(x.ends).getTime() > Date.now())
-                          : r.services.slice(0, 1)
-                        )
-                          .slice(0, 3)
-                          .map((x) => {
-                            const e = endLabel(x.ends);
-                            return (
-                              <span key={x.name} className="whitespace-nowrap text-[13px] text-ink-900">
-                                {x.name} <span className={`text-[12px] ${chip[e.tone]}`}>· {e.text}</span>
-                              </span>
-                            );
-                          })}
-                      </div>
-                    )}
-                  </td>
-                  <td className="px-4 py-3">
-                    <span
-                      className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2 py-0.5 text-[11.5px] font-semibold ${st.cls}`}
+      {GROUPS.map((g) => {
+        const list = rows.filter((r) => g.has.includes(r.status));
+        if (!list.length) return null;
+        const due = g.key === 'act' ? list.reduce((a, r) => a + r.renewKes, 0) : 0;
+        return (
+          <section key={g.key} className="mb-4 overflow-hidden rounded-2xl border border-[#E7EBF3] bg-white">
+            <header className="flex items-center gap-2.5 border-b border-[#EEF1F6] px-4 py-3">
+              {g.dot && <i className={`h-2 w-2 rounded-full ${g.dot}`} />}
+              <h2 className="text-[14px] font-semibold">{g.title}</h2>
+              <span className="text-[12px] tabular-nums text-ink-500">{list.length}</span>
+              <span className="ml-auto hidden text-[12px] text-ink-500 sm:block">
+                {due ? `${kes(due)} to renew` : g.hint}
+              </span>
+            </header>
+            <ul className="divide-y divide-[#EEF1F6]">
+              {list.map((r) => {
+                const t = timeLeft(r);
+                const running = r.services.filter((x) => new Date(x.ends).getTime() > Date.now());
+                const shown = (running.length ? running : r.services.slice(0, 1)).map((x) => x.name);
+                return (
+                  <li key={r.id}>
+                    <button
+                      type="button"
+                      onClick={() => setOpen(r.id)}
+                      className={`grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-4 px-4 py-3 text-left transition hover:bg-slate-50 md:grid-cols-[minmax(0,1.5fr)_minmax(0,1.2fr)_minmax(0,0.9fr)_150px] ${open === r.id ? 'bg-slate-50 shadow-[inset_3px_0_0_#0c1220]' : ''}`}
                     >
-                      <i className={`h-1.5 w-1.5 rounded-full ${st.dot}`} />
-                      {st.label}
-                    </span>
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3 text-ink-700">{visit(r.lastVisit)}</td>
-                  <td className="whitespace-nowrap px-4 py-3 text-[12.5px] text-ink-500">
-                    <span className="inline-flex items-center gap-1.5">
-                      <i className={`h-2 w-2 rounded-full ${SYNC[r.sync].dot}`} />
-                      {SYNC[r.sync].label}
-                    </span>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+                      <span className="flex min-w-0 items-center gap-3">
+                        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-slate-100 text-[12px] font-semibold text-ink-700">
+                          {initials(r.name)}
+                        </span>
+                        <span className="min-w-0">
+                          <b className="block truncate text-[13.5px] font-semibold text-ink-900">
+                            {mark(r.name)}
+                            {r.sync === 'failed' && (
+                              <span className="ml-2 align-middle text-[11px] font-semibold text-rose-700">
+                                Door update failed
+                              </span>
+                            )}
+                          </b>
+                          <span className="block truncate text-[12px] tabular-nums text-ink-500">
+                            #{mark(String(r.no))} · {mark(phoneLabel(r.phone))}
+                          </span>
+                        </span>
+                      </span>
+                      <span className="hidden truncate text-[13px] text-ink-900 md:block">
+                        {shown.length ? shown.join(' + ') : <span className="text-ink-500">No service yet</span>}
+                      </span>
+                      <span className="hidden text-[12.5px] text-ink-500 md:block">{visit(r.lastVisit)}</span>
+                      <span className="text-right">
+                        <span className={`block whitespace-nowrap text-[12.5px] ${t.cls}`}>{t.text}</span>
+                        {g.key === 'act' && r.renewKes > 0 && (
+                          <span className="block text-[12px] tabular-nums text-ink-500">{kes(r.renewKes)}</span>
+                        )}
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+        );
+      })}
       {open && <Drawer id={open} canPay={canPay} onClose={() => setOpen(null)} />}
     </>
   );
@@ -225,7 +235,7 @@ function Drawer({ id, canPay, onClose }: { id: string; canPay: boolean; onClose:
         ) : (
           <div className="flex flex-col gap-4">
             <div className="flex items-center gap-3 pr-10">
-              <span className="grid h-12 w-12 shrink-0 place-items-center rounded-full bg-orange-50 text-[15px] font-bold text-orange-700">
+              <span className="grid h-12 w-12 shrink-0 place-items-center rounded-full bg-slate-100 text-[15px] font-semibold text-ink-700">
                 {initials(m.name)}
               </span>
               <div className="min-w-0">

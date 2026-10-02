@@ -1,6 +1,6 @@
 import { withTenant } from '@lango/db';
 import { can } from '@lango/server';
-import { Search, Upload } from 'lucide-react';
+import { Upload } from 'lucide-react';
 import Link from 'next/link';
 import { AddMember } from '@/components/add-member';
 import { Notice } from '@/components/notice';
@@ -9,13 +9,15 @@ import { WalkIn } from '@/components/walk-in';
 import { membersBoard, nextMemberNo, walkinPrices } from '@/lib/data';
 import { requirePerm } from '@/lib/session';
 import { db } from '@/server/db';
-import { AutoSelect } from './auto-select';
+import { RemindAll } from '../_dash/remind-all';
 import { DayPasses } from './day-passes';
-import { MembersTable } from './table';
+import { MemberFilters } from './filters';
+import { MemberGroups } from './table';
 
 /**
- * Members (design A "Clean table + drawer", approved 2 Oct 2026): summary cards that double as filters, search and
- * filters, the list, and a side drawer with the member's services and quick actions. Day passes have their own tab.
+ * Members (design C "Money first", approved 2 Oct 2026): a band leading with the money due this week and one button
+ * to remind everyone, status tiles that filter, search that filters as you type, then the list grouped by who needs
+ * action first. A row opens the side drawer. Day passes have their own tab.
  */
 type Params = { q?: string; n?: string; tab?: string; f?: string; service?: string; page?: string };
 
@@ -48,18 +50,13 @@ export default async function Members({ searchParams }: { searchParams: Promise<
   };
   const tabClass = (on: boolean) =>
     `inline-flex items-center gap-2 border-b-2 px-1 pb-2.5 text-sm font-semibold ${on ? 'border-ink-900 text-ink-900' : 'border-transparent text-ink-500 hover:text-ink-900'}`;
-  const cards = [
-    { key: '', label: 'All members', n: c.all, sub: `+${c.joined} this month` },
-    {
-      key: 'active',
-      label: 'Active now',
-      n: c.active,
-      sub: c.all ? `${Math.round((c.active / c.all) * 100)}% of members` : '—',
-    },
-    { key: 'ending', label: 'Ending in 7 days', n: c.ending, sub: `KES ${c.dueKes.toLocaleString('en-KE')} due` },
-    { key: 'lapsed', label: 'Lapsed', n: c.lapsed, sub: 'Ended in the last 30 days' },
-    { key: 'never', label: 'Never paid', n: c.never, sub: 'Added, no payment yet' },
+  const tiles = [
+    { key: 'active', label: 'Active now', n: c.active, dot: 'bg-emerald-400' },
+    { key: 'ending', label: 'Ending in 7 days', n: c.ending, dot: 'bg-amber-400' },
+    { key: 'lapsed', label: 'Lapsed', n: c.lapsed, dot: 'bg-rose-400' },
+    { key: 'never', label: 'Never paid', n: c.never, dot: 'bg-slate-300' },
   ];
+  const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
   const pages = Math.max(1, Math.ceil(board.total / 50));
 
   return (
@@ -97,50 +94,65 @@ export default async function Members({ searchParams }: { searchParams: Promise<
         <DayPasses canAdd={can(s, 'members.edit')} />
       ) : (
         <>
-          <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
-            {cards.map((k) => {
-              const on = f === k.key;
-              return (
-                <Link
-                  key={k.key || 'all'}
-                  href={href({ f: k.key || undefined, page: undefined })}
-                  aria-current={on ? 'true' : undefined}
-                  className={`rounded-2xl border bg-white p-4 transition hover:border-slate-300 ${on ? 'border-ink-900 shadow-[0_0_0_1px_#0c1220]' : 'border-[#E7EBF3]'}`}
-                >
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-500">{k.label}</div>
-                  <div className="mt-2 text-[26px] font-semibold tabular-nums tracking-tight">{k.n}</div>
-                  <div className="mt-0.5 truncate text-[12.5px] text-ink-500">{k.sub}</div>
-                </Link>
-              );
-            })}
+          <section className="relative mb-5 grid gap-6 overflow-hidden rounded-[18px] bg-[linear-gradient(120deg,#0B1629_0%,#11284A_62%,#0E3A33_100%)] p-6 text-white lg:grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)]">
+            <div
+              aria-hidden
+              className="pointer-events-none absolute -right-20 -top-28 h-80 w-80 rounded-full bg-[radial-gradient(circle,rgba(16,185,129,0.28),transparent_65%)]"
+            />
+            <div className="relative">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.09em] text-[#8FB7AA]">
+                Due in the next 7 days
+              </div>
+              <div className="mt-1.5 text-[34px] font-semibold tabular-nums tracking-[-0.03em]">
+                KES {c.dueKes.toLocaleString('en-KE')}
+              </div>
+              <p className="mt-0.5 text-[13px] text-[#B9C6D8]">
+                {c.ending ? `${plural(c.ending, 'member ends', 'members end')} this week.` : 'Nobody ends this week.'}{' '}
+                {c.lapsed ? `${plural(c.lapsed, 'member', 'members')} lapsed in the last 30 days.` : ''}
+              </p>
+              {c.ending > 0 && can(s, 'messages.manage') && (
+                <div className="mt-4">
+                  <RemindAll light label="Remind them by SMS" />
+                </div>
+              )}
+            </div>
+            <div className="relative grid grid-cols-2 gap-2.5 self-center sm:grid-cols-4">
+              {tiles.map((k) => {
+                const on = f === k.key;
+                return (
+                  <Link
+                    key={k.key}
+                    href={href({ f: on ? undefined : k.key, page: undefined })}
+                    aria-current={on ? 'true' : undefined}
+                    className={`rounded-2xl border px-3.5 py-3 transition ${on ? 'border-white bg-white text-[#0B1629]' : 'border-white/10 bg-white/[0.06] hover:bg-white/10'}`}
+                  >
+                    <span
+                      className={`flex items-center gap-1.5 whitespace-nowrap text-[11.5px] font-medium ${on ? 'text-ink-500' : 'text-[#B9C6D8]'}`}
+                    >
+                      <i className={`h-1.5 w-1.5 rounded-full ${k.dot}`} />
+                      {k.label}
+                    </span>
+                    <span className="mt-1 block text-[26px] font-semibold tabular-nums tracking-[-0.02em]">{k.n}</span>
+                  </Link>
+                );
+              })}
+            </div>
+          </section>
+
+          <div className="mb-4 flex flex-wrap items-center gap-2.5">
+            <div className="min-w-0 flex-1">
+              <MemberFilters services={board.services} total={board.total} />
+            </div>
+            {(f || sp.service) && (
+              <Link href="/members" className="px-2 text-[13px] font-medium text-ink-500 hover:text-ink-900">
+                Show all {c.all}
+              </Link>
+            )}
           </div>
 
-          <section className="rounded-2xl border border-[#E7EBF3] bg-white">
-            <form action="/members" className="flex flex-wrap items-center gap-2 border-b border-[#EEF1F6] p-3">
-              {f && <input type="hidden" name="f" value={f} />}
-              <div className="relative min-w-[220px] flex-1">
-                <Search size={16} className="absolute left-3 top-3 text-ink-300" />
-                <input
-                  name="q"
-                  defaultValue={sp.q}
-                  placeholder="Search name, number or phone"
-                  className="h-10 w-full rounded-[10px] border border-[#E5E8EE] bg-white pl-9 pr-3 text-sm outline-none focus:border-ink-300"
-                />
-              </div>
-              <AutoSelect
-                name="service"
-                value={sp.service ?? ''}
-                label="Service"
-                options={[['', 'All services'], ...board.services.map((n) => [n, n] as [string, string])]}
-              />
-              {(f || sp.q || sp.service) && (
-                <Link href="/members" className="px-2 text-[13px] text-ink-500 hover:text-ink-900">
-                  Clear
-                </Link>
-              )}
-            </form>
+          <div>
             {board.rows.length === 0 ? (
-              <div className="px-5 py-10 text-center text-sm text-ink-500">
+              <div className="rounded-2xl border border-[#E7EBF3] bg-white px-5 py-12 text-center text-sm text-ink-500">
                 {c.all === 0 ? (
                   <>
                     No members yet.{' '}
@@ -150,16 +162,21 @@ export default async function Members({ searchParams }: { searchParams: Promise<
                     or add the first one.
                   </>
                 ) : (
-                  'No members match. Try another search or filter.'
+                  'No members match. Try another name, number or phone.'
                 )}
               </div>
             ) : (
-              <MembersTable
+              <MemberGroups
+                q={sp.q ?? ''}
                 canPay={can(s, 'payments.record')}
-                rows={board.rows.map((r) => ({ ...r, lastVisit: r.lastVisit ? r.lastVisit.toISOString() : null }))}
+                rows={board.rows.map((r) => ({
+                  ...r,
+                  lastVisit: r.lastVisit ? r.lastVisit.toISOString() : null,
+                  endsAt: r.endsAt ? r.endsAt.toISOString() : null,
+                }))}
               />
             )}
-            <div className="flex items-center justify-between border-t border-[#EEF1F6] px-4 py-3 text-[13px] text-ink-500">
+            <div className="flex items-center justify-between px-1 py-2 text-[13px] text-ink-500">
               <span>
                 Showing {board.rows.length} of {board.total}
               </span>
@@ -187,7 +204,7 @@ export default async function Members({ searchParams }: { searchParams: Promise<
                 </span>
               )}
             </div>
-          </section>
+          </div>
         </>
       )}
     </>
