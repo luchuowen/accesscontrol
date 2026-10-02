@@ -34,8 +34,8 @@ import { useFormStatus } from 'react-dom';
 import { MoneyInput } from '@/components/money-input';
 import type { ServiceRow } from '@/lib/data';
 import { kes } from '@/lib/format';
-import { addServices, savePrice, saveService, setOnSale } from './actions';
-import { CATALOG, CATALOG_ITEMS, CATEGORIES, SOLD_TO } from './catalog';
+import { createService, deleteService, savePrice, saveService, setOnSale } from './actions';
+import { CATALOG, CATEGORIES, SOLD_TO } from './catalog';
 
 type Area = { key: string; name: string; readers: number };
 const ICON: Record<string, LucideIcon> = {
@@ -134,7 +134,7 @@ export function ServicesBoard({ services, areas, edit }: { services: ServiceRow[
         </div>
         {services.length === 0 ? (
           <p className="px-5 py-12 text-center text-sm text-ink-500">
-            No services yet. Use “Add services” and pick what your club offers.
+            No services yet. Use “Add service” to add what your club sells.
           </p>
         ) : (
           <div className="overflow-x-auto">
@@ -399,6 +399,7 @@ function Panel({ s, areas, onClose }: { s: ServiceRow; areas: Area[]; onClose: (
         <p className="-mt-3 text-[11.5px] text-ink-500">
           {live.length ? 'Stopping a sale never locks out anyone already paid.' : 'Add a price to put it on sale.'}
         </p>
+        <DeleteService s={s} onDone={onClose} />
       </aside>
     </>
   );
@@ -461,156 +462,231 @@ function PriceRow({ serviceId, p }: { serviceId: string; p?: ServiceRow['prices'
   );
 }
 
-/** "Add services": the ready list of common services, grouped, plus "Something else" for the club's own. */
+function DeleteService({ s, onDone }: { s: ServiceRow; onDone: () => void }) {
+  const [ask, setAsk] = useState(false);
+  const [pending, start] = useTransition();
+  if (!ask)
+    return (
+      <button
+        type="button"
+        onClick={() => setAsk(true)}
+        className="inline-flex h-10 items-center justify-center gap-2 rounded-[10px] text-[13px] font-semibold text-rose-700 hover:bg-rose-50"
+      >
+        <Trash2 size={15} /> Delete service
+      </button>
+    );
+  return (
+    <div className="rounded-xl bg-rose-50 p-3.5 ring-1 ring-rose-200">
+      <p className="text-[13px] font-semibold text-rose-900">Delete {s.name}?</p>
+      <p className="mt-0.5 text-[12px] text-rose-800">
+        It comes off sale and off this list.
+        {s.using ? ` The ${s.using} using it now keep access until their date.` : ''}
+      </p>
+      <div className="mt-3 flex gap-2">
+        <button
+          type="button"
+          disabled={pending}
+          onClick={() =>
+            start(async () => {
+              await deleteService(s.id);
+              onDone();
+            })
+          }
+          className="inline-flex h-9 items-center gap-1.5 rounded-[9px] bg-rose-600 px-3.5 text-[12.5px] font-semibold text-white hover:bg-rose-700 disabled:opacity-60"
+        >
+          {pending && <Loader2 size={13} className="animate-spin" />} Delete
+        </button>
+        <button
+          type="button"
+          onClick={() => setAsk(false)}
+          className="h-9 rounded-[9px] border border-rose-200 bg-white px-3.5 text-[12.5px] font-semibold text-ink-900"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
+const NEW = '__new__';
+type Line = { price: string; count: string; unit: string };
+const blank = (): Line => ({ price: '', count: '1', unit: 'month' });
+const commas = (d: string) => (d ? Number(d).toLocaleString('en-KE') : '');
+
+/**
+ * Add service, in one step: choose the service from a list (or "Add a new service" and type its name), enter its
+ * prices (amount first, then for how long) and press Add service. Done.
+ */
 export function AddServices({ have }: { have: string[] }) {
   const ref = useRef<HTMLDialogElement>(null);
-  const [cat, setCat] = useState('All');
-  const [sel, setSel] = useState<string[]>([]);
-  const [own, setOwn] = useState({ name: '', category: 'Other' });
+  const [pick, setPick] = useState('');
+  const [own, setOwn] = useState('');
+  const [lines, setLines] = useState<Line[]>([blank()]);
   const [err, setErr] = useState('');
   const [pending, start] = useTransition();
   const lower = have.map((h) => h.toLowerCase());
-  const added = (n: string) => lower.includes(n.toLowerCase());
   const open = () => {
-    setSel([]);
-    setOwn({ name: '', category: 'Other' });
+    setPick('');
+    setOwn('');
+    setLines([blank()]);
     setErr('');
-    setCat('All');
     ref.current?.showModal();
   };
   const close = () => ref.current?.close();
-  const list = CATALOG_ITEMS.filter((i) => cat === 'All' || i.cat === cat);
-  const count = sel.length + (own.name.trim() ? 1 : 0);
-  const submit = () =>
+  const set = (i: number, patch: Partial<Line>) => setLines(lines.map((l, j) => (j === i ? { ...l, ...patch } : l)));
+  const name = pick === NEW ? own.trim() : pick;
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setErr('');
     start(async () => {
-      const picks = [
-        ...sel.map((name) => ({ name })),
-        ...(own.name.trim() ? [{ name: own.name.trim(), category: own.category }] : []),
-      ];
-      const r = await addServices(picks);
+      const r = await createService({ name, prices: lines });
       if (r.error) setErr(r.error);
       else close();
     });
+  };
   return (
     <>
       <button type="button" onClick={open} className="btn-primary">
-        <Plus size={16} /> Add services
+        <Plus size={16} /> Add service
       </button>
       <dialog
         ref={ref}
-        aria-labelledby="add-services-title"
+        aria-labelledby="add-service-title"
         onClick={(e) => e.target === ref.current && close()}
-        className="m-auto w-full max-w-[880px] overflow-hidden rounded-[20px] bg-white p-0 text-ink-900 shadow-[0_30px_80px_-20px_rgba(11,22,41,0.55)] backdrop:bg-[#0B1629]/45 backdrop:backdrop-blur-[3px] open:animate-[pop_.28s_cubic-bezier(.2,.9,.3,1.2)] max-sm:mb-0 max-sm:max-w-none max-sm:rounded-b-none motion-reduce:open:animate-none"
+        className="m-auto w-full max-w-[520px] overflow-visible rounded-[20px] bg-white p-0 text-ink-900 shadow-[0_30px_80px_-20px_rgba(11,22,41,0.55)] backdrop:bg-[#0B1629]/45 backdrop:backdrop-blur-[3px] open:animate-[pop_.28s_cubic-bezier(.2,.9,.3,1.2)] max-sm:mb-0 max-sm:max-w-none max-sm:rounded-b-none motion-reduce:open:animate-none"
       >
-        <div className="flex max-h-[88vh] flex-col">
-          <button
-            type="button"
-            onClick={close}
-            aria-label="Close"
-            className="absolute right-3 top-3 z-10 grid h-9 w-9 place-items-center rounded-[10px] text-ink-500 hover:bg-slate-100"
-          >
-            <X size={18} />
-          </button>
-          <div className="px-6 pt-6">
-            <h2 id="add-services-title" className="text-[19px] font-semibold tracking-tight">
-              Add services
+        <form onSubmit={submit} className="flex flex-col gap-5 p-6">
+          <div className="flex items-start justify-between gap-3">
+            <h2 id="add-service-title" className="text-[19px] font-semibold tracking-tight">
+              Add service
             </h2>
-            <p className="mt-1 text-[13px] text-ink-500">
-              Pick everything your business offers. You set the doors and prices for each one next.
-            </p>
-            <div className="mt-4 flex flex-wrap gap-1.5">
-              {['All', ...CATALOG.map(([c]) => c)].map((c) => (
-                <button
-                  key={c}
-                  type="button"
-                  onClick={() => setCat(c)}
-                  className={`h-8 rounded-full border px-3 text-[12px] font-semibold transition ${cat === c ? 'border-[#0B1629] bg-[#0B1629] text-white' : 'border-[#E5E8EE] bg-white text-ink-700 hover:border-slate-300'}`}
-                >
-                  {c}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className="grid min-h-0 flex-1 grid-cols-1 gap-2.5 overflow-y-auto px-6 py-4 sm:grid-cols-2 lg:grid-cols-3">
-            {list.map((i) => {
-              const on = sel.includes(i.name);
-              const has = added(i.name);
-              return (
-                <button
-                  key={i.name}
-                  type="button"
-                  disabled={has}
-                  onClick={() => setSel(on ? sel.filter((n) => n !== i.name) : [...sel, i.name])}
-                  aria-pressed={on}
-                  className={`relative flex items-start gap-3 rounded-2xl border-[1.5px] p-3 text-left transition disabled:opacity-50 ${on ? 'border-[#047857] bg-emerald-50/40' : 'border-[#E5E8EE] hover:border-slate-300'}`}
-                >
-                  <span className={`${tile} h-9 w-9`}>
-                    <Ico name={i.icon} />
-                  </span>
-                  <span className="min-w-0 pr-5">
-                    <b className="block text-[13px] font-semibold">{i.name}</b>
-                    <span className="block text-[11.5px] text-ink-500">{has ? 'Already added' : i.sub}</span>
-                    {!has && <span className="mt-0.5 block text-[11.5px] text-ink-700">{i.lengths}</span>}
-                  </span>
-                  <span
-                    className={`absolute right-3 top-3 grid h-[18px] w-[18px] place-items-center rounded-full border-[1.5px] ${on ? 'border-[#047857] bg-[#047857] text-white' : 'border-slate-300'}`}
-                  >
-                    {on && <Check size={11} strokeWidth={3} />}
-                  </span>
-                </button>
-              );
-            })}
-            <div className="flex flex-col gap-2 rounded-2xl border-[1.5px] border-dashed border-[#CBD5E1] p-3">
-              <span className="flex items-center gap-2 text-[13px] font-semibold">
-                <Plus size={15} /> Something else
-              </span>
-              <input
-                value={own.name}
-                maxLength={60}
-                onChange={(e) => setOwn({ ...own, name: e.target.value })}
-                placeholder="Name, e.g. Boxing ring"
-                className={field}
-              />
-              <select
-                value={own.category}
-                onChange={(e) => setOwn({ ...own, category: e.target.value })}
-                aria-label="Group"
-                className={field}
-              >
-                {CATEGORIES.map((c) => (
-                  <option key={c}>{c}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-          <div className="flex flex-wrap items-center gap-3 border-t border-[#EEF1F6] px-6 py-4">
-            <span className="text-[12.5px] text-ink-500">
-              {err ? (
-                <span className="text-rose-700">{err}</span>
-              ) : count ? (
-                `${count} selected`
-              ) : (
-                'Nothing selected yet'
-              )}
-            </span>
             <button
               type="button"
               onClick={close}
-              className="ml-auto h-10 rounded-xl border border-[#E5E8EE] px-4 text-[13px] font-semibold hover:bg-slate-50"
+              aria-label="Close"
+              className="-mr-2 -mt-1 grid h-9 w-9 place-items-center rounded-[10px] text-ink-500 hover:bg-slate-100"
+            >
+              <X size={18} />
+            </button>
+          </div>
+
+          <label className="flex flex-col gap-1.5">
+            <span className={label}>Service</span>
+            <select value={pick} onChange={(e) => setPick(e.target.value)} required className={`${field} h-11`}>
+              <option value="" disabled>
+                Select a service
+              </option>
+              {CATALOG.map(([cat, items]) => (
+                <optgroup key={cat} label={cat}>
+                  {items
+                    .filter((i) => !lower.includes(i.name.toLowerCase()))
+                    .map((i) => (
+                      <option key={i.name} value={i.name}>
+                        {i.name}
+                      </option>
+                    ))}
+                </optgroup>
+              ))}
+              <option value={NEW}>+ Add a new service…</option>
+            </select>
+            {pick === NEW && (
+              <input
+                value={own}
+                onChange={(e) => setOwn(e.target.value)}
+                maxLength={60}
+                required
+                autoFocus
+                placeholder="Service name, e.g. Boxing ring"
+                className={`${field} h-11`}
+              />
+            )}
+          </label>
+
+          <fieldset className="flex flex-col gap-2">
+            <legend className={`${label} mb-1.5`}>Prices</legend>
+            {lines.map((l, i) => (
+              <div
+                key={`l${i}`}
+                className="grid grid-cols-[minmax(0,1.4fr)_auto_52px_minmax(0,1fr)_32px] items-center gap-2"
+              >
+                <span className="flex h-11 items-center overflow-hidden rounded-[10px] border border-[#E5E8EE] focus-within:border-[#047857] focus-within:ring-4 focus-within:ring-emerald-500/10">
+                  <span className="flex h-full items-center border-r border-[#EEF1F6] bg-slate-50 px-2.5 text-[12px] font-semibold text-ink-500">
+                    KES
+                  </span>
+                  <input
+                    aria-label="Amount in KES"
+                    inputMode="numeric"
+                    required
+                    value={commas(l.price)}
+                    onChange={(e) =>
+                      set(i, { price: e.target.value.replace(/\D/g, '').replace(/^0+/, '').slice(0, 8) })
+                    }
+                    placeholder="Amount"
+                    className="h-full min-w-0 flex-1 px-2.5 text-[14px] tabular-nums outline-none placeholder:text-slate-400"
+                  />
+                </span>
+                <span className="text-[12.5px] text-ink-500">for</span>
+                <input
+                  aria-label="How many"
+                  inputMode="numeric"
+                  value={l.count}
+                  onChange={(e) => set(i, { count: e.target.value.replace(/\D/g, '').slice(0, 3) })}
+                  className={`${field} h-11 px-1 text-center tabular-nums`}
+                />
+                <select
+                  aria-label="Hours, days, weeks, months or years"
+                  value={l.unit}
+                  onChange={(e) => set(i, { unit: e.target.value })}
+                  className={`${field} h-11 px-2`}
+                >
+                  {UNITS.map((u) => (
+                    <option key={u} value={u}>
+                      {l.count === '1' ? u : `${u}s`}
+                    </option>
+                  ))}
+                </select>
+                {lines.length > 1 ? (
+                  <button
+                    type="button"
+                    aria-label="Remove this price"
+                    onClick={() => setLines(lines.filter((_, j) => j !== i))}
+                    className="grid h-9 w-8 place-items-center rounded-lg text-slate-400 hover:bg-rose-50 hover:text-rose-600"
+                  >
+                    <Trash2 size={15} />
+                  </button>
+                ) : (
+                  <span />
+                )}
+              </div>
+            ))}
+            <button
+              type="button"
+              onClick={() => setLines([...lines, { ...blank(), unit: 'day' }])}
+              className="inline-flex w-fit items-center gap-1.5 text-[13px] font-semibold text-[#047857] hover:underline"
+            >
+              <Plus size={14} /> Add another price
+            </button>
+          </fieldset>
+
+          {err && <p className="rounded-[10px] bg-rose-50 px-3 py-2 text-[12.5px] text-rose-800">{err}</p>}
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={close}
+              className="h-11 rounded-xl border border-[#E5E8EE] px-4 text-sm font-semibold hover:bg-slate-50"
             >
               Cancel
             </button>
             <button
-              type="button"
-              disabled={!count || pending}
-              onClick={submit}
-              className="inline-flex h-10 items-center gap-2 rounded-xl bg-[#047857] px-4 text-[13px] font-semibold text-white hover:bg-[#065F46] disabled:opacity-50"
+              type="submit"
+              disabled={pending || !name}
+              className="inline-flex h-11 items-center gap-2 rounded-xl bg-[#047857] px-5 text-sm font-semibold text-white hover:bg-[#065F46] disabled:opacity-50"
             >
-              {pending && <Loader2 size={14} className="animate-spin" />}
-              Add {count || ''} {count === 1 ? 'service' : 'services'}
+              {pending && <Loader2 size={15} className="animate-spin" />}
+              Add service
             </button>
           </div>
-        </div>
+        </form>
       </dialog>
     </>
   );

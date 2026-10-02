@@ -41,7 +41,6 @@ function readPrice(count: unknown, unit: unknown, price: unknown): PriceInput | 
 const priceName = (service: string, d: PriceInput) => `${service} · ${durationLabel({ unit: d.unit, count: d.count })}`;
 
 type Result = { error?: string; ok?: string };
-const ICONS = new Set([...CATALOG_ITEMS.map((i) => i.icon), 'layers']);
 
 async function editor() {
   const s = await requireSession();
@@ -62,39 +61,84 @@ async function areaFor(tx: Tx, tid: string, name: string) {
 }
 
 /**
- * Add services from the ready list (or one of the club's own). Each opens an area with its name (an existing one when
- * it matches, e.g. "Gym"); doors are linked to that area under Doors & access. Prices are added next.
+ * Add a service in one step: pick it from the ready list (or type a new name) and give its prices. It opens an area
+ * with its name (an existing one when it matches, e.g. "Gym"); doors are linked to that area under Doors & access.
  */
-export async function addServices(picks: { name: string; category?: string; icon?: string }[]): Promise<Result> {
+export async function createService(input: {
+  name: string;
+  category?: string;
+  prices: { price: unknown; count: unknown; unit: unknown }[];
+}): Promise<Result> {
   const s = await editor();
   if (!s) return { error: 'Your role can’t change services.' };
-  const list = (Array.isArray(picks) ? picks : []).slice(0, 40).map((p) => {
-    const name = clean(String(p?.name ?? ''), 60);
-    const known = CATALOG_ITEMS.find((i) => i.name === name);
-    const category = known?.cat ?? (CATEGORIES.includes(String(p?.category)) ? String(p?.category) : 'Other');
-    const icon = known?.icon ?? (ICONS.has(String(p?.icon)) ? String(p?.icon) : 'layers');
-    return { name, category, icon };
+  const name = clean(String(input?.name ?? ''), 60);
+  if (!name) return { error: 'Choose a service or type a name.' };
+  const known = CATALOG_ITEMS.find((i) => i.name.toLowerCase() === name.toLowerCase());
+  const category = known?.cat ?? (CATEGORIES.includes(String(input?.category)) ? String(input?.category) : 'Other');
+  const icon = known?.icon ?? 'layers';
+  const raw = Array.isArray(input?.prices) ? input.prices.slice(0, 12) : [];
+  const prices = raw.map((r) => readPrice(r?.count, r?.unit, r?.price));
+  if (!prices.length) return { error: 'Add at least one price.' };
+  if (prices.some((p) => !p)) return { error: 'Each price needs an amount in KES and a length.' };
+  const ok = prices as PriceInput[];
+  if (new Set(ok.map((p) => `${p.count} ${p.unit}`)).size !== ok.length)
+    return { error: 'Two prices have the same length. Keep one price per length.' };
+  const err = await withTenant(db(), s.tid, async (tx) => {
+    const [dupe] = await tx`select 1 from services where lower(name) = lower(${name}) and deleted_at is null`;
+    if (dupe) return `${name} is already on your list.`;
+    const zone = await areaFor(tx, s.tid, name);
+    if (!zone) return 'Set up the club’s site first (Doors & access).';
+    const [sv] = await tx<{ id: string }[]>`
+      insert into services (tenant_id, name, zone_keys, category, icon)
+      values (${s.tid}, ${known?.name ?? name}, ${[zone]}, ${category}, ${icon}) returning id`;
+    for (const p of ok)
+      await tx`insert into products (tenant_id, service_id, name, price_kes, duration_unit, duration_count, zone_keys)
+               values (${s.tid}, ${sv?.id as string}, ${priceName(known?.name ?? name, p)}, ${p.price}, ${p.unit}, ${p.count}, ${[zone]})`;
+    await tx`insert into audit_log (tenant_id, actor, action, entity, data)
+             values (${s.tid}, ${s.uid}, 'service.created', ${sv?.id as string}, ${tx.json({ name, category, prices: ok } as never)})`;
+    return null;
   });
-  if (!list.length || list.some((p) => !p.name)) return { error: 'Give the service a name.' };
-  const r = await withTenant(db(), s.tid, async (tx) => {
-    let added = 0;
-    for (const p of list) {
-      const [dupe] = await tx`select 1 from services where lower(name) = lower(${p.name})`;
-      if (dupe) continue;
-      const zone = await areaFor(tx, s.tid, p.name);
-      if (!zone) return 'Set up the club’s site first (Doors & access).';
-      const [sv] = await tx<{ id: string }[]>`
-        insert into services (tenant_id, name, zone_keys, category, icon)
-        values (${s.tid}, ${p.name}, ${[zone]}, ${p.category}, ${p.icon}) returning id`;
-      await tx`insert into audit_log (tenant_id, actor, action, entity, data)
-               values (${s.tid}, ${s.uid}, 'service.created', ${sv?.id as string}, ${tx.json(p as never)})`;
-      added++;
-    }
-    return added ? `${added}` : 'Those services are already on your list.';
-  });
-  if (!/^\d+$/.test(r)) return { error: r };
+  if (err) return { error: err };
   revalidatePath('/services');
-  return { ok: r };
+  return { ok: 'Added' };
+}
+
+/**
+ * Delete a service. Never sold: removed with its prices. Sold before: hidden and taken off sale, its history kept;
+ * anyone already paid keeps access until their date either way.
+ */
+export async function deleteService(id: string): Promise<Result> {
+  const s = await editor();
+  if (!s) return { error: 'Your role can’t change services.' };
+  const sid = uid(id);
+  if (!sid) return { error: 'That service no longer exists.' };
+  await withTenant(db(), s.tid, async (tx) => {
+    const [used] = await tx`
+      select 1 where exists (select 1 from payment_lines where service_id = ${sid})
+        or exists (select 1 from entitlements where service_id = ${sid})
+        or exists (select 1 from products p where p.service_id = ${sid}
+                   and (exists (select 1 from payments x where x.product_id = p.id)
+                     or exists (select 1 from payment_lines l where l.product_id = p.id)
+                     or exists (select 1 from entitlements e where e.product_id = p.id)
+                     or exists (select 1 from payment_intents i where i.product_id = p.id)))`;
+    if (used) {
+      await tx`update products set active = false where service_id = ${sid}`;
+      await tx`update services set active = false, deleted_at = now() where id = ${sid}`;
+    } else {
+      const [sv] = await tx<{ zone_keys: string[] }[]>`select zone_keys from services where id = ${sid}`;
+      await tx`delete from products where service_id = ${sid}`;
+      await tx`delete from services where id = ${sid}`;
+      // An area made just for this service, with no doors linked and used by nothing else, goes with it.
+      await tx`delete from zones z where z.key = any(${sv?.zone_keys ?? []}) and cardinality(z.reader_ids) = 0
+                 and not exists (select 1 from services o where z.key = any(o.zone_keys))
+                 and not exists (select 1 from products p where z.key = any(p.zone_keys))
+                 and not exists (select 1 from entitlements e where e.zone_key = z.key)`;
+    }
+    await tx`insert into audit_log (tenant_id, actor, action, entity, data)
+             values (${s.tid}, ${s.uid}, 'service.deleted', ${sid}, ${tx.json({ kept: !!used } as never)})`;
+  });
+  revalidatePath('/services');
+  return { ok: 'Deleted' };
 }
 
 /** Save a service's details: name, group, the areas it opens (or a new area by name) and who can buy it. */
@@ -112,7 +156,8 @@ export async function saveService(_prev: Result, form: FormData): Promise<Result
   if (!['members', 'walkins', 'both'].includes(soldTo)) return { error: 'Choose who can buy it.' };
   if (!zones.length && !newArea) return { error: 'Choose at least one area this service opens.' };
   const err = await withTenant(db(), s.tid, async (tx) => {
-    const [dupe] = await tx`select 1 from services where lower(name) = lower(${name}) and id <> ${id}`;
+    const [dupe] =
+      await tx`select 1 from services where lower(name) = lower(${name}) and id <> ${id} and deleted_at is null`;
     if (dupe) return 'Another service already has this name.';
     const known = (await tx<{ key: string }[]>`select distinct key from zones`).map((z) => z.key);
     if (zones.some((z) => !known.includes(z))) return 'One of the areas no longer exists.';

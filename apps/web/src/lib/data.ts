@@ -608,7 +608,7 @@ export async function servicesOverview(tenantId: string) {
             select p.id, p.name, p.price_kes, p.duration_unit, p.duration_count, p.active,
                    (select count(*)::int from payment_lines l where l.product_id = p.id) as sold
             from products p where p.service_id = s.id) x), '[]') as prices
-        from services s order by s.active desc, s.created_at`,
+        from services s where s.deleted_at is null order by s.active desc, s.created_at`,
       tx<{ key: string; name: string; readers: number }[]>`
         select key, min(name) as name, sum(cardinality(reader_ids))::int as readers from zones group by key order by min(name)`,
     ]);
