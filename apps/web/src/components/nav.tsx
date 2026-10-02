@@ -1,5 +1,15 @@
 'use client';
-import { Activity, CreditCard, DoorOpen, Layers, LayoutDashboard, LogOut, Plug, Users } from 'lucide-react';
+import {
+  Activity,
+  ArrowLeftRight,
+  CreditCard,
+  DoorOpen,
+  Layers,
+  LayoutDashboard,
+  LogOut,
+  Plug,
+  Users,
+} from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
@@ -9,10 +19,20 @@ const items = [
   { href: '/payments', label: 'Payments', icon: CreditCard },
   { href: '/plans', label: 'Plans & pricing', icon: Layers },
   { href: '/access', label: 'Doors & access', icon: DoorOpen },
-  { href: '/settings', label: 'Integrations', icon: Plug },
+  { href: '/settings', label: 'Settings', icon: Plug },
 ];
 
-export function Nav({ tenant, user, role }: { tenant: string; user: string; role: string }) {
+export function Nav({
+  tenant,
+  user,
+  role,
+  partner,
+}: {
+  tenant: string;
+  user: string;
+  role: string;
+  partner?: boolean;
+}) {
   const path = usePathname();
   return (
     <aside className="fixed inset-y-0 left-0 hidden w-64 flex-col bg-ink-950 px-4 py-6 text-ink-300 lg:flex">
@@ -42,7 +62,12 @@ export function Nav({ tenant, user, role }: { tenant: string; user: string; role
       </nav>
       <div className="mt-auto rounded-xl bg-white/5 p-3">
         <div className="text-sm text-white">{user}</div>
-        <div className="text-[11px] capitalize text-ink-500">{role}</div>
+        <div className="text-[11px] capitalize text-ink-500">{partner ? 'Partner · acting as owner' : role}</div>
+        {partner && (
+          <Link href="/partner" className="mt-3 flex items-center gap-2 text-xs text-ink-300 hover:text-white">
+            <ArrowLeftRight size={14} /> All clubs
+          </Link>
+        )}
         <form action="/logout" method="post" className="mt-3">
           <button type="submit" className="flex items-center gap-2 text-xs text-ink-300 hover:text-white">
             <LogOut size={14} /> Sign out

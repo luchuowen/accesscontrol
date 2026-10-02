@@ -1,13 +1,17 @@
+import { onboardingChecklist } from '@lango/server';
 import { ArrowUpRight, CircleAlert, Wifi, WifiOff } from 'lucide-react';
 import Link from 'next/link';
+import { Checklist } from '@/components/checklist';
 import { Badge, Bars, PageHeader, Stat } from '@/components/ui';
 import { dashboard } from '@/lib/data';
 import { ago, dateTime, daysLeft, kes, kesShort, time } from '@/lib/format';
 import { requireSession } from '@/lib/session';
+import { db } from '@/server/db';
 
 export default async function Overview() {
   const s = await requireSession();
-  const d = await dashboard(s.tid);
+  const [d, checklist] = await Promise.all([dashboard(s.tid), onboardingChecklist(db(), s.tid)]);
+  const setupDone = checklist.every((i) => i.done);
   const growth = d.revenue.prevMonth
     ? Math.round(((d.revenue.month - d.revenue.prevMonth) / d.revenue.prevMonth) * 100)
     : null;
@@ -24,6 +28,11 @@ export default async function Overview() {
           </Link>
         }
       />
+      {!setupDone && (
+        <div className="mb-4">
+          <Checklist items={checklist} />
+        </div>
+      )}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <Stat label="Collected today" value={kes(d.revenue.today)} hint={`${kes(d.revenue.week)} in the last 7 days`} />
         <Stat

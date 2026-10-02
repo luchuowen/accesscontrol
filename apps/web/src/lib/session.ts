@@ -21,5 +21,29 @@ export async function requireSession(): Promise<Session> {
   // A deactivated staff account loses access immediately, not when its 12 h cookie expires.
   const [row] = await db()<{ active: boolean }[]>`select app_staff_active(${s.uid}) as active`;
   if (!row?.active) redirect('/logout');
+  if (!s.tid) redirect('/partner'); // a partner admin who has not opened a club yet
   return s;
 }
+
+/** Partner/platform admins only (the NAVAC / installer view across clubs). */
+export async function requirePartner(): Promise<Session> {
+  const s = await getSession();
+  if (!s) redirect('/login');
+  const [row] = await db()<{ active: boolean }[]>`select app_staff_active(${s.uid}) as active`;
+  if (!row?.active) redirect('/logout');
+  if (!s.partner) redirect('/');
+  return s;
+}
+
+export const sessionCookie = (token: string) =>
+  [
+    SESSION_COOKIE,
+    token,
+    {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax' as const,
+      path: '/',
+      maxAge: 12 * 3600,
+    },
+  ] as const;

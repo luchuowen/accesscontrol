@@ -32,6 +32,8 @@ export const SyncResponse = z.object({
   zones: ZoneMap,
   timezone: z.string().default('Africa/Nairobi'),
   states: z.array(AccessState),
+  /** The club asked to (re)read its AxTraxNG setup; the bridge answers with POST /api/bridge/inventory. */
+  inventoryRequested: z.boolean().optional(),
 });
 export type SyncResponse = z.infer<typeof SyncResponse>;
 
@@ -61,3 +63,42 @@ export type AccessEvent = z.infer<typeof AccessEvent>;
 export const DriftRequest = z.object({
   drift: z.array(z.object({ memberNo: z.number().int(), changes: z.array(z.string()) })),
 });
+
+/**
+ * What the site's AxTraxNG already holds, sent by the Site Bridge so a club can be onboarded from its existing
+ * setup: doors/readers to map to zones, and existing users + cards to import. Never includes biometrics.
+ */
+export const InventoryRequest = z.object({
+  axtraxVersion: z.string().max(40).optional(),
+  readers: z
+    .array(z.object({ id: z.number().int(), name: z.string().max(120), door: z.string().max(120).optional() }))
+    .max(2000),
+  groups: z
+    .array(z.object({ id: z.number().int(), name: z.string().max(120), readers: z.array(z.number().int()) }))
+    .max(2000),
+  users: z
+    .array(
+      z.object({
+        number: z.number().int(),
+        firstName: z.string().max(120),
+        lastName: z.string().max(120),
+        mobile: z.string().max(40).optional(),
+        validFrom: LocalTime.nullable(),
+        validUntil: LocalTime.nullable(),
+        datesEnforced: z.boolean(),
+        groupId: z.number().int().nullable(),
+        cards: z
+          .array(
+            z.object({
+              siteCode: z.number().int(),
+              cardCode: z.number().int(),
+              cardType: z.number().int(),
+              active: z.boolean(),
+            }),
+          )
+          .max(16),
+      }),
+    )
+    .max(50000),
+});
+export type InventoryRequest = z.infer<typeof InventoryRequest>;

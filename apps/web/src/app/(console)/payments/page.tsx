@@ -1,12 +1,18 @@
 import Link from 'next/link';
+import { Notice } from '@/components/notice';
+import { SubmitButton } from '@/components/submit-button';
 import { Badge, PageHeader, Stat } from '@/components/ui';
-import { payments } from '@/lib/data';
+import { payments, products, unmatchedPayments } from '@/lib/data';
 import { dateTime, kes } from '@/lib/format';
 import { requireSession } from '@/lib/session';
+import { assignUnmatched } from '../actions';
 
-export default async function Payments() {
+export default async function Payments({ searchParams }: { searchParams: Promise<{ n?: string }> }) {
   const s = await requireSession();
-  const rows = await payments(s.tid);
+  const { n } = await searchParams;
+  const [rows, queue, plans] = await Promise.all([payments(s.tid), unmatchedPayments(s.tid), products(s.tid)]);
+  const onSale = plans.filter((p) => p.active);
+  const canAssign = ['owner', 'manager', 'accountant'].includes(s.role);
   const applied = rows.filter((r) => r.status === 'applied');
   const unmatched = rows.filter((r) => r.status === 'unmatched');
   const sum = (xs: readonly { amount_kes: number }[]) => xs.reduce((a, b) => a + b.amount_kes, 0);
@@ -15,6 +21,7 @@ export default async function Payments() {
   const cash = applied.filter((r) => r.channel === 'cash');
   return (
     <>
+      <Notice code={n} />
       <PageHeader
         title="Payments"
         subtitle="Every shilling, where it came from, and what it unlocked. Compare these totals with your M-Pesa and bank statements."
@@ -30,6 +37,59 @@ export default async function Payments() {
           tone={unmatched.length ? 'warn' : 'default'}
         />
       </div>
+      {queue.length > 0 && (
+        <section className="card mt-6 p-6 ring-1 ring-amber-200">
+          <div className="font-medium">Payments to assign</div>
+          <p className="mt-1 text-sm text-ink-500">
+            Money that arrived but could not be matched, usually a mistyped account number. Nothing is lost: point each
+            one at the right member and plan, and their access updates straight away.
+          </p>
+          <ul className="mt-4 divide-y divide-ink-100">
+            {queue.map((q) => {
+              const fits = onSale.filter((p) => p.price_kes === q.amount_kes);
+              return (
+                <li key={q.id} className="grid gap-3 py-3 lg:grid-cols-[1fr_auto] lg:items-center">
+                  <div className="text-sm">
+                    <span className="font-medium tabular-nums">{kes(q.amount_kes)}</span>
+                    <span className="text-ink-500">
+                      {' '}
+                      · {dateTime(q.paid_at)} · account typed “{q.account_ref ?? ''}”{q.phone ? ` · ${q.phone}` : ''}
+                    </span>
+                    {q.reason && <div className="text-xs text-amber-700">{q.reason}</div>}
+                  </div>
+                  {canAssign &&
+                    (fits.length ? (
+                      <form action={assignUnmatched} className="flex flex-wrap items-center gap-2">
+                        <input type="hidden" name="paymentId" value={q.id} />
+                        <input
+                          name="memberNo"
+                          inputMode="numeric"
+                          required
+                          placeholder="Member no."
+                          className="input w-32 py-2"
+                        />
+                        <select name="productId" className="input w-56 py-2" defaultValue={fits[0]?.id}>
+                          {fits.map((p) => (
+                            <option key={p.id} value={p.id}>
+                              {p.name}
+                            </option>
+                          ))}
+                        </select>
+                        <SubmitButton pendingText="Assigning…" className="btn-primary py-2">
+                          Assign
+                        </SubmitButton>
+                      </form>
+                    ) : (
+                      <span className="text-xs text-ink-500">
+                        No plan costs {kes(q.amount_kes)}: refund it or add a matching plan.
+                      </span>
+                    ))}
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      )}
       <div className="card mt-6 overflow-hidden">
         <table className="w-full text-sm">
           <thead className="bg-ink-50/60 text-left">

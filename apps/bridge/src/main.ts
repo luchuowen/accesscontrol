@@ -3,8 +3,17 @@ import { AxtraxClient } from '@lango/axtrax';
 import { Bridge } from './bridge.js';
 import { Journal } from './journal.js';
 
+// Site settings written by the installer (AxTraxNG login, pairing code); environment variables still win.
+const siteFile = `${process.env.LANGO_DATA ?? (process.platform === 'win32' ? 'C:\\ProgramData\\Lango' : './.lango')}/site.json`;
+const site: Record<string, string> = (() => {
+  try {
+    return JSON.parse(readFileSync(siteFile, 'utf8').replace(/^\uFEFF/, ''));
+  } catch {
+    return {};
+  }
+})();
 const env = (k: string, d?: string) => {
-  const v = process.env[k] ?? d;
+  const v = process.env[k] ?? site[k] ?? d;
   if (v === undefined) throw new Error(`missing ${k}`);
   return v;
 };
@@ -62,10 +71,16 @@ const RESYNC_MS = 60 * 60_000;
 // First guard ~3 min after start: AxTraxNG's REST service is still starting right after a reboot.
 let lastGuard = Date.now() - GUARD_MS + 3 * 60_000;
 let lastResync = Date.now();
+const INVENTORY_MS = 6 * 3600_000;
+let lastInventory = Date.now();
 for (;;) {
   if (Date.now() - lastResync > RESYNC_MS) {
     lastResync = Date.now();
     bridge.requestFullResync();
+  }
+  if (Date.now() - lastInventory > INVENTORY_MS) {
+    lastInventory = Date.now();
+    bridge.inventoryWanted = true; // keeps the club's door list and import preview current
   }
   const t0 = Date.now();
   await bridge.cycle(25).catch((e) => console.error(`cycle: ${(e as Error).message}`));

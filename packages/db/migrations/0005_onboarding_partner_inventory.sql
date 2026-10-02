@@ -13,6 +13,9 @@ CREATE POLICY tenant_isolation ON site_inventory
   USING (tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid)
   WITH CHECK (tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid);
 
+-- The club pressed "Read from AxTraxNG": the bridge sends a fresh inventory on its next sync.
+ALTER TABLE sites ADD COLUMN inventory_requested_at timestamptz;
+
 -- Staff of a partner (installer such as John) or of the platform (partner_id null) may log in without a club.
 ALTER TABLE staff_users DROP CONSTRAINT IF EXISTS staff_users_scope;
 ALTER TABLE staff_users ADD CONSTRAINT staff_users_scope
@@ -80,6 +83,47 @@ LANGUAGE sql SECURITY DEFINER SET search_path = public AS $$
   UPDATE bridges SET pair_code = p_code, pair_expires_at = now() + interval '30 days'
   WHERE tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid
 $$;
+
+-- Club team management (owner): list, add, (de)activate staff of the current tenant only.
+CREATE FUNCTION app_tenant_staff()
+RETURNS TABLE (id uuid, name text, email text, role text, active boolean, created_at timestamptz)
+LANGUAGE sql SECURITY DEFINER SET search_path = public AS $$
+  SELECT s.id, s.name, s.email, s.role, s.active, s.created_at FROM staff_users s
+  WHERE s.tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid AND s.role <> 'partner_admin'
+  ORDER BY s.created_at
+$$;
+
+CREATE FUNCTION app_add_staff(p_email text, p_name text, p_role text, p_hash text) RETURNS uuid
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE v_id uuid; v_tenant uuid := nullif(current_setting('app.tenant_id', true), '')::uuid;
+BEGIN
+  IF v_tenant IS NULL THEN RAISE EXCEPTION 'no tenant'; END IF;
+  IF p_role NOT IN ('owner', 'manager', 'reception', 'accountant') THEN RAISE EXCEPTION 'bad role'; END IF;
+  INSERT INTO staff_users (tenant_id, email, name, role, password_hash)
+    VALUES (v_tenant, lower(p_email), p_name, p_role, p_hash) RETURNING id INTO v_id;
+  RETURN v_id;
+END $$;
+
+CREATE FUNCTION app_set_staff_active(p_id uuid, p_active boolean) RETURNS void
+LANGUAGE sql SECURITY DEFINER SET search_path = public AS $$
+  UPDATE staff_users SET active = p_active
+  WHERE id = p_id AND role <> 'partner_admin'
+    AND tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid
+$$;
+
+-- Change one's own password (the caller proves the old one in the app before calling).
+CREATE FUNCTION app_set_password(p_id uuid, p_hash text) RETURNS void
+LANGUAGE sql SECURITY DEFINER SET search_path = public AS $$
+  UPDATE staff_users SET password_hash = p_hash WHERE id = p_id
+$$;
+
+CREATE FUNCTION app_staff_hash(p_id uuid) RETURNS text
+LANGUAGE sql SECURITY DEFINER SET search_path = public AS $$
+  SELECT password_hash FROM staff_users WHERE id = p_id
+$$;
+
+REVOKE EXECUTE ON FUNCTION app_tenant_staff(), app_add_staff(text, text, text, text), app_set_staff_active(uuid, boolean),
+  app_set_password(uuid, text), app_staff_hash(uuid) FROM PUBLIC;
 
 REVOKE EXECUTE ON FUNCTION app_partner_clubs(uuid), app_partner_stats(uuid),
   app_create_club(uuid, text, text, text, text, text, text, text, text), app_reissue_pair_code(text) FROM PUBLIC;

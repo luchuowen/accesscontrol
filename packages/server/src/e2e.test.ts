@@ -6,8 +6,9 @@ import { Bridge, Journal, sign } from '@lango/bridge';
 import { connect, migrate, type Sql, withTenant } from '@lango/db';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { rebuildAccessState } from './access.js';
-import { handleAck, handleDrift, handleEvents, handlePair, handleSync } from './bridge-api.js';
-import { recordPayment } from './payments.js';
+import { handleAck, handleDrift, handleEvents, handleInventory, handlePair, handleSync } from './bridge-api.js';
+import { importMembers, onboardingChecklist, planImport } from './onboarding.js';
+import { assignPayment, recordPayment } from './payments.js';
 import { handleTaifaWebhook, reconcileTaifaPay, TaifaAuthError, TaifaPay } from './taifapay.js';
 
 /**
@@ -19,6 +20,7 @@ const APP = process.env.TEST_DATABASE_APP_URL ?? 'postgres://lango_app:lango_app
 let owner: Sql;
 let app: Sql;
 let fake: FakeAxtrax;
+let ax: AxtraxClient;
 let bridge: Bridge;
 let tenantId: string;
 let otherTenant: string;
@@ -46,13 +48,14 @@ beforeAll(async () => {
   await withTenant(app, tenantId, (tx) => rebuildAccessState(tx, tenantId, m?.id as string));
 
   fake = new FakeAxtrax(demoSeed());
-  const ax = new AxtraxClient({ baseUrl: await fake.listen(), username: 'lango', password: 'lango' });
+  ax = new AxtraxClient({ baseUrl: await fake.listen(), username: 'lango', password: 'lango' });
   const route = (req: Request) => {
     const p = new URL(req.url).pathname;
     if (p === '/api/bridge/sync') return handleSync(app, req);
     if (p === '/api/bridge/ack') return handleAck(app, req);
     if (p === '/api/bridge/events') return handleEvents(app, req);
     if (p === '/api/bridge/drift') return handleDrift(app, req);
+    if (p === '/api/bridge/inventory') return handleInventory(app, req);
     return Promise.resolve(new Response('not found', { status: 404 }));
   };
   bridge = new Bridge(
@@ -371,5 +374,147 @@ describe('walking skeleton: pay → door', () => {
     expect(await (await hook()).json()).toMatchObject({ status: 'duplicate' });
     const [it] = await owner`select status from payment_intents where id = ${i?.id}`;
     expect(it).toEqual({ status: 'completed' });
+  });
+  it('missed-payment queue: a mistyped account number is assigned to the right member and applied', async () => {
+    const r = await recordPayment(app, tenantId, {
+      provider: 'taifapay',
+      providerTxnId: 'TP-TYPO-1',
+      amountKes: 5000,
+      accountRef: '2100l', // letter l instead of 1
+      paidAt: new Date(),
+    });
+    expect(r.status).toBe('unmatched');
+    const [p] = await owner`select id from products where price_kes = 5000`;
+    const wrongPlan = await assignPayment(app, tenantId, {
+      paymentId: r.paymentId,
+      memberNo: 21001,
+      productId: (await owner`select id from products where price_kes = 600`)[0]?.id,
+      actor: 'test',
+    });
+    expect(wrongPlan.status).toBe('unmatched'); // KES 5000 can never buy the KES 600 add-on
+    const ok = await assignPayment(app, tenantId, {
+      paymentId: r.paymentId,
+      memberNo: 21001,
+      productId: p?.id,
+      actor: 'test',
+    });
+    expect(ok.status).toBe('applied');
+    const again = await assignPayment(app, tenantId, {
+      paymentId: r.paymentId,
+      memberNo: 21001,
+      productId: p?.id,
+      actor: 'test',
+    });
+    expect(again.status).toBe('not_found');
+  });
+
+  it('onboarding an existing AxTraxNG site: inventory → import keeps today’s access, leaves staff alone', async () => {
+    // John's existing setup: a members group on the gym reader, a staff group, and users with cards.
+    const members = await ax.addAccessGroup({
+      ID: 0,
+      tDesc: 'Gym Members',
+      TimezoneReaders: [{ IdReader: 11, IdTimeZone: 2 }],
+    });
+    const staff = await ax.addAccessGroup({
+      ID: 0,
+      tDesc: 'Staff',
+      TimezoneReaders: [
+        { IdReader: 11, IdTimeZone: 2 },
+        { IdReader: 12, IdTimeZone: 2 },
+      ],
+    });
+    const mk = (n: number, g: number, enforced: boolean, until: string | null) =>
+      ax.addUser({
+        ID: 0,
+        EmpNumCompany: n,
+        tFirstName: `First${n}`,
+        tLastName: `Last${n}`,
+        UserAccGrp: { ID: g },
+        UserDepartment: { ID: 1 },
+        bValidDate: enforced,
+        dtStartDate: enforced ? '2026-01-01T00:00:00' : null,
+        dtStopDate: until,
+        UserCards: [],
+      });
+    const u1 = await mk(30001, members.ID, false, null);
+    await mk(30002, members.ID, true, '2027-03-31T23:59:59');
+    await mk(30003, members.ID, true, '2026-01-31T23:59:59'); // expired already
+    const s1 = await mk(39001, staff.ID, false, null);
+    await ax.addCard({
+      ID: 0,
+      iSiteCode: 0,
+      iCardCode: 30001,
+      eCardType: 1,
+      CredentialType: 1,
+      wStatus: 1,
+      IdEmpNum: u1.ID,
+    });
+    await ax.addCard({
+      ID: 0,
+      iSiteCode: 0,
+      iCardCode: 39001,
+      eCardType: 1,
+      CredentialType: 1,
+      wStatus: 1,
+      IdEmpNum: s1.ID,
+    });
+
+    bridge.inventoryWanted = true;
+    await bridge.cycle(0);
+    const [site] = await owner`select id from sites where tenant_id = ${tenantId}`;
+    const [inv] =
+      await owner`select jsonb_array_length(data->'users') as n from site_inventory where site_id = ${site?.id}`;
+    expect(Number(inv?.n)).toBeGreaterThanOrEqual(4);
+
+    const preview = await withTenant(app, tenantId, (tx) =>
+      planImport(tx, site?.id, 'Africa/Nairobi', 14, [members.ID]),
+    );
+    expect(preview.create.map((c) => c.user.number).sort()).toEqual([30001, 30002, 30003]);
+    const r = await importMembers(app, tenantId, {
+      siteId: site?.id,
+      graceDays: 14,
+      groupIds: [members.ID],
+      actor: 'test',
+    });
+    expect(r).toMatchObject({ created: 3, withAccess: 2 });
+
+    await bridge.cycle(0);
+    const today = new Date().toLocaleString('sv-SE', { timeZone: 'Africa/Nairobi' }).replace(' ', 'T').slice(0, 19);
+    expect(fake.swipe(30001, 0, 11, today)).toBe(true); // grace period, same card
+    const u2 = [...fake.users.values()].find((u) => u.EmpNumCompany === 30002);
+    expect(u2?.dtStopDate?.slice(0, 10)).toBe('2027-03-31'); // their paid-up end date is kept
+    expect(fake.swipe(39001, 0, 12, today)).toBe(true); // staff untouched by Lango
+    const st = [...fake.users.values()].find((u) => u.EmpNumCompany === 39001);
+    expect(st?.UserAccGrp.ID).toBe(staff.ID);
+    const again = await importMembers(app, tenantId, {
+      siteId: site?.id,
+      graceDays: 14,
+      groupIds: [members.ID],
+      actor: 'test',
+    });
+    expect(again).toMatchObject({ created: 0, existing: 3 });
+  });
+
+  it('onboarding checklist reflects live data', async () => {
+    const items = await onboardingChecklist(app, tenantId);
+    const by = Object.fromEntries(items.map((i) => [i.key, i.done]));
+    expect(by).toMatchObject({ bridge: true, doors: true, plans: true, members: true, taifapay: false });
+  });
+  it('partner: a platform admin creates a club in one call; club staff cannot', async () => {
+    const [pa] =
+      await owner`insert into staff_users (email, name, role, password_hash) values ('ops@navac.test', 'NAVAC Ops', 'partner_admin', 'x') returning id`;
+    const [club] = await app`select app_create_club(${pa?.id}, 'muthaiga-test', 'Muthaiga Test', 'Africa/Nairobi',
+      'GM@Muthaiga.test', 'General Manager', 'hash', 'ABCDE-23456', 'secret') as id`;
+    const [t] = await owner`select slug, (select count(*)::int from sites where tenant_id = ${club?.id}) as sites,
+      (select pair_code from bridges where tenant_id = ${club?.id}) as code,
+      (select role from staff_users where email = 'gm@muthaiga.test') as owner_role from tenants where id = ${club?.id}`;
+    expect(t).toEqual({ slug: 'muthaiga-test', sites: 1, code: 'ABCDE-23456', owner_role: 'owner' });
+    const seen = await app`select slug from app_partner_clubs(${pa?.id})`;
+    expect(seen.map((r) => r.slug)).toEqual(expect.arrayContaining(['demo-club', 'muthaiga-test']));
+    const [clubOwner] = await owner`select id from staff_users where email = 'gm@muthaiga.test'`;
+    await expect(
+      app`select app_create_club(${clubOwner?.id}, 'x-club', 'X', 'Africa/Nairobi', 'x@x.test', 'X', 'h', 'BCDEF-23456', 's')`,
+    ).rejects.toThrow(/not a partner admin/);
+    expect(await app`select * from app_partner_clubs(${clubOwner?.id})`).toHaveLength(0);
   });
 });

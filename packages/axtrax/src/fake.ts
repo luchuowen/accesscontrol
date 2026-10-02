@@ -111,8 +111,11 @@ export class FakeAxtrax {
       }
       case 'GET /api/User/GetUser':
         return this.users.has(Number(q('Id'))) ? ok(this.userView(Number(q('Id')))) : err('User not found');
-      case 'GET /api/User/GetUsers':
-        return ok([...this.users.keys()].map((id) => this.userView(id)));
+      case 'GET /api/User/GetUsers': {
+        const count = Number(q('count') ?? 1000) || 1000;
+        const offset = Number(q('offset') ?? 0) || 0;
+        return ok([...this.users.keys()].slice(offset, offset + count).map((id) => this.userView(id)));
+      }
       case 'POST /api/User/AddUser': {
         if (!b.tFirstName || !b.tLastName) return err('First and last name are required');
         if ([...this.users.values()].some((u) => u.EmpNumCompany === b.EmpNumCompany))

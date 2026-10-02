@@ -1,7 +1,14 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { Sql } from '@lango/db';
 import { withTenant } from '@lango/db';
-import { type AccessState, AckRequest, DriftRequest, EventsRequest, type SyncResponse } from '@lango/protocol';
+import {
+  type AccessState,
+  AckRequest,
+  DriftRequest,
+  EventsRequest,
+  InventoryRequest,
+  type SyncResponse,
+} from '@lango/protocol';
 
 interface BridgeRow {
   id: string;
@@ -35,6 +42,11 @@ async function changedSince(sql: Sql, b: BridgeRow, cursor: number): Promise<Syn
     const zones = await tx<
       { key: string; reader_ids: number[] }[]
     >`select key, reader_ids from zones where site_id = ${b.site_id}`;
+    const [inv] = await tx<{ wanted: boolean }[]>`
+      select s.inventory_requested_at is not null
+             and s.inventory_requested_at > coalesce((select received_at from site_inventory i where i.site_id = s.id), 'epoch')
+             as wanted
+      from sites s where s.id = ${b.site_id}`;
     const rows = await tx<{ doc: AccessState; seq: bigint }[]>`
       select doc, seq from access_states where site_id = ${b.site_id} and seq > ${cursor} order by seq limit 500`;
     const last = rows[rows.length - 1];
@@ -43,6 +55,7 @@ async function changedSince(sql: Sql, b: BridgeRow, cursor: number): Promise<Syn
       timezone: t?.timezone ?? 'Africa/Nairobi',
       zones: Object.fromEntries(zones.map((z) => [z.key, z.reader_ids])),
       states: rows.map((r) => r.doc),
+      ...(inv?.wanted ? { inventoryRequested: true } : {}),
     };
   });
 }
@@ -60,6 +73,21 @@ export async function handleSync(sql: Sql, req: Request): Promise<Response> {
     if (res.states.length || Date.now() >= deadline || req.signal.aborted) return json(200, res);
     await new Promise((r) => setTimeout(r, 500));
   }
+}
+
+/** POST /api/bridge/inventory — what the site's AxTraxNG holds (readers, groups, users + cards) for onboarding. */
+export async function handleInventory(sql: Sql, req: Request): Promise<Response> {
+  const raw = await req.text();
+  const b = await authBridge(sql, req, raw);
+  if (!b) return json(401, { error: 'unauthorized' });
+  const body = InventoryRequest.safeParse(safeJson(raw));
+  if (!body.success) return json(400, { error: body.error.message.slice(0, 500) });
+  await withTenant(sql, b.tenant_id, async (tx) => {
+    await tx`insert into site_inventory (site_id, tenant_id, data, received_at)
+             values (${b.site_id}, ${b.tenant_id}, ${tx.json(body.data as never)}, now())
+             on conflict (site_id) do update set data = excluded.data, received_at = now()`;
+  });
+  return json(200, { ok: true, users: body.data.users.length });
 }
 
 /** POST /api/bridge/ack — record which versions the site applied (or why not). */

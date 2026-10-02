@@ -23,6 +23,8 @@ export interface Session {
   tid: string; // tenant id
   role: string;
   name: string;
+  /** Partner/platform admin (NAVAC, an installer such as John): may open any of their clubs. */
+  partner?: boolean;
   exp: number; // epoch seconds
 }
 

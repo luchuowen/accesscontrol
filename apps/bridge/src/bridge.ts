@@ -1,6 +1,6 @@
 import { createHash, createHmac } from 'node:crypto';
 import { type AxtraxClient, isGranted } from '@lango/axtrax';
-import { type AccessEvent, type AckResult, SyncResponse } from '@lango/protocol';
+import { type AccessEvent, type AckResult, type InventoryRequest, SyncResponse } from '@lango/protocol';
 import { DateTime } from 'luxon';
 import { converge } from './converge.js';
 import type { Journal } from './journal.js';
@@ -51,6 +51,63 @@ export class Bridge {
     return DateTime.now().setZone(this.j.data.timezone);
   }
 
+  /** Set when the cloud asks for a fresh read of AxTraxNG (or at start-up). */
+  inventoryWanted = true;
+
+  /**
+   * Read what this AxTraxNG already holds — readers/doors, access groups, users and their cards — so the club can
+   * map doors to zones and import existing members. Read-only; never sends biometric data.
+   */
+  async collectInventory(): Promise<InventoryRequest> {
+    const [readers, doors, groups] = await Promise.all([this.ax.readers(), this.ax.doors(), this.ax.accessGroups()]);
+    const doorName = new Map(doors.map((d) => [d.ID, d.tDesc]));
+    const users: InventoryRequest['users'] = [];
+    const page = 500;
+    for (let offset = 0; offset < 50_000; offset += page) {
+      const batch = (await this.ax.getUsers(page, offset)) ?? [];
+      for (const u of batch) {
+        if (!u.EmpNumCompany) continue;
+        users.push({
+          number: u.EmpNumCompany,
+          firstName: (u.tFirstName ?? '').slice(0, 120),
+          lastName: (u.tLastName ?? '').slice(0, 120),
+          ...(u.tMobile ? { mobile: String(u.tMobile).slice(0, 40) } : {}),
+          validFrom: u.dtStartDate ? u.dtStartDate.slice(0, 19) : null,
+          validUntil: u.dtStopDate ? u.dtStopDate.slice(0, 19) : null,
+          datesEnforced: !!u.bValidDate,
+          groupId: u.UserAccGrp?.ID ?? null,
+          cards: (u.UserCards ?? [])
+            .filter((c) => c.ID > 0 && c.iCardCode > 0)
+            .slice(0, 16)
+            .map((c) => ({
+              siteCode: c.iSiteCode,
+              cardCode: c.iCardCode,
+              cardType: c.eCardType,
+              active: c.wStatus === 1,
+            })),
+        });
+      }
+      if (batch.length < page) break;
+    }
+    return {
+      readers: readers.map((r) => ({ id: r.ID, name: r.tDesc ?? `Reader ${r.ID}`, door: doorName.get(r.IdDoor) })),
+      groups: groups.map((g) => ({
+        id: g.ID,
+        name: g.tDesc,
+        readers: (g.TimezoneReaders ?? []).map((t) => t.IdReader),
+      })),
+      users,
+    };
+  }
+
+  async pushInventory() {
+    if (!this.inventoryWanted) return;
+    const inv = await this.collectInventory();
+    await this.cloud('POST', '/api/bridge/inventory', inv);
+    this.inventoryWanted = false;
+    this.log(`inventory sent: ${inv.readers.length} readers, ${inv.groups.length} groups, ${inv.users.length} users`);
+  }
+
   /** Pull new desired states (long-poll) into the journal. Returns number of new states. */
   async pull(waitSeconds = 25): Promise<number> {
     const res = SyncResponse.parse(
@@ -64,6 +121,7 @@ export class Bridge {
     }
     this.j.data.cursor = res.cursor;
     this.j.save();
+    if (res.inventoryRequested) this.inventoryWanted = true;
     return res.states.length;
   }
 
@@ -206,6 +264,11 @@ export class Bridge {
       await this.pumpEvents();
     } catch (e) {
       this.log(`events: ${(e as Error).message}`);
+    }
+    try {
+      await this.pushInventory();
+    } catch (e) {
+      this.log(`inventory: ${(e as Error).message}`);
     }
   }
 }

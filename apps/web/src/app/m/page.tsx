@@ -74,7 +74,9 @@ export default async function MemberPortal({ searchParams }: { searchParams: Pro
       { id: string; name: string; price_kes: number }[]
     >`select id, name, price_kes from products where active and price_kes >= 100 order by price_kes`;
     const [t] = await tx<{ name: string }[]>`select name from tenants where id = ${who.tenantId}`;
-    return { m, ents, plans, club: t?.name };
+    const [ch] = await tx<{ paybill: string | null; till: string | null }[]>`
+      select data->'channels'->>'paybill' as paybill, data->'channels'->>'till' as till from tenant_settings`;
+    return { m, ents, plans, club: t?.name, ch };
   });
   const now = Date.now();
   const live = d.ents.filter((e) => e.starts_at.getTime() <= now && e.ends_at.getTime() >= now);
@@ -112,6 +114,24 @@ export default async function MemberPortal({ searchParams }: { searchParams: Pro
           </div>
         )}
       </div>
+      {(d.ch?.paybill || d.ch?.till) && (
+        <div className="mt-4 rounded-2xl bg-white/5 p-4 text-sm ring-1 ring-white/10">
+          <div className="text-xs font-medium uppercase tracking-widest text-ink-300">Pay from the M-Pesa menu</div>
+          <div className="mt-2 grid grid-cols-2 gap-3">
+            <div>
+              <div className="text-xs text-ink-300">{d.ch?.paybill ? 'Paybill' : 'Till'}</div>
+              <div className="font-mono text-lg">{d.ch?.paybill ?? d.ch?.till}</div>
+            </div>
+            {d.ch?.paybill && (
+              <div>
+                <div className="text-xs text-ink-300">Account</div>
+                <div className="font-mono text-lg">{d.m?.member_no}</div>
+              </div>
+            )}
+          </div>
+          <div className="mt-2 text-xs text-ink-300">Pay the exact plan price; the doors update within a minute.</div>
+        </div>
+      )}
       {sp.pay === 'sent' && (
         <div className="mt-4 flex items-center gap-2 rounded-xl bg-white/5 p-3 text-sm">
           <Smartphone size={16} /> Check your phone and enter your M-Pesa PIN. The doors update automatically.

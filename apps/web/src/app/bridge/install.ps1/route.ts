@@ -1,0 +1,78 @@
+import { createHash } from 'node:crypto';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
+export const dynamic = 'force-dynamic';
+
+/**
+ * GET /bridge/install.ps1 — the Site Bridge installer for an AxTraxNG server PC. Run in an elevated PowerShell:
+ *   irm https://<lango>/bridge/install.ps1 | iex
+ * It asks for the club's pairing code and the AxTraxNG operator login on the PC itself; the AxTraxNG password never
+ * leaves the site. Re-running it upgrades the bridge in place and keeps its pairing and journal.
+ */
+export function GET(req: Request) {
+  const bundle = join(process.cwd(), 'public', 'bridge', 'lango-bridge.mjs');
+  if (!existsSync(bundle)) return new Response('bridge bundle not packaged', { status: 503 });
+  const sha = createHash('sha256').update(readFileSync(bundle)).digest('hex');
+  const cloud = (process.env.PUBLIC_URL ?? new URL(req.url).origin).replace(/\/$/, '');
+  const script = TEMPLATE.replaceAll('__CLOUD__', cloud).replaceAll('__SHA__', sha);
+  return new Response(script, {
+    headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' },
+  });
+}
+
+const TEMPLATE = String.raw`# Lango Site Bridge installer (Windows, run as Administrator on the AxTraxNG server PC)
+$ErrorActionPreference = 'Stop'; [Net.ServicePointManager]::SecurityProtocol = 'Tls12'; $ProgressPreference = 'SilentlyContinue'
+$principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
+if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { throw 'Open PowerShell with "Run as administrator" and run the command again.' }
+$cloud = '__CLOUD__'; $sha = '__SHA__'
+$app = 'C:\Program Files\Lango Bridge'; $data = 'C:\ProgramData\Lango'
+Write-Host ''; Write-Host '  Lango Site Bridge' -ForegroundColor Green; Write-Host '  Connects this AxTraxNG server to Lango. Doors keep working if the internet drops.'; Write-Host ''
+New-Item -ItemType Directory -Force $app, $data | Out-Null
+$paired = Test-Path "$data\bridge.json"
+$code = ''
+if ($paired) { Write-Host '  Already paired: upgrading in place.' } else { $code = (Read-Host '  Pairing code (club console > Doors & access)').Trim().ToUpper() }
+$axUrl = Read-Host '  AxTraxNG REST address [http://localhost:8080]'; if (-not $axUrl) { $axUrl = 'http://localhost:8080' }
+$axUser = Read-Host '  AxTraxNG operator [Administrator]'; if (-not $axUser) { $axUser = 'Administrator' }
+$sec = Read-Host '  AxTraxNG operator password' -AsSecureString
+$axPass = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($sec))
+Write-Host '  Checking the AxTraxNG login...'
+try { $null = Invoke-RestMethod -UseBasicParsing -Method Post -Uri "$axUrl/token" -ContentType 'application/x-www-form-urlencoded' -Body @{ grant_type = 'password'; username = $axUser; password = $axPass } }
+catch { throw "Could not sign in to the AxTraxNG REST API at $axUrl. Check the REST service is running and the operator login. ($($_.Exception.Message))" }
+if (-not (Test-Path "$app\node\node.exe")) {
+  Write-Host '  Downloading Node.js runtime...'
+  Invoke-WebRequest -UseBasicParsing https://nodejs.org/dist/v22.20.0/node-v22.20.0-win-x64.zip -OutFile "$env:TEMP\lango-node.zip"
+  Expand-Archive "$env:TEMP\lango-node.zip" "$env:TEMP\lango-node" -Force
+  Move-Item "$env:TEMP\lango-node\node-v22.20.0-win-x64" "$app\node" -Force
+}
+Write-Host '  Downloading the Site Bridge...'
+Invoke-WebRequest -UseBasicParsing "$cloud/bridge/lango-bridge.mjs" -OutFile "$app\lango-bridge.mjs.new"
+if ((Get-FileHash "$app\lango-bridge.mjs.new" -Algorithm SHA256).Hash.ToLower() -ne $sha) { throw 'Download check failed. Run the command again.' }
+Stop-ScheduledTask -TaskName 'Lango Site Bridge' -ErrorAction SilentlyContinue
+Get-Process node -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "$app*" } | Stop-Process -Force
+Start-Sleep 2
+Move-Item "$app\lango-bridge.mjs.new" "$app\lango-bridge.mjs" -Force
+Remove-Item "$data\bridge.lock" -ErrorAction SilentlyContinue
+# Site settings (incl. the AxTraxNG login) live in a JSON file only SYSTEM and Administrators can read.
+$site = [ordered]@{ AXTRAX_URL = $axUrl; AXTRAX_USER = $axUser; AXTRAX_PASSWORD = $axPass }
+if ($code) { $site.LANGO_PAIR_CODE = $code }
+$site | ConvertTo-Json | Set-Content "$data\site.json" -Encoding UTF8
+icacls "$data\site.json" /inheritance:r /grant:r 'SYSTEM:F' 'Administrators:F' | Out-Null
+$lines = @('@echo off', "set LANGO_CLOUD=$cloud", "set LANGO_DATA=$data")
+$lines += ('"' + "$app\node\node.exe" + '" "' + "$app\lango-bridge.mjs" + '" >> "' + "$data\bridge.log" + '" 2>&1')
+$lines | Set-Content "$app\run.cmd" -Encoding ASCII
+$act = New-ScheduledTaskAction -Execute 'cmd.exe' -Argument ('/c "' + "$app\run.cmd" + '"')
+$trg = New-ScheduledTaskTrigger -AtStartup
+$set = New-ScheduledTaskSettingsSet -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero) -AllowStartIfOnBatteries
+Register-ScheduledTask -TaskName 'Lango Site Bridge' -Action $act -Trigger $trg -Settings $set -User 'SYSTEM' -RunLevel Highest -Force | Out-Null
+Start-ScheduledTask -TaskName 'Lango Site Bridge'
+Write-Host '  Starting...'
+for ($i = 0; $i -lt 20; $i++) {
+  Start-Sleep 3
+  if (Test-Path "$data\bridge.json") { break }
+  $log = Get-Content "$data\bridge.log" -Tail 3 -ErrorAction SilentlyContinue
+  if ($log -match 'pairing failed') { throw "Pairing failed: the code is wrong, used or expired. Get a new one in the club console. ($($log -join ' '))" }
+}
+if (Test-Path "$data\bridge.json") { Write-Host '  Done. This site is connected to Lango; refresh Doors & access in the console.' -ForegroundColor Green }
+else { Write-Host "  Installed, still connecting. If the console does not show the bridge online within 2 minutes, send $data\bridge.log to support." -ForegroundColor Yellow }
+`;

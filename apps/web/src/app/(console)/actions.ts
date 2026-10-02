@@ -1,6 +1,14 @@
 'use server';
 import { withTenant } from '@lango/db';
-import { initiatedTransactionId, rebuildAccessState, recordPayment, tenantTaifa } from '@lango/server';
+import {
+  assignPayment,
+  importMembers,
+  initiatedTransactionId,
+  newPairCode,
+  rebuildAccessState,
+  recordPayment,
+  tenantTaifa,
+} from '@lango/server';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { requireSession } from '@/lib/session';
@@ -193,4 +201,160 @@ export async function requestMpesa(form: FormData) {
   }
   revalidatePath(`/members/${memberId}`);
   back(memberId, sent ? 'prompt-sent' : 'prompt-failed');
+}
+
+/** Missed-payment queue: point an unmatched payment at the right member and plan (amount must equal the price). */
+export async function assignUnmatched(form: FormData) {
+  const s = await requireSession();
+  if (!can(s.role, 'owner', 'manager', 'accountant')) redirect('/payments?n=forbidden');
+  const paymentId = id(form, 'paymentId');
+  const productId = id(form, 'productId');
+  const memberNo = Number(String(form.get('memberNo') ?? '').trim());
+  if (!paymentId || !productId || !Number.isInteger(memberNo) || memberNo < 1) redirect('/payments?n=invalid');
+  const r = await assignPayment(db(), s.tid, { paymentId, memberNo, productId, actor: s.uid });
+  revalidatePath('/payments');
+  redirect(
+    `/payments?n=${r.status === 'applied' ? 'assigned' : r.status === 'not_found' ? 'gone' : 'still-unmatched'}`,
+  );
+}
+
+const KINDS = ['membership', 'day_pass', 'addon', 'bundle'] as const;
+
+/** Create or edit a plan. Active plans keep unique prices so a paybill payment matches exactly one plan. */
+export async function savePlan(form: FormData) {
+  const s = await requireSession();
+  if (!can(s.role, 'owner', 'manager')) redirect('/plans?n=forbidden');
+  const planId = id(form, 'planId');
+  const name = String(form.get('name') ?? '')
+    .trim()
+    .slice(0, 80);
+  const kind = String(form.get('kind') ?? 'membership');
+  const price = Number(String(form.get('price') ?? '').replace(/[,\s]/g, ''));
+  const unit = form.get('unit') === 'day' ? 'day' : 'month';
+  const count = Number(form.get('count') ?? 1);
+  const zones = form.getAll('zones').map(String).filter(Boolean);
+  if (
+    !name ||
+    !(KINDS as readonly string[]).includes(kind) ||
+    !Number.isSafeInteger(price) ||
+    price < 1 ||
+    !Number.isInteger(count) ||
+    count < 1 ||
+    count > 366 ||
+    zones.length === 0
+  )
+    redirect('/plans?n=plan-invalid');
+  const ok = await withTenant(db(), s.tid, async (tx) => {
+    const known = (await tx<{ key: string }[]>`select distinct key from zones`).map((z) => z.key);
+    if (zones.some((z) => !known.includes(z))) return 'plan-invalid';
+    const [clash] =
+      await tx`select 1 from products where active and price_kes = ${price} and id is distinct from ${planId}`;
+    if (clash) return 'plan-price';
+    if (planId) {
+      await tx`update products set name = ${name}, kind = ${kind}, price_kes = ${price}, duration_unit = ${unit},
+                 duration_count = ${count}, zone_keys = ${zones} where id = ${planId}`;
+    } else {
+      await tx`insert into products (tenant_id, kind, name, price_kes, duration_unit, duration_count, zone_keys)
+               values (${s.tid}, ${kind}, ${name}, ${price}, ${unit}, ${count}, ${zones})`;
+    }
+    await tx`insert into audit_log (tenant_id, actor, action, entity, data) values (${s.tid}, ${s.uid}, ${planId ? 'plan.updated' : 'plan.created'}, ${planId}, ${tx.json({ name, price, unit, count, zones } as never)})`;
+    return 'saved';
+  });
+  revalidatePath('/plans');
+  redirect(`/plans?n=${ok}`);
+}
+
+export async function setPlanActive(form: FormData) {
+  const s = await requireSession();
+  if (!can(s.role, 'owner', 'manager')) redirect('/plans?n=forbidden');
+  const planId = id(form, 'planId');
+  const active = form.get('active') === 'true';
+  if (!planId) redirect('/plans');
+  const r = await withTenant(db(), s.tid, async (tx) => {
+    if (active) {
+      const [p] = await tx<{ price_kes: number }[]>`select price_kes from products where id = ${planId}`;
+      const [clash] =
+        await tx`select 1 from products where active and price_kes = ${p?.price_kes ?? -1} and id <> ${planId}`;
+      if (clash) return 'plan-price';
+    }
+    await tx`update products set active = ${active} where id = ${planId}`;
+    await tx`insert into audit_log (tenant_id, actor, action, entity) values (${s.tid}, ${s.uid}, ${active ? 'plan.restored' : 'plan.archived'}, ${planId})`;
+    return 'saved';
+  });
+  revalidatePath('/plans');
+  redirect(`/plans?n=${r}`);
+}
+
+const zoneKey = (name: string) =>
+  name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 30);
+
+/** Create a zone or change which AxTraxNG readers it opens (readers come from the Site Bridge's inventory). */
+export async function saveZone(form: FormData) {
+  const s = await requireSession();
+  if (!can(s.role, 'owner', 'manager')) redirect('/access?n=forbidden');
+  const zoneId = id(form, 'zoneId');
+  const siteId = id(form, 'siteId');
+  const name = String(form.get('name') ?? '')
+    .trim()
+    .slice(0, 60);
+  // Readers come as checkboxes (from the bridge's inventory) or, before the bridge is installed, as typed IDs.
+  const typed = String(form.get('readerIds') ?? '')
+    .split(/[\s,;]+/)
+    .filter(Boolean);
+  const readers = [...new Set([...form.getAll('readers'), ...typed].map(Number))].filter(
+    (n) => Number.isInteger(n) && n > 0,
+  );
+  if (!siteId || !name || (!zoneId && !zoneKey(name))) redirect('/access?n=zone-invalid');
+  const r = await withTenant(db(), s.tid, async (tx) => {
+    if (zoneId) {
+      await tx`update zones set name = ${name}, reader_ids = ${readers} where id = ${zoneId} and site_id = ${siteId}`;
+    } else {
+      const [dup] = await tx`select 1 from zones where site_id = ${siteId} and key = ${zoneKey(name)}`;
+      if (dup) return 'zone-taken';
+      await tx`insert into zones (tenant_id, site_id, key, name, reader_ids) values (${s.tid}, ${siteId}, ${zoneKey(name)}, ${name}, ${readers})`;
+    }
+    await tx`insert into audit_log (tenant_id, actor, action, entity, data) values (${s.tid}, ${s.uid}, 'zone.saved', ${zoneId ?? zoneKey(name)}, ${tx.json({ name, readers } as never)})`;
+    return 'saved';
+  });
+  revalidatePath('/access');
+  redirect(`/access?n=${r}`);
+}
+
+/** Ask the Site Bridge to read AxTraxNG again (doors, groups, users) on its next sync. */
+export async function requestInventory(form: FormData) {
+  const s = await requireSession();
+  const siteId = id(form, 'siteId');
+  if (!siteId) redirect('/access');
+  await withTenant(db(), s.tid, (tx) => tx`update sites set inventory_requested_at = now() where id = ${siteId}`);
+  revalidatePath('/access');
+  redirect('/access?n=inventory-requested');
+}
+
+/** Bring the club's existing AxTraxNG users in as members, keeping the access they have today. */
+export async function importFromAxtrax(form: FormData) {
+  const s = await requireSession();
+  if (!can(s.role, 'owner', 'manager')) redirect('/access?n=forbidden');
+  const siteId = id(form, 'siteId');
+  const groupIds = form.getAll('groups').map(Number).filter(Number.isInteger);
+  const graceDays = Math.min(90, Math.max(0, Number(form.get('graceDays') ?? 14) || 0));
+  if (!siteId || groupIds.length === 0) redirect('/access?n=invalid');
+  const r = await importMembers(db(), s.tid, { siteId, graceDays, groupIds, actor: s.uid });
+  revalidatePath('/access');
+  redirect(`/access?imported=${r.created}&withAccess=${r.withAccess}&existing=${r.existing}&skipped=${r.skipped}`);
+}
+
+/** A fresh pairing code, e.g. when the AxTraxNG PC is replaced (the old bridge must then be reinstalled). */
+export async function reissuePairCode() {
+  const s = await requireSession();
+  if (s.role !== 'owner') redirect('/access?n=forbidden');
+  await withTenant(db(), s.tid, async (tx) => {
+    await tx`select app_reissue_pair_code(${newPairCode()})`;
+    await tx`insert into audit_log (tenant_id, actor, action) values (${s.tid}, ${s.uid}, 'bridge.pair_code_reissued')`;
+  });
+  revalidatePath('/access');
+  redirect('/access?n=pair-new');
 }

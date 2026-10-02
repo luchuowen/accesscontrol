@@ -124,3 +124,45 @@ interface Product {
   duration_count: number;
   zone_keys: string[];
 }
+
+/**
+ * Missed-payment queue: staff point an unmatched payment (wrong account number, unknown amount) at the right
+ * member and plan. The amount must equal the plan's price, so nobody can turn KES 10 into a month. Audited.
+ */
+export async function assignPayment(
+  sql: Sql,
+  tenantId: string,
+  a: { paymentId: string; memberNo: number; productId: string; actor: string },
+): Promise<ApplyOutcome | { status: 'not_found' }> {
+  return withTenant(sql, tenantId, async (tx) => {
+    const [p] = await tx<
+      {
+        id: string;
+        provider: string;
+        provider_txn_id: string;
+        amount_kes: number;
+        phone: string | null;
+        paid_at: Date;
+        channel: Channel;
+        account_ref: string | null;
+      }[]
+    >`select id, provider, provider_txn_id, amount_kes, phone, paid_at, channel, account_ref
+      from payments where id = ${a.paymentId} and status = 'unmatched' for update`;
+    if (!p) return { status: 'not_found' as const };
+    await tx`update payments set account_ref = ${String(a.memberNo)} where id = ${p.id}`;
+    await tx`insert into audit_log (tenant_id, actor, action, entity, data)
+             values (${tenantId}, ${a.actor}, 'payment.assigned', ${p.id},
+                     ${tx.json({ from: p.account_ref, memberNo: a.memberNo, productId: a.productId } as never)})`;
+    return applyPayment(tx, tenantId, p.id, {
+      provider: p.provider,
+      providerTxnId: p.provider_txn_id,
+      amountKes: p.amount_kes,
+      accountRef: String(a.memberNo),
+      phone: p.phone,
+      productId: a.productId,
+      channel: p.channel,
+      recordedBy: a.actor,
+      paidAt: p.paid_at,
+    });
+  });
+}

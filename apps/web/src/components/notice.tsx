@@ -19,6 +19,31 @@ const MESSAGES: Record<string, { tone: 'ok' | 'warn' | 'err'; text: string }> = 
   names: { tone: 'err', text: 'First and last name are required.' },
   number: { tone: 'err', text: 'Member numbers are 1 to 65535.' },
   taken: { tone: 'err', text: 'That member number is already in use.' },
+  assigned: {
+    tone: 'ok',
+    text: 'Payment assigned. The member’s access is updated and the doors follow within a minute.',
+  },
+  gone: { tone: 'warn', text: 'That payment was already handled.' },
+  'still-unmatched': {
+    tone: 'err',
+    text: 'Not applied: the member was not found or is inactive, or the amount does not equal that plan’s price.',
+  },
+  saved: { tone: 'ok', text: 'Saved.' },
+  'plan-price': {
+    tone: 'err',
+    text: 'Another active plan already has that price. Prices must be unique so paybill payments match one plan.',
+  },
+  'plan-invalid': {
+    tone: 'err',
+    text: 'Give the plan a name, a price in whole shillings, a duration and at least one zone.',
+  },
+  'zone-invalid': { tone: 'err', text: 'Give the zone a name (letters and numbers).' },
+  'zone-taken': { tone: 'err', text: 'A zone with that name already exists at this site.' },
+  'inventory-requested': {
+    tone: 'ok',
+    text: 'Asked the Site Bridge to read AxTraxNG again. The list updates within a minute while the bridge is online.',
+  },
+  'pair-new': { tone: 'ok', text: 'New pairing code issued. It is valid for 30 days.' },
 };
 const TONES = {
   ok: 'bg-emerald-50 text-emerald-800 ring-emerald-200',

@@ -287,3 +287,25 @@ export async function accessOverview(tenantId: string) {
     return { sites, zones, bridges, stats: st, events, tamper };
   });
 }
+
+/** Payments waiting for a person: wrong account number, unknown amount, inactive member. */
+export async function unmatchedPayments(tenantId: string) {
+  return T(
+    tenantId,
+    (tx) => tx<
+      {
+        id: string;
+        paid_at: Date;
+        amount_kes: number;
+        account_ref: string | null;
+        phone: string | null;
+        provider_txn_id: string;
+        reason: string | null;
+      }[]
+    >`
+    select p.id, p.paid_at, p.amount_kes, p.account_ref, p.phone, p.provider_txn_id,
+           (select a.data->>'reason' from audit_log a where a.action = 'payment.unmatched' and a.entity = p.id::text
+             order by a.at desc limit 1) as reason
+    from payments p where p.status = 'unmatched' order by p.paid_at desc limit 100`,
+  );
+}

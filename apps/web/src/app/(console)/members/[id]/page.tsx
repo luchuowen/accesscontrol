@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { withTenant } from '@lango/db';
 import { ArrowLeft, CheckCircle2, Clock, CreditCard, ShieldAlert } from 'lucide-react';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
@@ -8,6 +9,7 @@ import { Badge, Empty } from '@/components/ui';
 import { member, products } from '@/lib/data';
 import { date, dateTime, daysLeft, kes } from '@/lib/format';
 import { requireSession } from '@/lib/session';
+import { db } from '@/server/db';
 import { grantOverride, linkCard, recordDeskPayment, requestMpesa } from '../../actions';
 
 export default async function MemberPage({
@@ -30,6 +32,14 @@ export default async function MemberPage({
   const synced = d.sync.every((x) => x.applied_version === x.version);
   const failed = d.sync.find((x) => x.error);
   const zones = [...new Set(plans.flatMap((p) => p.zone_keys))];
+  const [ch] = await withTenant(
+    db(),
+    s.tid,
+    (tx) =>
+      tx<{ paybill: string | null; till: string | null }[]>`
+      select data->'channels'->>'paybill' as paybill, data->'channels'->>'till' as till from tenant_settings`,
+  );
+  const payTo = ch?.paybill ? `Paybill ${ch.paybill}` : ch?.till ? `Till ${ch.till}` : null;
   return (
     <>
       <Link href="/members" className="mb-6 inline-flex items-center gap-1.5 text-sm text-ink-500 hover:text-ink-900">
@@ -165,10 +175,11 @@ export default async function MemberPage({
             <SubmitButton pendingText="Recording…" className="btn-ghost mt-4 w-full">
               <CreditCard size={16} /> Record cash &amp; open doors
             </SubmitButton>
-            <p className="mt-3 text-xs text-ink-500">
-              Members can also pay by M-Pesa to the club paybill using account <b>{d.m.member_no}</b>; access updates
-              automatically.
-            </p>
+            {payTo && (
+              <p className="mt-3 text-xs text-ink-500">
+                Or M-Pesa {payTo} with account <b>{d.m.member_no}</b>; access updates automatically.
+              </p>
+            )}
           </form>
 
           <form action={linkCard} className="card p-6">
