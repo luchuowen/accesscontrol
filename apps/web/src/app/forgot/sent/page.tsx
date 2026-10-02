@@ -12,7 +12,7 @@ export default async function Sent({ searchParams }: { searchParams: Promise<{ i
       <h1 className="text-center text-[26px] font-semibold tracking-tight text-ink-900">Check your email</h1>
       <div
         role="status"
-        className="mt-6 flex flex-col items-center gap-3 rounded-[14px] border border-emerald-200 bg-emerald-50 px-6 py-6 text-center"
+        className="mt-6 grid grid-cols-[auto_1fr] items-start gap-3.5 rounded-[14px] border border-emerald-200 bg-emerald-50 p-[18px]"
       >
         <div className="grid h-[38px] w-[38px] place-items-center rounded-[10px] bg-brand-500 text-white">
           <Check size={18} strokeWidth={2.4} aria-hidden="true" />
