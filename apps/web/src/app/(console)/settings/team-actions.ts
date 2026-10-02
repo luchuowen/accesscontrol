@@ -24,7 +24,7 @@ import { getSession, publicUrl, requireSession } from '@/lib/session';
 import { db } from '@/server/db';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-const back = (m: string): never => redirect(`/team?m=${m}`);
+const back = (m: string): never => redirect(`/settings?tab=team&m=${m}`);
 
 /** Every team action: signed in, in a club, allowed to manage its team. */
 async function manager() {
@@ -71,7 +71,7 @@ export async function invite(_prev: InviteState, form: FormData): Promise<Invite
       baseUrl: publicUrl(),
       ctx: { inviterName: s.name, to: t?.name ?? 'your club', roleLabel: roleLabel(role) },
     });
-    revalidatePath('/team');
+    revalidatePath('/settings');
     return { done: { name, email, emailed: r.emailed, added: r.added } };
   } catch (e) {
     return { error: teamError(e) };
@@ -152,5 +152,5 @@ export async function takeClub(form: FormData) {
   if (!s) redirect(`/login?m=signed-out`);
   const me = await staffById(db(), s.uid);
   const ok = me ? await acceptOwnership(db(), token, me.id, clientIp(await headers())) : false;
-  redirect(ok ? '/team?m=owner-now' : `/transfer/${encodeURIComponent(token)}?e=1`);
+  redirect(ok ? '/settings?tab=team&m=owner-now' : `/transfer/${encodeURIComponent(token)}?e=1`);
 }

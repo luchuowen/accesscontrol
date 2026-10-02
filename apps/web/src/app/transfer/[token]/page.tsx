@@ -4,7 +4,7 @@ import { AuthHeading, AuthNotice, AuthShell } from '@/components/auth-shell';
 import { SubmitButton } from '@/components/submit-button';
 import { getSession } from '@/lib/session';
 import { db } from '@/server/db';
-import { takeClub } from '../../(console)/team/actions';
+import { takeClub } from '../../(console)/settings/team-actions';
 
 export const metadata = { title: 'Accept ownership · Lango', referrer: 'no-referrer' };
 

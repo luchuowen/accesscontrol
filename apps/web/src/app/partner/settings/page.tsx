@@ -27,6 +27,7 @@ const MSG: Record<string, [string, string]> = {
   'email-from': ['red', 'Enter a full sending address, e.g. lango@navac.co.ke.'],
   'email-reply': ['red', 'Enter a full reply-to address, or leave it blank.'],
   'email-secret': ['red', 'A Resend webhook signing secret starts with whsec_.'],
+  'email-inbound': ['red', 'Enter a domain like reply.lango.co.ke, and a key that starts with re_.'],
   'email-missing': ['amber', 'Paste the API key from Resend › API keys.'],
   'email-test-sent': ['green', 'Test email sent to your address. It should arrive within a minute.'],
   'email-test-failed': ['red', 'The test email was not sent. The reason is in the list below.'],
@@ -171,6 +172,7 @@ export default async function PlatformSettings({ searchParams }: { searchParams:
                 <span className="min-w-0 flex-1">
                   Sending as <b>{emailCfg.from}</b>
                   {emailCfg.replyTo ? <> · replies to {emailCfg.replyTo}</> : null}
+                  {emailCfg.inboundDomain ? <> · club replies arrive at *@{emailCfg.inboundDomain}</> : null}
                 </span>
                 <form action={sendPlatformTestEmail}>
                   <SubmitButton pendingText="Sending…" className="btn-primary py-2">
@@ -236,6 +238,36 @@ export default async function PlatformSettings({ searchParams }: { searchParams:
                     className={input}
                   />
                 </label>
+                <fieldset className="rounded-lg border border-[#E4E8EF] p-4">
+                  <legend className="px-1 text-[12px] font-semibold text-ink-700">Receiving replies (optional)</legend>
+                  <p className="mb-3 text-[12px] text-ink-500">
+                    Members’ replies to club emails go to <b>&lt;club code&gt;@this domain</b> and appear in the club’s
+                    Communications inbox. In Resend › Domains, add the domain with receiving on (MX records), and
+                    subscribe the webhook above to <b>email.received</b>. Reading a received email needs a{' '}
+                    <b>full-access</b> key; it is kept apart from the sending key and used for nothing else.
+                  </p>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <label>
+                      <span className={label}>Receiving domain</span>
+                      <input
+                        name="inboundDomain"
+                        defaultValue={emailCfg?.inboundDomain ?? ''}
+                        placeholder="e.g. reply.lango.co.ke"
+                        className={input}
+                      />
+                    </label>
+                    <label>
+                      <span className={label}>Full-access key for reading replies</span>
+                      <input
+                        name="inboundKey"
+                        type="password"
+                        autoComplete="off"
+                        placeholder={emailCfg?.inboundKey ? '•••••••• stored' : 're_… (full access)'}
+                        className={input}
+                      />
+                    </label>
+                  </div>
+                </fieldset>
                 <div className="flex justify-end">
                   <SubmitButton pendingText="Checking with Resend…" className="btn-primary">
                     Verify &amp; save

@@ -1,6 +1,6 @@
 import { withTenant } from '@lango/db';
 import { memberOtpStatus } from '@lango/server';
-import { CheckCircle2, Smartphone } from 'lucide-react';
+import { CheckCircle2, Megaphone, MessageCircle, Smartphone } from 'lucide-react';
 import { AuthHeading, AuthNotice, AuthShell } from '@/components/auth-shell';
 import { LangoMark } from '@/components/logo';
 import { SubmitButton } from '@/components/submit-button';
@@ -18,17 +18,6 @@ export default async function MemberPortal({
 }) {
   const sp = await searchParams;
   const who = await readMember();
-  const Shell = ({ children }: { children: React.ReactNode }) => (
-    <div className="min-h-screen bg-ink-950 px-4 py-8 text-white">
-      <div className="mx-auto max-w-md">
-        <div className="mb-8 flex items-center gap-2">
-          <LangoMark size={32} />
-          <span className="font-semibold">Lango</span>
-        </div>
-        {children}
-      </div>
-    </div>
-  );
   if (!who) {
     const step = sp.step === 'code' || sp.step === 'phone' ? sp.step : 'start';
     const club = (sp.c ?? '').slice(0, 40);
@@ -174,136 +163,245 @@ export default async function MemberPortal({
     const [m] = await tx<
       { first_name: string; member_no: number; sms_news: boolean }[]
     >`select first_name, member_no, sms_news from members where id = ${who.memberId}`;
-    const ents = await tx<
-      { zone_key: string; ends_at: Date; starts_at: Date }[]
-    >`select zone_key, starts_at, ends_at from entitlements where member_id = ${who.memberId}`;
-    const plans = await tx<
-      { id: string; name: string; price_kes: number }[]
-    >`select p.id, p.name, p.price_kes from products p left join services s on s.id = p.service_id
+    // Access per service: the latest end date, and whether it is on now.
+    const access = await tx<{ name: string; ends: Date; live: boolean }[]>`
+      select coalesce(sv.name, initcap(e.zone_key)) as name, max(e.ends_at) as ends,
+             bool_or(e.starts_at <= now() and e.ends_at > now()) as live
+      from entitlements e left join services sv on sv.id = e.service_id
+      where e.member_id = ${who.memberId}
+      group by 1 order by bool_or(e.starts_at <= now() and e.ends_at > now()) desc, max(e.ends_at) desc`;
+    const plans = await tx<{ id: string; name: string; price_kes: number; service: string }[]>`
+      select p.id, p.name, p.price_kes, coalesce(s.name, split_part(p.name, ' · ', 1)) as service
+      from products p left join services s on s.id = p.service_id
        where p.active and p.price_kes >= 100 and coalesce(s.sold_to, 'both') <> 'walkins'
          and coalesce(s.active and s.deleted_at is null, true)
-       order by p.price_kes`;
+       order by 4, p.price_kes`;
+    const recent = await tx<{ id: string; paid_at: Date; amount_kes: number; what: string | null; channel: string }[]>`
+      select p.id, p.paid_at, p.amount_kes, p.channel,
+             coalesce((select string_agg(l.label, ' + ') from payment_lines l where l.payment_id = p.id), pr.name) as what
+      from payments p left join products pr on pr.id = p.product_id
+      where p.member_id = ${who.memberId} and p.status = 'applied' order by p.paid_at desc limit 4`;
+    const [last] = await tx<{ product_id: string }[]>`
+      select coalesce(l.product_id, p.product_id) as product_id from payments p
+      left join payment_lines l on l.payment_id = p.id
+      where p.member_id = ${who.memberId} and p.status = 'applied' and coalesce(l.product_id, p.product_id) is not null
+      order by p.paid_at desc limit 1`;
     const [t] = await tx<{ name: string }[]>`select name from tenants where id = ${who.tenantId}`;
     const [ch] = await tx<{ paybill: string | null; till: string | null }[]>`
       select data->'channels'->>'paybill' as paybill, data->'channels'->>'till' as till from tenant_settings`;
-    return { m, ents, plans, club: t?.name, ch };
+    const [wa] = await tx<{ phone: string | null }[]>`
+      select config->>'displayPhone' as phone from comm_channels where channel = 'whatsapp' and enabled`;
+    return { m, access, plans, recent, last: last?.product_id ?? null, club: t?.name, ch, wa: wa?.phone ?? null };
   });
-  const now = Date.now();
-  const live = d.ents.filter((e) => e.starts_at.getTime() <= now && e.ends_at.getTime() >= now);
-  const until = d.ents.length ? new Date(Math.max(...d.ents.map((e) => e.ends_at.getTime()))) : null;
+  const live = d.access.filter((a) => a.live);
+  const again = d.plans.find((p) => p.id === d.last) ?? null;
+  const groups = [...new Set(d.plans.map((p) => p.service))].map((g) => ({
+    name: g,
+    plans: d.plans.filter((p) => p.service === g),
+  }));
+  const short = (p: { name: string; service: string }) => {
+    const t = p.name.startsWith(`${p.service} · `) ? p.name.slice(p.service.length + 3) : p.name;
+    return t.charAt(0).toUpperCase() + t.slice(1);
+  };
+  const waLink = d.wa ? `https://wa.me/${d.wa.replace(/\D/g, '')}` : null;
+  const card = 'rounded-2xl bg-white ring-1 ring-[#E7EBF3] shadow-[0_1px_2px_rgba(12,18,32,0.04)]';
   return (
-    <Shell>
-      <div className="text-sm text-ink-300">{d.club}</div>
-      <h1 className="text-2xl font-semibold tracking-tight">Hi {d.m?.first_name}</h1>
-      <div
-        className={`mt-6 rounded-3xl p-6 ${live.length ? 'bg-gradient-to-br from-brand-500 to-emerald-700 text-ink-950' : 'bg-white/5 ring-1 ring-white/10'}`}
-      >
-        <div className="text-xs font-medium uppercase tracking-widest opacity-70">Member #{d.m?.member_no}</div>
-        <div className="mt-3 flex items-center gap-2 text-xl font-semibold">
-          {live.length ? (
-            <>
-              <CheckCircle2 size={20} /> You&apos;re in
-            </>
-          ) : (
-            'No active plan'
-          )}
-        </div>
-        {until && (
-          <div className="mt-1 text-sm opacity-80">
-            Access until {date(until)}
-            {live.length ? ` · ${daysLeft(until)} days left` : ''}
+    <div className="min-h-screen bg-[#F4F6F9] px-4 py-6 text-ink-900">
+      <div className="mx-auto max-w-md">
+        <header className="mb-6 flex items-center gap-2.5">
+          <LangoMark size={30} />
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-[15px] font-semibold">{d.club}</div>
+            <div className="text-[11.5px] text-ink-500">Member #{d.m?.member_no}</div>
           </div>
-        )}
-        {live.length > 0 && (
-          <div className="mt-4 flex flex-wrap gap-1.5">
-            {[...new Set(live.map((e) => e.zone_key))].map((z) => (
-              <span key={z} className="rounded-full bg-ink-950/15 px-2.5 py-0.5 text-xs font-medium capitalize">
-                {z}
-              </span>
-            ))}
-          </div>
-        )}
-      </div>
-      {(d.ch?.paybill || d.ch?.till) && (
-        <div className="mt-4 rounded-2xl bg-white/5 p-4 text-sm ring-1 ring-white/10">
-          <div className="text-xs font-medium uppercase tracking-widest text-ink-300">Pay from the M-Pesa menu</div>
-          <div className="mt-2 grid grid-cols-2 gap-3">
-            <div>
-              <div className="text-xs text-ink-300">{d.ch?.paybill ? 'Paybill' : 'Till'}</div>
-              <div className="font-mono text-lg">{d.ch?.paybill ?? d.ch?.till}</div>
-            </div>
-            {d.ch?.paybill && (
-              <div>
-                <div className="text-xs text-ink-300">Account</div>
-                <div className="font-mono text-lg">{d.m?.member_no}</div>
-              </div>
+          <form action={memberLogout}>
+            <button
+              type="submit"
+              className="rounded-lg px-2.5 py-1.5 text-[12.5px] font-medium text-ink-500 hover:bg-white"
+            >
+              Sign out
+            </button>
+          </form>
+        </header>
+
+        <h1 className="text-[24px] font-semibold tracking-tight">Hi {d.m?.first_name}</h1>
+        <div
+          className={`mt-4 rounded-3xl p-5 ${live.length ? 'bg-gradient-to-br from-emerald-500 to-emerald-700 text-white' : 'bg-white text-ink-900 ring-1 ring-[#E7EBF3]'}`}
+        >
+          <div className="flex items-center gap-2 text-[19px] font-semibold">
+            {live.length ? (
+              <>
+                <CheckCircle2 size={20} /> You&apos;re in
+              </>
+            ) : d.access.length ? (
+              'Your access has ended'
+            ) : (
+              'No plan yet'
             )}
           </div>
-          <div className="mt-2 text-xs text-ink-300">Pay the exact plan price; the doors update within a minute.</div>
+          {d.access.length > 0 ? (
+            <ul className={`mt-3 space-y-1.5 text-[13.5px] ${live.length ? 'text-white/90' : 'text-ink-500'}`}>
+              {d.access.slice(0, 5).map((a) => (
+                <li key={a.name} className="flex items-center gap-2">
+                  <span className={`h-1.5 w-1.5 rounded-full ${a.live ? 'bg-white' : 'bg-current opacity-40'}`} />
+                  <b className="font-semibold">{a.name}</b>
+                  <span className="ml-auto tabular-nums">
+                    {a.live ? `until ${date(a.ends)} · ${daysLeft(a.ends)} days` : `ended ${date(a.ends)}`}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="mt-1 text-[13.5px] text-ink-500">Pick a plan below and pay with M-Pesa to get in.</p>
+          )}
         </div>
-      )}
-      {sp.pay === 'sent' && (
-        <div className="mt-4 flex items-center gap-2 rounded-xl bg-white/5 p-3 text-sm">
-          <Smartphone size={16} /> Check your phone and enter your M-Pesa PIN. The doors update automatically.
-        </div>
-      )}
-      {sp.pay === 'unavailable' && (
-        <div className="mt-4 rounded-xl bg-amber-500/15 p-3 text-sm text-amber-100">
-          Online payment isn&apos;t switched on for this club yet. Pay at reception.
-        </div>
-      )}
-      {(sp.pay === 'failed' || sp.pay === 'wait') && (
-        <div className="mt-4 rounded-xl bg-amber-500/15 p-3 text-sm text-amber-100">
-          {sp.pay === 'wait'
-            ? 'A payment request was just sent. Give it a few minutes before trying again.'
-            : 'We couldn\u2019t reach M-Pesa just now. Try again in a minute or pay at reception.'}
-        </div>
-      )}
-      <h2 className="mt-8 text-xs font-medium uppercase tracking-widest text-ink-300">Renew or add</h2>
-      <div className="mt-3 space-y-2">
-        {d.plans.map((p) => (
-          <form
-            key={p.id}
-            action={memberPay}
-            className="flex items-center justify-between rounded-2xl bg-white/5 p-4 ring-1 ring-white/10"
-          >
-            <input type="hidden" name="productId" value={p.id} />
-            <div>
-              <div className="text-sm font-medium">{p.name}</div>
-              <div className="text-xs text-ink-300">{kes(p.price_kes)}</div>
+
+        {sp.pay === 'sent' && (
+          <div className="mt-4 flex items-center gap-2 rounded-xl bg-emerald-50 p-3 text-[13px] text-emerald-900 ring-1 ring-emerald-200">
+            <Smartphone size={16} /> Check your phone and enter your M-Pesa PIN. The doors update automatically.
+          </div>
+        )}
+        {sp.pay === 'unavailable' && (
+          <div className="mt-4 rounded-xl bg-amber-50 p-3 text-[13px] text-amber-900 ring-1 ring-amber-200">
+            Online payment isn&apos;t switched on for this club yet. Pay at reception.
+          </div>
+        )}
+        {(sp.pay === 'failed' || sp.pay === 'wait') && (
+          <div className="mt-4 rounded-xl bg-amber-50 p-3 text-[13px] text-amber-900 ring-1 ring-amber-200">
+            {sp.pay === 'wait'
+              ? 'A payment request was just sent. Give it a few minutes before trying again.'
+              : 'We couldn\u2019t reach M-Pesa just now. Try again in a minute or pay at reception.'}
+          </div>
+        )}
+
+        {again && (
+          <form action={memberPay} className={`${card} mt-4 flex items-center gap-3 p-4`}>
+            <input type="hidden" name="productId" value={again.id} />
+            <div className="min-w-0 flex-1">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-500">Renew</div>
+              <div className="truncate text-[14.5px] font-semibold">{again.name}</div>
+              <div className="text-[12.5px] text-ink-500 tabular-nums">{kes(again.price_kes)}</div>
             </div>
-            <SubmitButton
-              pendingText="Sending…"
-              className="btn bg-white px-3 py-2 text-xs text-ink-950 hover:bg-ink-100"
-            >
+            <SubmitButton pendingText="Sending…" className="btn-primary px-4 py-2.5 text-[13px]">
               Pay with M-Pesa
             </SubmitButton>
           </form>
-        ))}
-      </div>
-      <form action={setNews} className="mt-8 rounded-2xl bg-white/5 p-4 text-sm ring-1 ring-white/10">
-        <input type="hidden" name="news" value={d.m?.sms_news ? 'off' : 'on'} />
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <div className="font-medium">Club news by SMS</div>
-            <div className="text-xs text-ink-300">
-              {sp.news === 'off'
-                ? 'Turned off. Receipts and renewal reminders still come.'
-                : sp.news === 'on'
-                  ? 'Turned on.'
-                  : 'Closures, events and offers. Receipts and reminders always come.'}
+        )}
+
+        <h2 className="mt-7 mb-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-500">
+          {again ? 'Or choose another plan' : 'Plans'}
+        </h2>
+        <div className="space-y-3">
+          {groups.map((g) => (
+            <section key={g.name} className={`${card} overflow-hidden`}>
+              <div className="border-b border-[#EEF1F6] px-4 py-2.5 text-[13.5px] font-semibold">{g.name}</div>
+              <div className="divide-y divide-[#F0F2F6]">
+                {g.plans.map((p) => (
+                  <form key={p.id} action={memberPay} className="flex items-center gap-3 px-4 py-3">
+                    <input type="hidden" name="productId" value={p.id} />
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[13.5px]">{short(p)}</div>
+                      <div className="text-[12.5px] font-semibold tabular-nums">{kes(p.price_kes)}</div>
+                    </div>
+                    <SubmitButton
+                      pendingText="Sending…"
+                      className="btn rounded-lg px-3 py-1.5 text-[12.5px] ring-1 ring-[#E1E5EC] hover:bg-ink-50"
+                    >
+                      Pay
+                    </SubmitButton>
+                  </form>
+                ))}
+              </div>
+            </section>
+          ))}
+        </div>
+
+        {(d.ch?.paybill || d.ch?.till) && (
+          <div className={`${card} mt-4 p-4`}>
+            <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-500">
+              Or pay from the M-Pesa menu
+            </div>
+            <div className="mt-2 grid grid-cols-2 gap-3">
+              <div>
+                <div className="text-[12px] text-ink-500">{d.ch?.paybill ? 'Paybill' : 'Till'}</div>
+                <div className="font-mono text-[18px] font-semibold">{d.ch?.paybill ?? d.ch?.till}</div>
+              </div>
+              {d.ch?.paybill && (
+                <div>
+                  <div className="text-[12px] text-ink-500">Account</div>
+                  <div className="font-mono text-[18px] font-semibold">{d.m?.member_no}</div>
+                </div>
+              )}
+            </div>
+            <div className="mt-2 text-[12px] text-ink-500">
+              Pay the exact plan price; the doors update within a minute.
             </div>
           </div>
-          <button type="submit" className="btn bg-white/10 px-3 py-2 text-xs hover:bg-white/15">
-            {d.m?.sms_news ? 'Turn off' : 'Turn on'}
-          </button>
+        )}
+
+        {d.recent.length > 0 && (
+          <>
+            <h2 className="mt-7 mb-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-500">
+              Recent payments
+            </h2>
+            <ul className={`${card} divide-y divide-[#F0F2F6]`}>
+              {d.recent.map((r) => (
+                <li key={r.id} className="flex items-center gap-3 px-4 py-3 text-[13px]">
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate">{r.what ?? 'Payment'}</div>
+                    <div className="text-[12px] text-ink-500">
+                      {date(r.paid_at)} · {r.channel === 'cash' ? 'Cash' : 'M-Pesa'}
+                    </div>
+                  </div>
+                  <b className="tabular-nums">{kes(r.amount_kes)}</b>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+
+        <div className={`${card} mt-7 divide-y divide-[#F0F2F6]`}>
+          {waLink && (
+            <a
+              href={waLink}
+              target="_blank"
+              rel="noopener"
+              className="flex items-center gap-3 px-4 py-3.5 text-[13.5px]"
+            >
+              <span className="grid h-9 w-9 place-items-center rounded-xl bg-emerald-50 text-emerald-700">
+                <MessageCircle size={17} />
+              </span>
+              <span className="min-w-0 flex-1">
+                <b className="block font-semibold">Message the club on WhatsApp</b>
+                <span className="text-[12px] text-ink-500">{d.wa}</span>
+              </span>
+            </a>
+          )}
+          <form action={setNews} className="flex items-center gap-3 px-4 py-3.5">
+            <input type="hidden" name="news" value={d.m?.sms_news ? 'off' : 'on'} />
+            <span className="grid h-9 w-9 place-items-center rounded-xl bg-ink-50 text-ink-500">
+              <Megaphone size={16} />
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="text-[13.5px] font-semibold">Club news by SMS</div>
+              <div className="text-[12px] text-ink-500">
+                {sp.news === 'off'
+                  ? 'Turned off. Receipts and renewal reminders still come.'
+                  : sp.news === 'on'
+                    ? 'Turned on.'
+                    : 'Closures, events and offers. Receipts and reminders always come.'}
+              </div>
+            </div>
+            <button
+              type="submit"
+              className="btn rounded-lg px-3 py-1.5 text-[12.5px] ring-1 ring-[#E1E5EC] hover:bg-ink-50"
+            >
+              {d.m?.sms_news ? 'Turn off' : 'Turn on'}
+            </button>
+          </form>
         </div>
-      </form>
-      <form action={memberLogout} className="mt-6 text-center">
-        <button type="submit" className="text-sm text-ink-300 underline">
-          Sign out
-        </button>
-      </form>
-    </Shell>
+        <p className="mt-8 text-center text-[11px] tracking-[0.12em] text-ink-300">© NAVAC GLOBAL</p>
+      </div>
+    </div>
   );
 }

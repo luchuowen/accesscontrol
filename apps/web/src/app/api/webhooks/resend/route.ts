@@ -1,7 +1,10 @@
-import { applyResendEvent, decrypt, platformEmailConfig, verifySvix } from '@lango/server';
+import { applyResendEvent, decrypt, platformEmailConfig, receiveEmail, verifySvix } from '@lango/server';
 import { db } from '@/server/db';
 
-/** Resend delivery events (delivered, bounced, complained), signed with Svix; unsigned or stale events are refused. */
+/**
+ * Resend events, signed with Svix (unsigned or stale events are refused): delivery updates (delivered, bounced,
+ * complained), and email.received for replies to clubs, which land in the club's Communications inbox.
+ */
 export async function POST(req: Request) {
   const raw = await req.text();
   const cfg = await platformEmailConfig(db());
@@ -17,7 +20,9 @@ export async function POST(req: Request) {
   );
   if (!ok) return new Response('bad signature', { status: 401 });
   try {
-    await applyResendEvent(db(), JSON.parse(raw));
+    const evt = JSON.parse(raw);
+    if (evt?.type === 'email.received') await receiveEmail(db(), evt.data ?? {});
+    else await applyResendEvent(db(), evt);
   } catch {
     return new Response('bad body', { status: 400 });
   }

@@ -273,7 +273,7 @@ export default async function Dashboard({
               </div>
               {can(s, 'messages.manage') && d.renewals.lapsed > 0 && (
                 <Link
-                  href="/messages"
+                  href="/communications?news=lapsed"
                   className="mt-3 inline-flex rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-ink-900 hover:bg-slate-50"
                 >
                   Message lapsed

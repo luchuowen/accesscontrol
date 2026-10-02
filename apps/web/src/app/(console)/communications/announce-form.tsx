@@ -9,14 +9,14 @@ const AUDIENCES = {
   all: 'All members',
 } as const;
 
-const units = (t: string) => {
+export const units = (t: string) => {
   // biome-ignore lint/suspicious/noControlCharactersInRegex: GSM-7 basic set check
   const gsm = /^[\x0A\x0D\x20-\x7E£¥èéùìòÇØøÅåΔ_ΦΓΛΩΠΨΣΘΞÆæßÉ¤¡ÄÖÑÜ§¿äöñüà€]*$/.test(t);
   const [one, part] = gsm ? [160, 153] : [70, 67];
   return t.length <= one ? 1 : Math.ceil(t.length / part);
 };
 
-export function AnnounceForm({ club }: { club: string }) {
+export function AnnounceForm({ club, initialAudience }: { club: string; initialAudience?: string }) {
   const [state, action] = useActionState<AnnounceState, FormData>(announce, { step: 'edit' });
   const [text, setText] = useState('');
   const [editing, setEditing] = useState(false);
@@ -81,7 +81,7 @@ export function AnnounceForm({ club }: { club: string }) {
   const u = body ? units(body) : 0;
   return (
     <form action={action} onSubmit={() => setEditing(false)} className="mt-6 space-y-3 text-sm">
-      <select name="audience" defaultValue={audience ?? 'current'} className="input">
+      <select name="audience" defaultValue={audience ?? initialAudience ?? 'current'} className="input">
         {Object.entries(AUDIENCES).map(([k, v]) => (
           <option key={k} value={k}>
             {v}

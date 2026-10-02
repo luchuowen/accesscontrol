@@ -24,6 +24,7 @@ import {
   verifySignInCode,
 } from './accounts.js';
 import { handleAck, handleDrift, handleEvents, handleInventory, handlePair, handleSync } from './bridge-api.js';
+import { parseMeta, ReplyError, receiveEmail, receiveWhatsApp, sendReply, verifyMeta } from './comms.js';
 import { encrypt } from './crypto.js';
 import { applyResendEvent, Resend, sendEmail, verifySvix } from './email.js';
 import {
@@ -1210,5 +1211,122 @@ describe('walking skeleton: pay → door', () => {
     const at = later.toFormat("yyyy-MM-dd'T'HH:mm:ss");
     expect(fake.swipe(28777, 0, 12, at)).toBe(false);
     expect(fake.swipe(28777, 0, 11, at)).toBe(true);
+  });
+});
+
+describe('communications', () => {
+  const key = 'test-only-key-0123456789abcdef0123456789';
+  const meta = (id: string, body: string, from = '254700000001', at = Math.floor(Date.now() / 1000)) => ({
+    entry: [
+      {
+        changes: [
+          {
+            value: {
+              contacts: [{ wa_id: from, profile: { name: 'Jane W' } }],
+              messages: [{ from, id, timestamp: String(at), type: 'text', text: { body } }],
+            },
+          },
+        ],
+      },
+    ],
+  });
+
+  it('WhatsApp: a signed message opens one conversation linked to the member; replies only within 24 hours', async () => {
+    vi.stubEnv('APP_ENCRYPTION_KEY', key);
+    const raw = JSON.stringify(meta('wamid.1', 'Is the pool open on Saturday?'));
+    const sig = `sha256=${createHmac('sha256', 'app-secret').update(raw).digest('hex')}`;
+    expect(verifyMeta('app-secret', raw, sig)).toBe(true);
+    expect(verifyMeta('app-secret', raw, 'sha256=00')).toBe(false);
+    expect(verifyMeta('other-secret', raw, sig)).toBe(false);
+    await owner`insert into comm_channels (tenant_id, channel, enabled, config, secret, routing_token, verify_token)
+      values (${tenantId}, 'whatsapp', true, ${owner.json({ phoneNumberId: '555' } as never)},
+              ${encrypt(JSON.stringify({ accessToken: 'tok', appSecret: 'app-secret' }))}, 'route-token-0123456789abcdef', 'v')`;
+    // Meta may deliver the same message twice: it is stored once.
+    expect(await receiveWhatsApp(app, tenantId, parseMeta(JSON.parse(raw)))).toBe(1);
+    expect(await receiveWhatsApp(app, tenantId, parseMeta(JSON.parse(raw)))).toBe(0);
+    const [c] = await withTenant(
+      app,
+      tenantId,
+      (tx) => tx<{ id: string; member_id: string | null; unread: number }[]>`
+      select c.id, c.member_id, c.unread from conversations c where address = '254700000001'`,
+    );
+    const [jane] = await owner<
+      { id: string }[]
+    >`select id from members where member_no = 21001 and tenant_id = ${tenantId}`;
+    expect(c?.member_id).toBe(jane?.id);
+    expect(c?.unread).toBe(1);
+    // Another club never sees it.
+    expect(await withTenant(app, otherTenant, (tx) => tx`select 1 from conversations`)).toHaveLength(0);
+    // A reply goes to Meta with the club's token, and delivery updates move its ticks forward only.
+    const sent: { url: string; body: string; auth: string }[] = [];
+    const graph = (async (url: string, init: RequestInit) => {
+      sent.push({ url, body: String(init.body), auth: String((init.headers as Record<string, string>).Authorization) });
+      return new Response(JSON.stringify({ messages: [{ id: 'wamid.out1' }] }), { status: 200 });
+    }) as unknown as typeof fetch;
+    await sendReply(app, tenantId, c?.id as string, { body: 'Yes, 6am to 8pm.', staffName: 'Mary' }, graph);
+    expect(sent[0]?.url).toContain('/555/messages');
+    expect(sent[0]?.auth).toBe('Bearer tok');
+    expect(JSON.parse(sent[0]?.body ?? '{}')).toMatchObject({ to: '254700000001', text: { body: 'Yes, 6am to 8pm.' } });
+    await receiveWhatsApp(app, tenantId, {
+      messages: [],
+      statuses: [{ id: 'wamid.out1', status: 'read', error: null }],
+    });
+    await receiveWhatsApp(app, tenantId, {
+      messages: [],
+      statuses: [{ id: 'wamid.out1', status: 'delivered', error: null }],
+    });
+    const [out] = await withTenant(
+      app,
+      tenantId,
+      (tx) => tx<{ status: string; staff_name: string }[]>`
+      select status, staff_name from comm_messages where provider_ref = 'wamid.out1'`,
+    );
+    expect(out).toEqual({ status: 'read', staff_name: 'Mary' });
+    // Past Meta's 24-hour window, free text is refused before anything is sent.
+    await withTenant(app, tenantId, (tx) => tx`update conversations set last_in_at = now() - interval '25 hours'`);
+    await expect(
+      sendReply(app, tenantId, c?.id as string, { body: 'Hello again', staffName: 'Mary' }, graph),
+    ).rejects.toThrow(ReplyError);
+    expect(sent).toHaveLength(1);
+  });
+
+  it('email replies land in the club inbox by club code, without the quoted earlier message', async () => {
+    vi.stubEnv('APP_ENCRYPTION_KEY', key);
+    await owner`insert into platform_settings (key, data) values ('email', ${owner.json({
+      apiKey: encrypt('re_test'),
+      from: 'Lango <lango@navac.co.ke>',
+      inboundDomain: 'reply.test',
+      inboundKey: encrypt('re_full'),
+    } as never)}) on conflict (key) do update set data = excluded.data`;
+    await owner`insert into comm_channels (tenant_id, channel, enabled) values (${tenantId}, 'email', true)`;
+    const asked: string[] = [];
+    const resend = (async (url: string, init: RequestInit) => {
+      asked.push(`${url} ${(init.headers as Record<string, string>).Authorization}`);
+      return new Response(
+        JSON.stringify({ text: 'Thanks, see you Monday.\n\nOn Fri, Demo Club wrote:\n> Your plan ends soon' }),
+      );
+    }) as unknown as typeof fetch;
+    const data = {
+      email_id: 'em_1',
+      from: 'Kevin O <Kevin@Example.com>',
+      to: ['demo-club@reply.test'],
+      subject: 'Re: Your plan',
+    };
+    expect(await receiveEmail(app, data, resend)).toBe(true);
+    expect(await receiveEmail(app, data, resend)).toBe(true); // a resent webhook adds nothing
+    expect(asked[0]).toBe('https://api.resend.com/emails/receiving/em_1 Bearer re_full');
+    const msgs = await withTenant(
+      app,
+      tenantId,
+      (tx) => tx<{ body: string; subject: string; address: string }[]>`
+      select m.body, m.subject, c.address from comm_messages m join conversations c on c.id = m.conversation_id
+      where c.channel = 'email'`,
+    );
+    expect(msgs).toEqual([{ body: 'Thanks, see you Monday.', subject: 'Re: Your plan', address: 'kevin@example.com' }]);
+    // Unknown club codes and other domains are ignored.
+    expect(await receiveEmail(app, { ...data, email_id: 'em_2', to: ['nobody@reply.test'] }, resend)).toBe(false);
+    expect(await receiveEmail(app, { ...data, email_id: 'em_3', to: ['demo-club@elsewhere.test'] }, resend)).toBe(
+      false,
+    );
   });
 });

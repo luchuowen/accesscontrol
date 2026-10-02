@@ -11,6 +11,10 @@ export interface PlatformEmail {
   from: string; // e.g. "Lango <lango@navac.co.ke>"
   replyTo?: string;
   webhookSecret?: string; // encrypted, "whsec_…"
+  /** Receiving: replies to clubs arrive at <club code>@inboundDomain (MX records point to Resend). */
+  inboundDomain?: string;
+  /** Encrypted full-access key, used only to read received emails (the sending key stays sending-only). */
+  inboundKey?: string;
 }
 
 export class ResendError extends Error {
@@ -113,6 +117,8 @@ export async function sendEmail(
     key: string;
     tenantId?: string;
     replyTo?: string;
+    /** Shown as the sender's name instead of the platform's (e.g. the club), same address. */
+    fromName?: string;
   },
   client?: Resend | null,
 ): Promise<boolean> {
@@ -131,7 +137,9 @@ export async function sendEmail(
   const resend = client ?? new Resend(decrypt(cfg.apiKey));
   try {
     const r = await resend.send({
-      from: cfg.from,
+      from: m.fromName
+        ? `${m.fromName.replace(/[<>"]/g, '')} <${/<([^>]+)>/.exec(cfg.from)?.[1] ?? cfg.from}>`
+        : cfg.from,
       to: m.to,
       subject: m.subject,
       html: m.html,

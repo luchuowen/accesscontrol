@@ -336,7 +336,7 @@ export async function dispatchSms(
 export async function sendNow(
   sql: Sql,
   tenantId: string,
-  m: { phone: string; body: string; kind: string; memberId?: string },
+  m: { phone: string; body: string; kind: string; memberId?: string; conversationId?: string; staffName?: string },
   client?: SourceCodeSms | null,
 ): Promise<boolean> {
   const sms = client ?? (await platformSms(sql));
@@ -358,9 +358,11 @@ export async function sendNow(
   const units = Math.max(smsUnits(m.body), r.cost ?? 0);
   await withTenant(sql, tenantId, async (tx) => {
     const [row] = await tx<{ id: string }[]>`
-      insert into sms_messages (tenant_id, member_id, phone, body, kind, status, provider_ref, error, attempts, sent_at)
+      insert into sms_messages (tenant_id, member_id, phone, body, kind, status, provider_ref, error, attempts, sent_at,
+                                conversation_id, staff_name)
       values (${tenantId}, ${m.memberId ?? null}, ${to}, ${m.body}, ${m.kind}, ${r.ok ? 'sent' : 'failed'},
-              ${r.messageId ?? null}, ${r.ok ? null : `${r.code} ${r.desc}`.slice(0, 300)}, 1, ${r.ok ? new Date() : null})
+              ${r.messageId ?? null}, ${r.ok ? null : `${r.code} ${r.desc}`.slice(0, 300)}, 1, ${r.ok ? new Date() : null},
+              ${m.conversationId ?? null}, ${m.staffName ?? null})
       returning id`;
     if (r.ok)
       await tx`insert into sms_ledger (tenant_id, units, kind, ref, amount_kes)

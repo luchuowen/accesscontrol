@@ -18,7 +18,12 @@ export function PartnerNav({
 }) {
   const path = usePathname();
   const items = [
-    { href: '/partner', label: 'Clubs', icon: Building2, on: path === '/partner' || path.startsWith('/partner/new') },
+    {
+      href: '/partner',
+      label: 'Clubs',
+      icon: Building2,
+      on: path === '/partner' || path.startsWith('/partner/new') || path.startsWith('/partner/clubs'),
+    },
     ...(people
       ? [{ href: '/partner/partners', label: 'People', icon: UsersRound, on: path.startsWith('/partner/partners') }]
       : []),

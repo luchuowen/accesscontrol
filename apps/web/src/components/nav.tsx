@@ -11,7 +11,6 @@ import {
   Plug,
   SlidersHorizontal,
   Users,
-  UsersRound,
 } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
@@ -30,13 +29,12 @@ export const ITEMS = [
     any: ['payments.record', 'payments.assign', 'reports.all'],
   },
   { href: '/reports', label: 'Reports', icon: ChartColumn, any: ['reports.all'] },
-  { href: '/messages', label: 'Messages', icon: MessageSquare, any: ['messages.manage'] },
-  { href: '/team', label: 'Team', icon: UsersRound, any: ['team.manage'] },
+  { href: '/communications', label: 'Communications', icon: MessageSquare, any: ['inbox.reply', 'messages.manage'] },
   {
     href: '/settings',
     label: 'Settings',
     icon: SlidersHorizontal,
-    any: ['settings.payments', 'sms.buy', 'messages.manage'],
+    any: ['settings.payments', 'sms.buy', 'messages.manage', 'team.manage'],
   },
 ];
 

@@ -325,7 +325,7 @@ function Drawer({ id, canPay, onClose }: { id: string; canPay: boolean; onClose:
                   <Link href={`/members/${m.id}#card`} className={act}>
                     <CreditCard size={16} /> {m.card ? 'Replace card' : 'Link card'}
                   </Link>
-                  <Link href="/messages" className={act}>
+                  <Link href={`/communications/start?member=${m.id}`} className={act}>
                     <MessageSquare size={16} /> Message
                   </Link>
                 </div>

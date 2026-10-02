@@ -1,11 +1,10 @@
 import { onboardingChecklist } from '@lango/server';
-import { Plus } from 'lucide-react';
+import { ChevronRight, Plus } from 'lucide-react';
 import Link from 'next/link';
-import { Badge, PageHeader, Stat } from '@/components/ui';
+import { PageHeader } from '@/components/ui';
 import { ago, kes } from '@/lib/format';
 import { requirePartner } from '@/lib/session';
 import { db } from '@/server/db';
-import { inviteOwner, resendOwnerInvite } from './actions';
 
 interface Row {
   id: string;
@@ -80,134 +79,119 @@ export default async function PartnerHome({ searchParams }: { searchParams: Prom
           {msg[1]}
         </div>
       )}
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <Stat label="Clubs" value={rows.length} />
-        <Stat label="Through Payment Gateway · 30 days" value={kes(taifa)} hint="fee-earning volume" />
-        <Stat label="Cash · 30 days" value={kes(cash)} hint="recorded at the desk" />
-        <Stat label="Active members" value={rows.reduce((a, r) => a + r.active_members, 0)} />
+      <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+        {[
+          [
+            'Clubs',
+            `${rows.length}`,
+            `${rows.filter((r) => (prog.get(r.id)?.done ?? 0) === (prog.get(r.id)?.total ?? -1)).length} fully set up`,
+          ],
+          ['Payment Gateway · 30 d', kes(taifa), 'fee-earning volume'],
+          ['Cash · 30 d', kes(cash), 'recorded at club desks'],
+          [
+            'Active members',
+            rows.reduce((a, r) => a + r.active_members, 0).toLocaleString('en-KE'),
+            'across all clubs',
+          ],
+        ].map(([k, v, h]) => (
+          <div key={k} className="rounded-2xl border border-[#E4E8EF] bg-white px-4 py-3.5">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-500">{k}</div>
+            <div className="mt-1 truncate text-[22px] font-semibold tabular-nums tracking-tight">{v}</div>
+            <div className="mt-0.5 text-[12px] text-ink-500">{h}</div>
+          </div>
+        ))}
       </div>
-      <div className="card mt-6 overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead className="bg-ink-50/60 text-left">
+      <div className="mt-5 overflow-x-auto rounded-2xl border border-[#E4E8EF] bg-white">
+        <table className="w-full min-w-[860px] text-[13px]">
+          <thead className="bg-[#FAFBFC] text-left">
             <tr>
-              {['Club', 'Owner', 'Setup', 'Payments', 'Doors', 'Members', 'Payment Gateway · 30 d', 'Cash · 30 d'].map(
+              {['Club', 'Owner', 'Setup', 'Payments', 'Door PC', 'Members', 'Gateway · 30 d', 'Cash · 30 d', ''].map(
                 (h) => (
-                  <th key={h} className="label px-5 py-3 font-medium">
+                  <th key={h} className="px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.06em] text-ink-500">
                     {h}
                   </th>
                 ),
               )}
             </tr>
           </thead>
-          <tbody className="divide-y divide-ink-100">
+          <tbody className="divide-y divide-[#F0F2F6]">
             {rows.map((r) => {
               const p = prog.get(r.id);
+              const o = owners.get(r.id);
               const online = r.bridge_seen && Date.now() - r.bridge_seen.getTime() < 10 * 60_000;
+              const href = `/partner/clubs/${r.id}`;
+              const dot = (tone: string, text: string) => (
+                <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+                  <i className={`h-1.5 w-1.5 rounded-full ${tone}`} />
+                  {text}
+                </span>
+              );
               return (
-                <tr key={r.id} className="hover:bg-ink-50/50">
-                  <td className="px-5 py-3">
-                    <div className="font-medium">{r.name}</div>
+                <tr key={r.id} className="group hover:bg-[#FAFBFC]">
+                  <td className="px-4 py-3.5">
+                    <Link href={href} className="font-semibold text-ink-900 hover:underline">
+                      {r.name}
+                    </Link>
                     <div className="font-mono text-[11px] text-ink-500">
                       {r.slug}
                       {r.partner ? ` · ${r.partner}` : ''}
                     </div>
                   </td>
-                  <td className="px-5 py-3 text-xs">
-                    {(() => {
-                      const o = owners.get(r.id);
-                      if (o?.owner_email && o.accepted)
-                        return (
-                          <>
-                            <div className="text-sm font-medium">{o.owner_name}</div>
-                            <div className="text-ink-500">{o.owner_email}</div>
-                          </>
-                        );
-                      if (o?.owner_email)
-                        return (
-                          <>
-                            <div className="flex items-center gap-1.5 text-sm font-medium">
-                              {o.owner_name} <Badge tone="amber">invited</Badge>
-                            </div>
-                            <div className="text-ink-500">{o.owner_email}</div>
-                            {s.kind === 'partner_admin' && (
-                              <form action={resendOwnerInvite}>
-                                <input type="hidden" name="tenantId" value={r.id} />
-                                <button type="submit" className="mt-1 font-medium text-ink-500 hover:text-ink-900">
-                                  Resend invitation
-                                </button>
-                              </form>
-                            )}
-                          </>
-                        );
-                      return s.kind === 'partner_admin' ? (
-                        <details>
-                          <summary className="cursor-pointer list-none font-medium text-brand-600 hover:underline">
-                            Invite owner
-                          </summary>
-                          <form action={inviteOwner} className="mt-2 grid w-60 gap-2">
-                            <input type="hidden" name="tenantId" value={r.id} />
-                            <input name="name" required placeholder="Enter full name" className="input py-2 text-xs" />
-                            <input
-                              name="email"
-                              type="email"
-                              required
-                              placeholder="Enter email address"
-                              className="input py-2 text-xs"
-                            />
-                            <input
-                              name="phone"
-                              type="tel"
-                              placeholder="Enter mobile number (optional)"
-                              className="input py-2 text-xs"
-                            />
-                            <button type="submit" className="btn-primary py-2 text-xs">
-                              Send invitation
-                            </button>
-                          </form>
-                        </details>
-                      ) : (
-                        <span className="text-ink-500">No owner yet</span>
-                      );
-                    })()}
+                  <td className="px-4 py-3.5">
+                    {o?.owner_email ? (
+                      <>
+                        <div className="font-medium">{o.owner_name}</div>
+                        <div className="text-[12px] text-ink-500">
+                          {o.accepted ? o.owner_email : 'invited, not signed up yet'}
+                        </div>
+                      </>
+                    ) : (
+                      <Link href={href} className="text-[12.5px] font-medium text-emerald-700 hover:underline">
+                        Invite owner
+                      </Link>
+                    )}
                   </td>
-                  <td className="px-5 py-3">
+                  <td className="px-4 py-3.5">
                     {p && (
                       <div className="flex items-center gap-2">
-                        <div className="h-1.5 w-20 overflow-hidden rounded-full bg-ink-100">
+                        <div className="h-1.5 w-16 overflow-hidden rounded-full bg-ink-100">
                           <div
-                            className="h-full rounded-full bg-brand-500"
+                            className="h-full rounded-full bg-emerald-500"
                             style={{ width: `${Math.round((p.done / p.total) * 100)}%` }}
                           />
                         </div>
-                        <span className="text-xs tabular-nums text-ink-500">
+                        <span className="text-[12px] tabular-nums text-ink-500">
                           {p.done}/{p.total}
                         </span>
                       </div>
                     )}
                   </td>
-                  <td className="px-5 py-3 text-xs">
-                    {r.taifapay_env ? (
-                      <Badge tone="green">Payment Gateway {r.taifapay_env}</Badge>
-                    ) : (
-                      <Badge tone="amber">not connected</Badge>
-                    )}
-                    <div className="mt-1 text-ink-500">
-                      {r.paybill ? `Paybill ${r.paybill}` : r.till ? `Till ${r.till}` : 'links & prompts'}
+                  <td className="px-4 py-3.5 text-[12.5px]">
+                    {r.taifapay_env
+                      ? dot('bg-emerald-500', `Gateway ${r.taifapay_env}`)
+                      : dot('bg-amber-500', 'Not connected')}
+                    <div className="mt-0.5 text-[11.5px] text-ink-500">
+                      {r.paybill ? `Paybill ${r.paybill}` : r.till ? `Till ${r.till}` : 'Prompts & links'}
                     </div>
                   </td>
-                  <td className="px-5 py-3 text-xs">
-                    <Badge tone={online ? 'green' : r.bridge_seen ? 'amber' : 'gray'}>
-                      {online ? 'online' : r.bridge_seen ? `seen ${ago(r.bridge_seen)}` : 'not installed'}
-                    </Badge>
+                  <td className="px-4 py-3.5 text-[12.5px]">
+                    {online
+                      ? dot('bg-emerald-500', 'Online')
+                      : r.bridge_seen
+                        ? dot('bg-amber-500', `Seen ${ago(r.bridge_seen)}`)
+                        : dot('bg-ink-300', 'Not installed')}
                   </td>
-                  <td className="px-5 py-3 tabular-nums">
+                  <td className="px-4 py-3.5 tabular-nums">
                     {r.active_members} <span className="text-ink-500">/ {r.members}</span>
-                    {r.unmatched > 0 && (
-                      <div className="text-[11px] text-amber-700">{r.unmatched} payment(s) to assign</div>
-                    )}
+                    {r.unmatched > 0 && <div className="text-[11px] text-amber-700">{r.unmatched} to sort</div>}
                   </td>
-                  <td className="px-5 py-3 tabular-nums">{kes(Number(r.via_taifapay))}</td>
-                  <td className="px-5 py-3 tabular-nums text-ink-500">{kes(Number(r.cash))}</td>
+                  <td className="px-4 py-3.5 tabular-nums">{kes(Number(r.via_taifapay))}</td>
+                  <td className="px-4 py-3.5 tabular-nums text-ink-500">{kes(Number(r.cash))}</td>
+                  <td className="px-4 py-3.5 text-right">
+                    <Link href={href} aria-label={`Open ${r.name}`} className="text-ink-300 group-hover:text-ink-900">
+                      <ChevronRight size={18} />
+                    </Link>
+                  </td>
                 </tr>
               );
             })}

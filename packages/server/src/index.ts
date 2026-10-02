@@ -2,6 +2,7 @@ export * from './access.js';
 export * from './accounts.js';
 export * from './auth.js';
 export * from './bridge-api.js';
+export * from './comms.js';
 export * from './crypto.js';
 export * from './email.js';
 export * from './notify.js';

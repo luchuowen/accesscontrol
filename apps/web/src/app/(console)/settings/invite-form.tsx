@@ -1,7 +1,7 @@
 'use client';
 import { useActionState } from 'react';
 import { SubmitButton } from '@/components/submit-button';
-import { type InviteState, invite } from './actions';
+import { type InviteState, invite } from './team-actions';
 
 export function InviteForm({ roles }: { roles: { key: string; label: string; hint: string }[] }) {
   const [state, action] = useActionState<InviteState, FormData>(invite, {});

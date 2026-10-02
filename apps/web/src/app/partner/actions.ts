@@ -1,8 +1,10 @@
 'use server';
 import { randomBytes } from 'node:crypto';
+import { withTenant } from '@lango/db';
 import {
   accountEmail,
   assignClubs,
+  checkWhatsApp,
   clientIp,
   encrypt,
   hashPassword,
@@ -204,6 +206,13 @@ export async function savePlatformEmail(form: FormData) {
       .trim()
       .toLowerCase() || undefined;
   const webhookSecret = String(form.get('webhookSecret') ?? '').trim();
+  const inboundDomain = String(form.get('inboundDomain') ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/^@/, '');
+  const inboundKey = String(form.get('inboundKey') ?? '').trim();
+  if (inboundDomain && !/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(inboundDomain)) back('email-inbound');
+  if (inboundKey && !inboundKey.startsWith('re_')) back('email-inbound');
   const emailRe = /^[^@\s]+@[^@\s]+\.[a-z]{2,}$/;
   if (!emailRe.test(fromAddress)) back('email-from');
   if (replyTo && !emailRe.test(replyTo)) back('email-reply');
@@ -230,6 +239,12 @@ export async function savePlatformEmail(form: FormData) {
       ? { webhookSecret: encrypt(webhookSecret) }
       : cur?.data?.webhookSecret
         ? { webhookSecret: cur.data.webhookSecret }
+        : {}),
+    ...(inboundDomain ? { inboundDomain } : {}),
+    ...(inboundKey
+      ? { inboundKey: encrypt(inboundKey) }
+      : inboundDomain && cur?.data?.inboundKey
+        ? { inboundKey: cur.data.inboundKey }
         : {}),
   };
   await db()`select app_platform_set(${s.uid}, 'email', ${db().json(data as never)})`;
@@ -516,4 +531,94 @@ export async function resendOwnerInvite(form: FormData) {
   if (!o) return backClubs('denied');
   const r = await resendInvite(db(), o.id, s.uid, publicUrl());
   backClubs(r.ok ? 'owner-invited' : 'owner-failed');
+}
+
+// ---------- one club: doors and communications ----------
+
+/** The club from the form, if this partner login may work on it. */
+async function partnerClub(form: FormData, kinds: string[]) {
+  const s = await requirePartner();
+  const tenantId = String(form.get('tenantId') ?? '');
+  if (!UUID.test(tenantId) || !kinds.includes(s.kind)) redirect('/partner?m=denied');
+  const [c] = await db()<{ id: string }[]>`select id from app_partner_clubs(${s.uid}) where id = ${tenantId}`;
+  if (!c) redirect('/partner?m=denied');
+  return { s, tenantId };
+}
+const toClub = (tenantId: string, tab: string, n: string): never =>
+  redirect(`/partner/clubs/${tenantId}?tab=${tab}&n=${n}`);
+const INSTALLERS = ['partner_admin', 'partner_tech'];
+
+/** Installer: which door readers open each area (from the readers the Site Bridge read from AxTraxNG). */
+export async function partnerSaveReaders(form: FormData) {
+  const { s, tenantId } = await partnerClub(form, INSTALLERS);
+  const zoneId = String(form.get('zoneId') ?? '');
+  if (!UUID.test(zoneId)) toClub(tenantId, 'doors', 'zone-invalid');
+  const readers = [...new Set(form.getAll('readers').map(Number))].filter((n) => Number.isInteger(n) && n > 0);
+  await withTenant(db(), tenantId, async (tx) => {
+    await tx`update zones set reader_ids = ${readers} where id = ${zoneId}`;
+    await tx`insert into audit_log (tenant_id, actor, action, entity, data)
+             values (${tenantId}, ${s.uid}, 'zone.readers', ${zoneId}, ${tx.json({ readers } as never)})`;
+  });
+  revalidatePath(`/partner/clubs/${tenantId}`);
+  toClub(tenantId, 'doors', 'readers-saved');
+}
+
+/** Installer: ask the Site Bridge to read AxTraxNG again on its next sync. */
+export async function partnerInventory(form: FormData) {
+  const { tenantId } = await partnerClub(form, INSTALLERS);
+  const siteId = String(form.get('siteId') ?? '');
+  if (!UUID.test(siteId)) toClub(tenantId, 'doors', 'zone-invalid');
+  await withTenant(db(), tenantId, (tx) => tx`update sites set inventory_requested_at = now() where id = ${siteId}`);
+  revalidatePath(`/partner/clubs/${tenantId}`);
+  toClub(tenantId, 'doors', 'inventory');
+}
+
+/** Installer: a fresh pairing code, e.g. when the AxTraxNG PC is replaced. */
+export async function partnerPairCode(form: FormData) {
+  const { s, tenantId } = await partnerClub(form, INSTALLERS);
+  await withTenant(db(), tenantId, async (tx) => {
+    await tx`select app_reissue_pair_code(${newPairCode()})`;
+    await tx`insert into audit_log (tenant_id, actor, action) values (${tenantId}, ${s.uid}, 'bridge.pair_code_reissued')`;
+  });
+  revalidatePath(`/partner/clubs/${tenantId}`);
+  toClub(tenantId, 'doors', 'pair-new');
+}
+
+/**
+ * Connect the club's WhatsApp Business number (Meta Cloud API). The token is checked with Meta before it is
+ * stored (encrypted); blank secrets keep the stored ones.
+ */
+export async function partnerSaveWhatsApp(form: FormData) {
+  const { s, tenantId } = await partnerClub(form, ['partner_admin']);
+  const phoneNumberId = String(form.get('phoneNumberId') ?? '').replace(/\D/g, '');
+  const accessToken = String(form.get('accessToken') ?? '').trim();
+  const appSecret = String(form.get('appSecret') ?? '').trim();
+  const enabled = form.get('enabled') === 'on';
+  if (!/^\d{6,20}$/.test(phoneNumberId)) toClub(tenantId, 'comms', 'wa-id');
+  const [cur] = await db()<{ has_secret: boolean; config: { displayPhone?: string; phoneNumberId?: string } }[]>`
+    select has_secret, config from app_partner_channels(${s.uid}, ${tenantId}) where channel = 'whatsapp'`;
+  let secret: string | null = null;
+  let display = cur?.config?.displayPhone;
+  if (accessToken || appSecret) {
+    if (!accessToken || !appSecret) toClub(tenantId, 'comms', 'wa-both');
+    const check = await checkWhatsApp(phoneNumberId, accessToken);
+    if (!check.ok) toClub(tenantId, 'comms', 'wa-rejected');
+    else display = check.display;
+    secret = encrypt(JSON.stringify({ accessToken, appSecret }));
+  } else if (!cur?.has_secret || cur.config?.phoneNumberId !== phoneNumberId) {
+    toClub(tenantId, 'comms', 'wa-both');
+  }
+  await db()`select app_partner_set_channel(${s.uid}, ${tenantId}, 'whatsapp', ${enabled},
+             ${db().json({ phoneNumberId, displayPhone: display } as never)}, ${secret})`;
+  revalidatePath(`/partner/clubs/${tenantId}`);
+  toClub(tenantId, 'comms', 'wa-ok');
+}
+
+/** Email under the club's name (sent from NAVAC's Resend account); replies need receiving set up on the platform. */
+export async function partnerSaveEmail(form: FormData) {
+  const { s, tenantId } = await partnerClub(form, ['partner_admin']);
+  const enabled = form.get('enabled') === 'on';
+  await db()`select app_partner_set_channel(${s.uid}, ${tenantId}, 'email', ${enabled}, '{}'::jsonb, null)`;
+  revalidatePath(`/partner/clubs/${tenantId}`);
+  toClub(tenantId, 'comms', 'email-ok');
 }
