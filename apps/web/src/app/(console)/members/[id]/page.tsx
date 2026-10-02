@@ -143,7 +143,7 @@ export default async function MemberPage({
 
         <div className="space-y-4">
           {can(s, 'payments.record') && (
-            <form action={requestMpesa} className="card p-6">
+            <form id="pay" action={requestMpesa} className="card scroll-mt-24 p-6">
               <div className="label">Send M-Pesa prompt</div>
               <input type="hidden" name="memberId" value={d.m.id} />
               <select name="productId" className="input mt-4" required>
@@ -164,7 +164,7 @@ export default async function MemberPage({
           )}
 
           {can(s, 'payments.record') && (
-            <form action={recordDeskPayment} className="card p-6">
+            <form id="cash" action={recordDeskPayment} className="card scroll-mt-24 p-6">
               <div className="label">Cash at the desk</div>
               <input type="hidden" name="memberId" value={d.m.id} />
               <input type="hidden" name="nonce" value={randomUUID()} />
@@ -188,7 +188,7 @@ export default async function MemberPage({
           )}
 
           {can(s, 'members.edit') && (
-            <form action={linkCard} className="card p-6">
+            <form id="card" action={linkCard} className="card scroll-mt-24 p-6">
               <div className="label">Cards &amp; wristbands</div>
               <ul className="mt-3 space-y-1.5 text-sm">
                 {d.creds.map((c) => (

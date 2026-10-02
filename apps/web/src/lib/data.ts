@@ -685,3 +685,131 @@ export async function dayPassBoard(tenantId: string) {
     return { bands, today: today ?? { sold: 0, kes: 0 }, visits };
   });
 }
+
+export type MemberStatus = 'active' | 'ending' | 'lapsed' | 'never' | 'inactive';
+export interface MemberListRow {
+  id: string;
+  no: number;
+  name: string;
+  phone: string | null;
+  services: { name: string; ends: string }[];
+  status: MemberStatus;
+  lastVisit: Date | null;
+  card: boolean;
+  sync: 'synced' | 'pending' | 'failed';
+}
+export interface MembersBoard {
+  rows: MemberListRow[];
+  total: number;
+  counts: {
+    all: number;
+    joined: number;
+    active: number;
+    ending: number;
+    dueKes: number;
+    lapsed: number;
+    never: number;
+  };
+  services: string[];
+}
+
+/**
+ * Members page (design A, approved 2 Oct 2026): summary counts for the whole club, then the filtered list.
+ * Status: active (any service running), ending (a running service ends within 7 days), lapsed (nothing running,
+ * last end within 30 days), never (no access ever), inactive (lapsed longer ago). Wristbands are not members.
+ */
+export async function membersBoard(
+  tenantId: string,
+  o: { q?: string; f?: string; service?: string; card?: string; page?: number },
+): Promise<MembersBoard> {
+  const per = 50;
+  const page = Math.max(1, o.page ?? 1);
+  const q = (o.q ?? '').trim().toLowerCase();
+  const qDigits = q.replace(/\D/g, '').replace(/^254/, '').replace(/^0/, '');
+  const like = `%${q}%`;
+  const f = ['active', 'ending', 'lapsed', 'never'].includes(o.f ?? '') ? (o.f as string) : '';
+  const svc = (o.service ?? '').trim();
+  const card = o.card === 'yes' || o.card === 'no' ? o.card : '';
+  return T(tenantId, async (tx) => {
+    const status = tx`
+      with base as (
+        select m.id, m.member_no, m.first_name, m.last_name, m.phone, m.created_at,
+          (select coalesce(json_agg(json_build_object('name', x.name, 'ends', x.ends) order by x.ends desc), '[]') from (
+             select coalesce(sv.name, z.name, e.zone_key) as name, max(e.ends_at) as ends
+             from entitlements e left join services sv on sv.id = e.service_id
+             left join (select distinct on (key) key, name from zones order by key) z on z.key = e.zone_key and e.service_id is null
+             where e.member_id = m.id group by 1) x) as services,
+          (select max(ends_at) from entitlements e where e.member_id = m.id) as last_end,
+          (select min(ends_at) from entitlements e where e.member_id = m.id and e.ends_at > now() and e.starts_at <= now()) as next_end,
+          (select max(at) from access_events a where a.member_no = m.member_no and a.granted) as last_visit,
+          exists (select 1 from credentials c where c.member_id = m.id) as card,
+          (select case when bool_or(s.error is not null) then 'failed'
+                       when bool_and(s.applied_version is not distinct from s.version) then 'synced' else 'pending' end
+             from access_states s where s.member_id = m.id) as sync
+        from members m where m.member_no not between 11001 and 11999),
+      st as (
+        select *, case when next_end is not null and next_end <= now() + interval '7 days' then 'ending'
+                       when next_end is not null then 'active'
+                       when last_end is null then 'never'
+                       when last_end >= now() - interval '30 days' then 'lapsed' else 'inactive' end as status
+        from base)`;
+    const where = tx`
+      where (${q} = '' or lower(first_name || ' ' || last_name) like ${like} or member_no::text like ${like}
+             or (${qDigits} <> '' and regexp_replace(coalesce(phone, ''), '\\D', '', 'g') like ${`%${qDigits}%`}))
+        and (${f} = '' or status = ${f} or (${f} = 'active' and status = 'ending'))
+        and (${svc} = '' or exists (select 1 from json_array_elements(services) j where j->>'name' = ${svc}))
+        and (${card} = '' or card = (${card} = 'yes'))`;
+    const [rows, [tot], [counts], [due], names] = await Promise.all([
+      tx<
+        {
+          id: string;
+          member_no: number;
+          first_name: string;
+          last_name: string;
+          phone: string | null;
+          services: { name: string; ends: string }[];
+          status: MemberStatus;
+          last_visit: Date | null;
+          card: boolean;
+          sync: string | null;
+        }[]
+      >`${status} select * from st ${where} order by member_no limit ${per} offset ${(page - 1) * per}`,
+      tx<{ n: number }[]>`${status} select count(*)::int as n from st ${where}`,
+      tx<{ all: number; joined: number; active: number; ending: number; lapsed: number; never: number }[]>`
+        ${status} select count(*)::int as all,
+          count(*) filter (where created_at >= date_trunc('month', now()))::int as joined,
+          count(*) filter (where status in ('active', 'ending'))::int as active,
+          count(*) filter (where status = 'ending')::int as ending,
+          count(*) filter (where status = 'lapsed')::int as lapsed,
+          count(*) filter (where status = 'never')::int as never
+        from st`,
+      tx<{ kes: number }[]>`
+        select coalesce(sum(price_kes), 0)::int as kes from (
+          select distinct on (p.member_id, coalesce(l.service_id::text, l.label)) l.price_kes, l.ends_at
+          from payment_lines l join payments p on p.id = l.payment_id join members m on m.id = p.member_id
+          where p.status = 'applied' and m.member_no not between 11001 and 11999
+          order by p.member_id, coalesce(l.service_id::text, l.label), l.ends_at desc) x
+        where ends_at between now() and now() + interval '7 days'`,
+      tx<{ name: string }[]>`select name from services where active order by created_at`,
+    ]);
+    return {
+      rows: rows.map((r) => ({
+        id: r.id,
+        no: r.member_no,
+        name: `${r.first_name} ${r.last_name}`.trim(),
+        phone: r.phone,
+        services: r.services,
+        status: r.status,
+        lastVisit: r.last_visit,
+        card: r.card,
+        sync: (r.sync ?? 'synced') as MemberListRow['sync'],
+      })),
+      total: tot?.n ?? 0,
+      counts: {
+        ...(counts ?? { all: 0, joined: 0, active: 0, ending: 0, lapsed: 0, never: 0 }),
+        dueKes: due?.kes ?? 0,
+      },
+      services: names.map((n) => n.name),
+    };
+  });
+}
