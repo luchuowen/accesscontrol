@@ -52,9 +52,9 @@ export async function clubHealth(s: LiveSession): Promise<HealthArea[]> {
         tone: 'blue',
         icon: 'card',
         title: 'Payment Gateway not connected',
-        sub: 'Members can’t pay by M-Pesa prompt or link until it is set up.',
+        sub: 'NAVAC connects it during setup. Until then members pay cash at the desk.',
         href: '/settings?tab=payments',
-        action: 'Set up',
+        action: 'See',
       },
   ]);
 

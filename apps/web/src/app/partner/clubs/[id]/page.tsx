@@ -1,7 +1,9 @@
+import { withTenant } from '@lango/db';
 import { onboardingChecklist, platformEmailConfig, platformSmsConfig } from '@lango/server';
 import {
   ArrowLeft,
   CheckCircle2,
+  CreditCard,
   DoorOpen,
   Download,
   LayoutGrid,
@@ -23,6 +25,8 @@ import { requirePartner } from '@/lib/session';
 import { db } from '@/server/db';
 import {
   inviteOwner,
+  navacSaveChannels,
+  navacSaveGateway,
   partnerInventory,
   partnerPairCode,
   partnerSaveEmail,
@@ -45,9 +49,15 @@ const NOTE: Record<string, [ok: boolean, text: string]> = {
   'wa-both': [false, 'Enter both the access token and the app secret.'],
   'wa-rejected': [false, 'Meta did not accept that token for this phone number ID. Check both and try again.'],
   'email-ok': [true, 'Email saved.'],
+  'gw-ok': [true, 'Payment Gateway connected. The keys were checked and stored encrypted.'],
+  'gw-missing': [false, 'Enter both the client ID and the client secret.'],
+  'gw-rejected': [false, 'The Payment Gateway rejected those keys. Check the environment and try again.'],
+  'gw-unreachable': [false, 'The Payment Gateway did not answer, so nothing was saved. Try again in a minute.'],
+  'ch-ok': [true, 'Payment details saved. The club sees them straight away.'],
+  'ch-number': [false, 'Paybill and till numbers are 5 to 7 digits.'],
 };
 
-type Tab = 'overview' | 'doors' | 'comms';
+type Tab = 'overview' | 'pay' | 'doors' | 'comms';
 
 export default async function PartnerClub({
   params,
@@ -81,7 +91,7 @@ export default async function PartnerClub({
     from app_partner_clubs(${s.uid}) c join app_partner_stats(${s.uid}) st on st.tenant_id = c.id
     where c.id = ${id}`;
   if (!club) notFound();
-  const tab: Tab = sp.tab === 'doors' || sp.tab === 'comms' ? sp.tab : 'overview';
+  const tab: Tab = sp.tab === 'doors' || sp.tab === 'comms' || sp.tab === 'pay' ? sp.tab : 'overview';
   const installer = s.kind === 'partner_admin' || s.kind === 'partner_tech';
   const admin = s.kind === 'partner_admin';
   const note = sp.n ? NOTE[sp.n] : undefined;
@@ -140,6 +150,7 @@ export default async function PartnerClub({
       </div>
       <div className="mt-5 inline-flex rounded-xl bg-[#EEF1F6] p-1">
         {tabLink('overview', 'Overview', LayoutGrid)}
+        {tabLink('pay', 'Payments', CreditCard)}
         {installer && tabLink('doors', 'Doors', DoorOpen)}
         {tabLink('comms', 'Communications', MessageSquare)}
       </div>
@@ -171,7 +182,7 @@ export default async function PartnerClub({
                 </div>
               ))}
             </div>
-            <Checklist items={checklist} />
+            <Checklist items={checklist} audience="partner" />
             <section className={`${card} p-5`}>
               <h2 className="text-[14px] font-semibold">Club owner</h2>
               {owner?.owner_email ? (
@@ -216,6 +227,7 @@ export default async function PartnerClub({
           </div>
         )}
         {tab === 'doors' && installer && <Doors tenantId={id} />}
+        {tab === 'pay' && <Payments tenantId={id} uid={s.uid} />}
         {tab === 'comms' && <Comms tenantId={id} uid={s.uid} admin={admin} slug={club.slug} />}
       </div>
     </>
@@ -337,6 +349,182 @@ async function Doors({ tenantId }: { tenantId: string }) {
           </section>
         );
       })}
+    </div>
+  );
+}
+
+async function Payments({ tenantId, uid }: { tenantId: string; uid: string }) {
+  const [[plat], [row]] = await Promise.all([
+    db()<{ ok: boolean }[]>`select app_is_platform(${uid}) as ok`,
+    withTenant(
+      db(),
+      tenantId,
+      (tx) =>
+        tx<
+          {
+            tp: { env: string; clientId: string } | null;
+            ch: {
+              paybill?: string | null;
+              till?: string | null;
+              linksOnly?: boolean;
+              settlementBank?: string;
+              settlementConfirmed?: boolean;
+            } | null;
+          }[]
+        >`select data->'taifapay' as tp, data->'channels' as ch from tenant_settings where tenant_id = ${tenantId}`,
+    ),
+  ]);
+  const navac = !!plat?.ok;
+  const tp = row?.tp ?? null;
+  const ch = row?.ch ?? {};
+  const [t] = await db()<{ slug: string }[]>`select slug from tenants where id = ${tenantId}`;
+  const host = (await headers()).get('host');
+  const base = (process.env.PUBLIC_URL ?? `https://${host}`).replace(/\/$/, '');
+  const card = 'rounded-2xl border border-[#E4E8EF] bg-white p-5';
+  const lbl = 'mb-1.5 block text-[11.5px] font-semibold text-ink-500';
+  const pill = (ok: boolean, text: string) => (
+    <span
+      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11.5px] font-semibold ${ok ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-800'}`}
+    >
+      <i className={`h-1.5 w-1.5 rounded-full ${ok ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+      {text}
+    </span>
+  );
+  return (
+    <div className="grid gap-4 xl:grid-cols-2">
+      <section className={card}>
+        <header className="flex items-center gap-3">
+          <h2 className="text-[14.5px] font-semibold">Payment Gateway</h2>
+          <span className="ml-auto">{pill(!!tp, tp ? `Connected · ${tp.env}` : 'Not connected')}</span>
+        </header>
+        {navac ? (
+          <form action={navacSaveGateway} className="mt-4 grid gap-3.5">
+            <input type="hidden" name="tenantId" value={tenantId} />
+            <label>
+              <span className={lbl}>Environment</span>
+              <select name="env" defaultValue={tp?.env ?? 'live'} className="input py-2">
+                <option value="live">Live</option>
+                <option value="sandbox">Sandbox</option>
+              </select>
+            </label>
+            <label>
+              <span className={lbl}>Client ID</span>
+              <input
+                name="clientId"
+                type="password"
+                autoComplete="off"
+                placeholder={tp ? `••••${tp.clientId.slice(-4)} (stored)` : 'Client ID'}
+                className="input py-2"
+              />
+            </label>
+            <label>
+              <span className={lbl}>Client secret</span>
+              <input
+                name="clientSecret"
+                type="password"
+                autoComplete="new-password"
+                placeholder={tp ? '•••••••• (stored)' : 'Client secret'}
+                className="input py-2"
+              />
+            </label>
+            <div>
+              <span className={lbl}>Deposit webhook URL</span>
+              <CopyField value={`${base}/api/webhooks/taifapay/${t?.slug}`} label="Deposit webhook URL" />
+            </div>
+            <SubmitButton pendingText="Checking the keys…" className="btn-primary py-2.5">
+              Verify &amp; save
+            </SubmitButton>
+          </form>
+        ) : (
+          <p className="mt-3 text-[13px] text-ink-500">NAVAC sets up the Payment Gateway for each club.</p>
+        )}
+      </section>
+
+      <section className={card}>
+        <header className="flex items-center gap-3">
+          <h2 className="text-[14.5px] font-semibold">Where members pay</h2>
+          <span className="ml-auto">
+            {pill(
+              !!(ch.paybill || ch.till || ch.linksOnly),
+              ch.paybill
+                ? `Paybill ${ch.paybill}`
+                : ch.till
+                  ? `Till ${ch.till}`
+                  : ch.linksOnly
+                    ? 'Prompts & links'
+                    : 'Not set',
+            )}
+          </span>
+        </header>
+        {navac ? (
+          <form action={navacSaveChannels} className="mt-4 grid gap-3.5">
+            <input type="hidden" name="tenantId" value={tenantId} />
+            <div className="grid gap-3.5 sm:grid-cols-2">
+              <label>
+                <span className={lbl}>Paybill</span>
+                <input
+                  name="paybill"
+                  inputMode="numeric"
+                  defaultValue={ch.paybill ?? ''}
+                  placeholder="400200"
+                  className="input py-2"
+                />
+              </label>
+              <label>
+                <span className={lbl}>Till</span>
+                <input
+                  name="till"
+                  inputMode="numeric"
+                  defaultValue={ch.till ?? ''}
+                  placeholder="Optional"
+                  className="input py-2"
+                />
+              </label>
+            </div>
+            <label className="flex items-center gap-2.5 text-[13px]">
+              <input
+                type="checkbox"
+                name="linksOnly"
+                defaultChecked={!!ch.linksOnly}
+                className="h-4 w-4 accent-ink-900"
+              />
+              No paybill or till: prompts and links only
+            </label>
+            <label>
+              <span className={lbl}>Settlement bank</span>
+              <input
+                name="settlementBank"
+                defaultValue={ch.settlementBank ?? ''}
+                placeholder="KCB · ending 4821"
+                className="input py-2"
+              />
+            </label>
+            <label className="flex items-center gap-2.5 text-[13px]">
+              <input
+                type="checkbox"
+                name="settlementConfirmed"
+                defaultChecked={!!ch.settlementConfirmed}
+                className="h-4 w-4 accent-ink-900"
+              />
+              Settlement confirmed by the Payment Gateway
+            </label>
+            <SubmitButton pendingText="Saving…" className="btn-ghost py-2.5">
+              Save
+            </SubmitButton>
+          </form>
+        ) : (
+          <dl className="mt-3 grid gap-2 text-[13px]">
+            <div className="flex justify-between">
+              <dt className="text-ink-500">Settlement bank</dt>
+              <dd>{ch.settlementBank || '—'}</dd>
+            </div>
+            <div className="flex justify-between">
+              <dt className="text-ink-500">Settlement confirmed</dt>
+              <dd>{ch.settlementConfirmed ? 'Yes' : 'Not yet'}</dd>
+            </div>
+          </dl>
+        )}
+      </section>
     </div>
   );
 }

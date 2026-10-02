@@ -18,7 +18,7 @@ const TABS = [
   {
     key: 'payments',
     label: 'Payments',
-    hint: 'Gateway, paybill or till',
+    hint: 'Where members pay',
     icon: CreditCard,
     any: ['settings.payments'],
   },
@@ -79,7 +79,7 @@ export default async function Settings({ searchParams }: { searchParams: Promise
         </nav>
         <div className="min-w-0">
           {tab?.key === 'payments' ? (
-            <PaymentsTab s={s} taifa={sp.taifa} ch={sp.ch} />
+            <PaymentsTab s={s} />
           ) : tab?.key === 'messages' ? (
             <MessagesTab s={s} m={sp.m} sms={sp.sms} />
           ) : tab?.key === 'team' ? (

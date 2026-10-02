@@ -29,7 +29,7 @@ export const PERMISSIONS = [
   { key: 'messages.manage', label: 'Message settings and club news' },
   { key: 'sms.buy', label: 'Buy SMS credit' },
   { key: 'reports.all', label: 'Reports beyond today' },
-  { key: 'settings.payments', label: 'Payment keys and how members pay' },
+  { key: 'settings.payments', label: 'See how members pay' },
   { key: 'billing.manage', label: 'Club subscription, invoices, setup fee' },
   { key: 'team.manage', label: 'Team: invite, roles, remove' },
   { key: 'club.own', label: 'Close the club, transfer ownership' },

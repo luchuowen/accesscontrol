@@ -622,3 +622,63 @@ export async function partnerSaveEmail(form: FormData) {
   revalidatePath(`/partner/clubs/${tenantId}`);
   toClub(tenantId, 'comms', 'email-ok');
 }
+
+// ---------- one club: payments (NAVAC only) ----------
+
+/**
+ * A club's Payment Gateway keys. Only NAVAC sets these, during onboarding: the client ID and secret stay secret
+ * from partners and from the club. The keys are checked with the Payment Gateway before they are stored.
+ */
+export async function navacSaveGateway(form: FormData) {
+  const s = await platformOnly();
+  const tenantId = String(form.get('tenantId') ?? '');
+  if (!UUID.test(tenantId)) redirect('/partner?m=denied');
+  const env = String(form.get('env')) === 'sandbox' ? 'sandbox' : 'live';
+  const clientId = String(form.get('clientId') ?? '').trim();
+  const clientSecret = String(form.get('clientSecret') ?? '').trim();
+  if (!clientId || !clientSecret) toClub(tenantId, 'pay', 'gw-missing');
+  let outcome: 'ok' | 'rejected' | 'unreachable' = 'ok';
+  try {
+    await new TaifaPay({ env, clientId, clientSecret }).verify();
+  } catch (e) {
+    outcome = e instanceof TaifaAuthError ? 'rejected' : 'unreachable';
+  }
+  if (outcome !== 'ok') toClub(tenantId, 'pay', `gw-${outcome}`);
+  await withTenant(db(), tenantId, async (tx) => {
+    const data = { taifapay: { env, clientId, clientSecret: encrypt(clientSecret) } };
+    await tx`insert into tenant_settings (tenant_id, data) values (${tenantId}, ${tx.json(data as never)})
+             on conflict (tenant_id) do update set data = tenant_settings.data || excluded.data`;
+    await tx`insert into audit_log (tenant_id, actor, action, data) values (${tenantId}, ${s.uid}, 'settings.taifapay',
+             ${tx.json({ env, clientId: `…${clientId.slice(-4)}` } as never)})`;
+  });
+  revalidatePath(`/partner/clubs/${tenantId}`);
+  toClub(tenantId, 'pay', 'gw-ok');
+}
+
+/** Where members pay (the club's paybill or till on the Payment Gateway) and the bank it settles to. NAVAC only. */
+export async function navacSaveChannels(form: FormData) {
+  const s = await platformOnly();
+  const tenantId = String(form.get('tenantId') ?? '');
+  if (!UUID.test(tenantId)) redirect('/partner?m=denied');
+  const code = /^\d{5,7}$/;
+  const paybill = String(form.get('paybill') ?? '').replace(/\s/g, '');
+  const till = String(form.get('till') ?? '').replace(/\s/g, '');
+  if ((paybill && !code.test(paybill)) || (till && !code.test(till))) toClub(tenantId, 'pay', 'ch-number');
+  const channels = {
+    paybill: paybill || null,
+    till: till || null,
+    linksOnly: form.get('linksOnly') === 'on',
+    settlementBank: String(form.get('settlementBank') ?? '')
+      .trim()
+      .slice(0, 80),
+    settlementConfirmed: form.get('settlementConfirmed') === 'on',
+  };
+  await withTenant(db(), tenantId, async (tx) => {
+    await tx`insert into tenant_settings (tenant_id, data) values (${tenantId}, ${tx.json({ channels } as never)})
+             on conflict (tenant_id) do update set data = tenant_settings.data || excluded.data`;
+    await tx`insert into audit_log (tenant_id, actor, action, data) values (${tenantId}, ${s.uid}, 'settings.channels',
+             ${tx.json(channels as never)})`;
+  });
+  revalidatePath(`/partner/clubs/${tenantId}`);
+  toClub(tenantId, 'pay', 'ch-ok');
+}

@@ -10,6 +10,8 @@ export interface ChecklistItem {
   done: boolean;
   hint: string;
   href: string;
+  /** Who does it: NAVAC (payments, during onboarding), the installer (door PC and readers) or the club. */
+  by: 'navac' | 'installer' | 'club';
 }
 
 /** What is still missing before a club runs on its own. Every item is derived from data, never ticked by hand,
@@ -36,21 +38,24 @@ export async function onboardingChecklist(sql: Sql, tenantId: string): Promise<C
         label: 'Payment Gateway account connected',
         done: !!taifa,
         hint: 'Merchant keys verified with the Payment Gateway',
-        href: '/settings',
+        href: '/settings?tab=payments',
+        by: 'navac',
       },
       {
         key: 'channels',
         label: 'How members pay is set',
         done: !!(ch.paybill || ch.till || ch.linksOnly),
         hint: 'Paybill or till linked on the Payment Gateway, or payment links only',
-        href: '/settings',
+        href: '/settings?tab=payments',
+        by: 'navac',
       },
       {
         key: 'settlement',
         label: 'Bank settlement confirmed',
         done: !!ch.settlementConfirmed,
         hint: 'The Payment Gateway pays the club’s bank account',
-        href: '/settings',
+        href: '/settings?tab=payments',
+        by: 'navac',
       },
       {
         key: 'bridge',
@@ -58,6 +63,7 @@ export async function onboardingChecklist(sql: Sql, tenantId: string): Promise<C
         done: !!b?.seen,
         hint: 'Installed on the AxTraxNG server PC and paired',
         href: '/access',
+        by: 'installer',
       },
       {
         key: 'doors',
@@ -65,14 +71,23 @@ export async function onboardingChecklist(sql: Sql, tenantId: string): Promise<C
         done: (z?.mapped ?? 0) > 0 && (unmappedInUse?.n ?? 0) === 0,
         hint: 'Every zone a plan sells opens at least one reader',
         href: '/access',
+        by: 'installer',
       },
-      { key: 'plans', label: 'Plans priced', done: (p?.n ?? 0) > 0, hint: 'At least one plan on sale', href: '/plans' },
+      {
+        key: 'plans',
+        label: 'Plans priced',
+        done: (p?.n ?? 0) > 0,
+        hint: 'At least one plan on sale',
+        href: '/services',
+        by: 'club',
+      },
       {
         key: 'members',
         label: 'Members on board',
         done: (m?.n ?? 0) > 0,
         hint: 'Imported from AxTraxNG or added',
-        href: '/access',
+        href: '/members',
+        by: 'club',
       },
       {
         key: 'first-payment',
@@ -80,6 +95,7 @@ export async function onboardingChecklist(sql: Sql, tenantId: string): Promise<C
         done: (pay?.n ?? 0) > 0,
         hint: 'A real KES 10 test is enough',
         href: '/payments',
+        by: 'club',
       },
     ];
   });
