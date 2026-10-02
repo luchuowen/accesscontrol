@@ -170,7 +170,7 @@ export function MoneyIn({ daily, days, weekly }: { daily: Day[]; days: number; w
               <span key={b.key} className="relative min-w-0 flex-1">
                 {show && (
                   <span
-                    className={`absolute top-0 whitespace-nowrap ${last ? 'right-0' : 'left-1/2 -translate-x-1/2'}`}
+                    className={`absolute top-0 whitespace-nowrap ${last ? 'right-0' : 'left-1/2 -translate-x-1/2'} ${!last && (i / every) % 2 === 1 ? 'max-sm:hidden' : ''}`}
                   >
                     {last ? 'Today' : weekly && bars.length > 7 ? fmt(b.key) : b.label}
                   </span>

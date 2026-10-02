@@ -310,7 +310,7 @@ export default async function Dashboard({
         </div>
       )}
 
-      <div className="mt-3.5 grid gap-3.5 lg:grid-cols-3">
+      <div className="mt-3.5 grid gap-3.5 md:grid-cols-2 xl:grid-cols-3">
         <Card className="flex flex-col">
           <div className="flex items-center justify-between">
             <Label>Ending in 7 days</Label>
@@ -429,7 +429,7 @@ export default async function Dashboard({
             </ul>
           )}
         </Card>
-        <Card>
+        <Card className="md:col-span-2 xl:col-span-1">
           <div className="flex items-center justify-between">
             <Label>Needs attention</Label>
             {attention.length > 0 && (

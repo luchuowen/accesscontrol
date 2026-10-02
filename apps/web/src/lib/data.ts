@@ -347,108 +347,137 @@ export interface OwnerDashboard {
 
 export async function ownerDashboard(tenantId: string, days: number): Promise<OwnerDashboard> {
   return T(tenantId, async (tx) => {
-    const [t] = await tx<
-      { name: string; timezone: string }[]
-    >`select name, timezone from tenants where id = ${tenantId}`;
+    // One window for every "period" figure: from midnight (club time) days-1 ago until now, the same days the
+    // Money in chart shows, so Revenue, Money in and Top plans always agree. The previous period is the same length
+    // just before it.
+    const [t] = await tx<{ name: string; timezone: string; start: Date; prev: Date }[]>`
+      with z as (select name, coalesce(timezone, 'Africa/Nairobi') as tz from tenants where id = ${tenantId})
+      select name, tz as timezone,
+             (((now() at time zone tz)::date - ${days - 1}::int)::timestamp at time zone tz) as start,
+             (((now() at time zone tz)::date - ${2 * days - 1}::int)::timestamp at time zone tz) as prev
+      from z`;
     const tz = t?.timezone ?? 'Africa/Nairobi';
-    const span = `${days} days`;
-    const span2 = `${days * 2} days`;
-    // In the club now: doors record entries only, so "inside" = distinct members who entered in the last 90 minutes.
-    const [inside] = await tx<{ n: number }[]>`
-      select count(distinct member_no)::int as n from access_events where granted and at >= now() - interval '90 minutes'`;
-    const [busy] = await tx<{ h: number | null }[]>`
-      select extract(hour from at at time zone ${tz})::int as h from access_events
-      where granted and at >= now() - interval '56 days'
-        and extract(isodow from at at time zone ${tz}) = extract(isodow from now() at time zone ${tz})
-      group by 1 order by count(*) desc limit 1`;
-    const today = await tx<{ h: number; n: number }[]>`
-      select extract(hour from at at time zone ${tz})::int as h, count(*)::int as n from access_events
-      where granted and at >= date_trunc('day', now() at time zone ${tz}) at time zone ${tz} group by 1`;
-    const [rev] = await tx<{ now: number; prev: number; mpesa: number; cash: number }[]>`
-      select coalesce(sum(amount_kes) filter (where paid_at >= now() - ${span}::interval), 0)::int as now,
-             coalesce(sum(amount_kes) filter (where paid_at >= now() - ${span2}::interval and paid_at < now() - ${span}::interval), 0)::int as prev,
-             coalesce(sum(amount_kes) filter (where paid_at >= now() - ${span}::interval and channel <> 'cash'), 0)::int as mpesa,
-             coalesce(sum(amount_kes) filter (where paid_at >= now() - ${span}::interval and channel = 'cash'), 0)::int as cash
-      from payments where status = 'applied'`;
-    const daily = await tx<{ day: string; mpesa: number; cash: number }[]>`
-      select to_char(d, 'YYYY-MM-DD') as day,
-             coalesce(sum(p.amount_kes) filter (where p.channel <> 'cash'), 0)::int as mpesa,
-             coalesce(sum(p.amount_kes) filter (where p.channel = 'cash'), 0)::int as cash
-      from generate_series((now() at time zone ${tz})::date - ${days - 1}::int, (now() at time zone ${tz})::date, '1 day') d
-      left join payments p on p.status = 'applied' and (p.paid_at at time zone ${tz})::date = d
-      group by d order by d`;
-    // Seven points across the period, for the small trend bars.
-    const points = await tx<{ i: number; rev: number; active: number }[]>`
-      select g.i,
-        (select coalesce(sum(amount_kes), 0)::int from payments where status = 'applied'
-           and paid_at > now() - ${span}::interval + (g.i - 1) * (${span}::interval / 7)
-           and paid_at <= now() - ${span}::interval + g.i * (${span}::interval / 7)) as rev,
-        (select count(distinct member_id)::int from entitlements
-           where now() - ${span}::interval + g.i * (${span}::interval / 7) between starts_at and ends_at) as active
-      from generate_series(1, 7) g(i) order by g.i`;
-    const [act] = await tx<{ n: number }[]>`
-      select count(distinct member_id)::int as n from entitlements where now() between starts_at and ends_at`;
-    const [joined] = await tx<{ n: number }[]>`
-      select count(*)::int as n from (select member_id, min(paid_at) as first from payments
-        where status = 'applied' and member_id is not null group by member_id) f where f.first >= now() - ${span}::interval`;
-    // Renewals: members whose membership ended in the period, and how many of them are active again now.
-    const [ren] = await tx<{ ended: number; renewed: number }[]>`
-      with ended as (
-        select member_id from entitlements group by member_id
-        having bool_or(ends_at between now() - ${span}::interval and now()))
-      select count(*)::int as ended,
-             count(*) filter (where exists (select 1 from entitlements e where e.member_id = ended.member_id
-                                             and now() between e.starts_at and e.ends_at))::int as renewed
-      from ended`;
-    const ending = await tx<
-      {
-        id: string;
-        member_no: number;
-        first_name: string;
-        last_name: string;
-        ends: Date;
-        plan: string | null;
-        price: number | null;
-      }[]
-    >`
-      select x.*, lp.name as plan, lp.price_kes as price from (
-        select m.id, m.member_no, m.first_name, m.last_name, max(e.ends_at) as ends
-        from members m join entitlements e on e.member_id = m.id
-        where m.first_name <> 'Wristband'
-        group by m.id having max(e.ends_at) between now() and now() + interval '7 days'
-        order by ends limit 5) x
-      left join lateral (select pr.name, pr.price_kes from payments p join products pr on pr.id = p.product_id
-                         where p.member_id = x.id and p.status = 'applied' order by p.paid_at desc limit 1) lp on true
-      order by x.ends`;
-    const [e7] = await tx<{ n: number; kes: number }[]>`
-      select count(*)::int as n, coalesce(sum(lp.price_kes), 0)::int as kes
-      from (select m.id from members m join entitlements e on e.member_id = m.id
-            where m.first_name <> 'Wristband'
-            group by m.id having max(e.ends_at) between now() and now() + interval '7 days') x
-      left join lateral (select pr.price_kes from payments p join products pr on pr.id = p.product_id
-                         where p.member_id = x.id and p.status = 'applied' order by p.paid_at desc limit 1) lp on true`;
-    const plans = await tx<{ name: string; kes: number }[]>`
-      select coalesce(pr.name, 'Other') as name, sum(p.amount_kes)::int as kes
-      from payments p left join products pr on pr.id = p.product_id
-      where p.status = 'applied' and p.paid_at >= now() - ${span}::interval
-      group by 1 order by 2 desc limit 4`;
-    // At risk: paid up, but no entry for 14+ days (the clearest early sign that someone is about to leave).
-    const risk = await tx<{ id: string; member_no: number; first_name: string; last_name: string; away: number }[]>`
-      select m.id, m.member_no, m.first_name, m.last_name,
-             extract(day from now() - coalesce(max(a.at), min(e.starts_at)))::int as away
-      from members m
-      join entitlements e on e.member_id = m.id and now() between e.starts_at and e.ends_at
-      left join access_events a on a.member_no = m.member_no and a.granted
-      group by m.id
-      having coalesce(max(a.at), min(e.starts_at)) < now() - interval '14 days'
-      order by away desc`;
-    const [um] = await tx<{ n: number; kes: number }[]>`
-      select count(*)::int as n, coalesce(sum(amount_kes), 0)::int as kes from payments where status = 'unmatched'`;
-    const [st] = await tx<
-      { failed: number }[]
-    >`select count(*) filter (where error is not null)::int as failed from access_states`;
-    const [br] = await tx<{ last: Date | null }[]>`select max(last_seen_at) as last from app_tenant_bridges()`;
-    const [sms] = await tx<{ units: string | null }[]>`select sum(units) as units from sms_ledger`;
+    const start = t?.start ?? new Date(Date.now() - days * 86400_000);
+    const prev = t?.prev ?? new Date(start.getTime() - days * 86400_000);
+    // Walk-in wristbands (member numbers 11001–11999, John's convention) are reusable day passes, not members:
+    // they count as money and as people inside, never as members, renewals or lapses.
+    // All queries below are independent, so they are sent together (pipelined on the one connection).
+    const [
+      [inside],
+      [busy],
+      today,
+      [rev],
+      daily,
+      points,
+      [act],
+      [joined],
+      [ren],
+      ending,
+      plans,
+      risk,
+      [um],
+      [st],
+      [br],
+      [sms],
+    ] = await Promise.all([
+      // In the club now: doors record entries only, so "inside" = distinct people (member or card) who entered in the last 90 minutes.
+      tx<{ n: number }[]>`
+        select count(distinct coalesce(member_no::bigint, card_code))::int as n from access_events where granted and at >= now() - interval '90 minutes'`,
+      tx<{ h: number | null }[]>`
+        select extract(hour from at at time zone ${tz})::int as h from access_events
+        where granted and at >= now() - interval '56 days'
+          and extract(isodow from at at time zone ${tz}) = extract(isodow from now() at time zone ${tz})
+        group by 1 order by count(*) desc limit 1`,
+      tx<{ h: number; n: number }[]>`
+        select extract(hour from at at time zone ${tz})::int as h, count(*)::int as n from access_events
+        where granted and at >= date_trunc('day', now() at time zone ${tz}) at time zone ${tz} group by 1`,
+      tx<{ now: number; prev: number; mpesa: number; cash: number }[]>`
+        select coalesce(sum(amount_kes) filter (where paid_at >= ${start}), 0)::int as now,
+               coalesce(sum(amount_kes) filter (where paid_at < ${start}), 0)::int as prev,
+               coalesce(sum(amount_kes) filter (where paid_at >= ${start} and channel <> 'cash'), 0)::int as mpesa,
+               coalesce(sum(amount_kes) filter (where paid_at >= ${start} and channel = 'cash'), 0)::int as cash
+        from payments where status = 'applied' and paid_at >= ${prev}`,
+      tx<{ day: string; mpesa: number; cash: number }[]>`
+        select to_char(d, 'YYYY-MM-DD') as day,
+               coalesce(sum(p.amount_kes) filter (where p.channel <> 'cash'), 0)::int as mpesa,
+               coalesce(sum(p.amount_kes) filter (where p.channel = 'cash'), 0)::int as cash
+        from generate_series((now() at time zone ${tz})::date - ${days - 1}::int, (now() at time zone ${tz})::date, '1 day') d
+        left join payments p on p.status = 'applied' and p.paid_at >= ${start}
+                            and (p.paid_at at time zone ${tz})::date = d::date
+        group by d order by d`,
+      // Seven points across the period, for the small trend bars.
+      tx<{ i: number; rev: number; active: number }[]>`
+        with g as (select i, ${start}::timestamptz + (now() - ${start}::timestamptz) * (i - 1) / 7 as a,
+                             ${start}::timestamptz + (now() - ${start}::timestamptz) * i / 7 as b
+                   from generate_series(1, 7) i)
+        select g.i,
+          (select coalesce(sum(amount_kes), 0)::int from payments
+             where status = 'applied' and paid_at > g.a and paid_at <= g.b) as rev,
+          (select count(distinct e.member_id)::int from entitlements e join members m on m.id = e.member_id
+             where m.member_no not between 11001 and 11999 and e.ends_at >= g.b and e.starts_at <= g.b) as active
+        from g order by g.i`,
+      tx<{ n: number }[]>`
+        select count(distinct e.member_id)::int as n from entitlements e join members m on m.id = e.member_id
+        where m.member_no not between 11001 and 11999 and e.ends_at > now() and e.starts_at <= now()`,
+      // Joined: members whose first ever payment falls in the period.
+      tx<{ n: number }[]>`
+        select count(distinct p.member_id)::int as n from payments p join members m on m.id = p.member_id
+        where p.status = 'applied' and p.paid_at >= ${start} and m.member_no not between 11001 and 11999
+          and not exists (select 1 from payments q where q.member_id = p.member_id and q.status = 'applied'
+                          and q.paid_at < ${start})`,
+      // Renewals: members whose plan ended in the period, and how many of them are paid up again now.
+      tx<{ ended: number; renewed: number }[]>`
+        with ended as (
+          select distinct e.member_id from entitlements e join members m on m.id = e.member_id
+          where e.ends_at >= ${start} and e.ends_at <= now() and m.member_no not between 11001 and 11999)
+        select count(*)::int as ended,
+               count(*) filter (where exists (select 1 from entitlements e where e.member_id = ended.member_id
+                                               and e.ends_at > now() and e.starts_at <= now()))::int as renewed
+        from ended`,
+      // Ending in 7 days: paid up now, last day within a week, with the plan they last paid for.
+      tx<
+        {
+          id: string;
+          member_no: number;
+          first_name: string;
+          last_name: string;
+          ends: Date;
+          plan: string | null;
+          price: number | null;
+        }[]
+      >`
+        select x.*, lp.name as plan, lp.price_kes as price from (
+          select m.id, m.member_no, m.first_name, m.last_name, max(e.ends_at) as ends
+          from members m join entitlements e on e.member_id = m.id
+          where e.ends_at > now() and m.member_no not between 11001 and 11999
+          group by m.id having max(e.ends_at) <= now() + interval '7 days') x
+        left join lateral (select pr.name, pr.price_kes from payments p join products pr on pr.id = p.product_id
+                           where p.member_id = x.id and p.status = 'applied' order by p.paid_at desc limit 1) lp on true
+        order by x.ends`,
+      tx<{ name: string; kes: number }[]>`
+        select coalesce(pr.name, 'Other') as name, sum(p.amount_kes)::int as kes
+        from payments p left join products pr on pr.id = p.product_id
+        where p.status = 'applied' and p.paid_at >= ${start}
+        group by 1 order by 2 desc limit 4`,
+      // Not seen 14+ days: paid up, but no entry for 14+ days (counted from the start of their current plan if they
+      // have never come in) — the clearest early sign someone is about to leave.
+      tx<{ id: string; member_no: number; first_name: string; last_name: string; away: number }[]>`
+        select m.id, m.member_no, m.first_name, m.last_name,
+               extract(day from now() - coalesce(la.last, cur.since))::int as away
+        from members m
+        join lateral (select min(e.starts_at) as since from entitlements e
+                      where e.member_id = m.id and e.ends_at > now() and e.starts_at <= now()) cur on cur.since is not null
+        left join lateral (select max(a.at) as last from access_events a
+                           where a.member_no = m.member_no and a.granted) la on true
+        where m.member_no not between 11001 and 11999
+          and coalesce(la.last, cur.since) < now() - interval '14 days'
+        order by away desc`,
+      tx<{ n: number; kes: number }[]>`
+        select count(*)::int as n, coalesce(sum(amount_kes), 0)::int as kes from payments where status = 'unmatched'`,
+      tx<{ failed: number }[]>`select count(*) filter (where error is not null)::int as failed from access_states`,
+      tx<{ last: Date | null }[]>`select max(last_seen_at) as last from app_tenant_bridges()`,
+      tx<{ units: string | null }[]>`select sum(units) as units from sms_ledger`,
+    ]);
     const ended = ren?.ended ?? 0;
     const renewed = ren?.renewed ?? 0;
     return {
@@ -475,7 +504,7 @@ export async function ownerDashboard(tenantId: string, days: number): Promise<Ow
         spark: points.map((p) => p.active),
       },
       renewals: { ended, renewed, lapsed: ended - renewed },
-      endingSoon: ending.map((x) => ({
+      endingSoon: ending.slice(0, 5).map((x) => ({
         id: x.id,
         memberNo: x.member_no,
         name: `${x.first_name} ${x.last_name}`,
@@ -483,7 +512,7 @@ export async function ownerDashboard(tenantId: string, days: number): Promise<Ow
         plan: x.plan,
         priceKes: x.price,
       })),
-      ending7: { count: e7?.n ?? 0, expectedKes: e7?.kes ?? 0 },
+      ending7: { count: ending.length, expectedKes: ending.reduce((a, x) => a + (x.price ?? 0), 0) },
       plans,
       atRisk: risk.slice(0, 5).map((x) => ({
         id: x.id,

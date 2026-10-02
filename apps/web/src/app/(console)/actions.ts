@@ -422,7 +422,7 @@ export async function remindEnding(_prev: { done?: string }, _form: FormData): P
     const due = await tx<{ member_id: string; member_no: number; first_name: string; phone: string; ends: Date }[]>`
       select m.id as member_id, m.member_no, m.first_name, m.phone, x.ends from members m
       join (select member_id, max(ends_at) as ends from entitlements group by member_id) x on x.member_id = m.id
-      where m.status = 'active' and m.phone is not null and m.first_name <> 'Wristband'
+      where m.status = 'active' and m.phone is not null and m.member_no not between 11001 and 11999
         and x.ends between now() and now() + interval '7 days'`;
     const portal = (process.env.PUBLIC_URL ?? '').replace(/\/$/, '');
     let n = 0;
@@ -439,7 +439,8 @@ export async function remindEnding(_prev: { done?: string }, _form: FormData): P
     }
     if (n)
       await tx`insert into audit_log (tenant_id, actor, action, entity, data) values (${s.tid}, ${s.uid}, 'reminders.sent', 'dashboard', ${tx.json({ count: n } as never)})`;
-    return n;
+    return { n, due: due.length };
   });
-  return { done: queued ? `Reminder sent to ${queued}` : 'Already reminded' };
+  if (!queued.due) return { done: 'No mobile numbers to text' };
+  return { done: queued.n ? `Reminder sent to ${queued.n}` : 'Already reminded' };
 }
