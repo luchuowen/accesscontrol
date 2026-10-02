@@ -328,7 +328,7 @@ export default async function Dashboard({
           </div>
           <ul className="mt-2">
             {d.endingSoon.length === 0 && <li className="py-2 text-sm text-ink-500">Nobody this week</li>}
-            {d.endingSoon.map((m) => {
+            {d.endingSoon.slice(0, 3).map((m) => {
               const left = Math.max(0, Math.ceil((m.endsAt.getTime() - Date.now()) / 86400_000));
               const tone =
                 left <= 2
@@ -380,6 +380,11 @@ export default async function Dashboard({
               );
             })}
           </ul>
+          {d.ending7.count > 3 && (
+            <Link href="/members?f=ending" className="mb-3 text-[12.5px] font-semibold text-ink-500 hover:text-ink-900">
+              +{d.ending7.count - 3} more ending this week →
+            </Link>
+          )}
           {d.ending7.count > 0 && (
             <div className="mt-auto flex items-center justify-between gap-3 border-t border-dashed border-[#E7EBF3] pt-3">
               <span className="text-xs text-ink-500">
