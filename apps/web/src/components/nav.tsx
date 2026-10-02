@@ -70,6 +70,11 @@ export function Nav({
             <ArrowLeftRight size={14} /> All clubs
           </Link>
         )}
+        {partner && (
+          <Link href="/partner/settings" className="mt-2 flex items-center gap-2 text-xs text-ink-300 hover:text-white">
+            <Plug size={14} /> SaaS console
+          </Link>
+        )}
         <form action="/logout" method="post" className="mt-3">
           <button type="submit" className="flex items-center gap-2 text-xs text-ink-300 hover:text-white">
             <LogOut size={14} /> Sign out

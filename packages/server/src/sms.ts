@@ -75,19 +75,27 @@ export class SourceCodeSms {
     };
   }
 
-  /** Proves the key works and returns the prepaid balance (SMS units). */
+  /**
+   * Proves the API key works without sending anything. Source Code's documented profile endpoint does not exist
+   * (404, checked 2026-10-02), but sendsms checks the key before the number: an impossible number answers
+   * 1006 for a bad key and a number error for a good one. No SMS is sent and nothing is charged.
+   */
   async profile(): Promise<{ ok: boolean; balance: string | null; company: string | null; desc: string }> {
-    const j = (await this.post('profile', { api_key: this.apiKey })) as
-      | Record<string, unknown>
-      | Record<string, unknown>[];
-    const r = ((Array.isArray(j) ? j[0] : j) ?? {}) as Record<string, Record<string, unknown> | string | undefined>;
-    const ok = String(r.status_code) === '1000' || String(r.status_code) === '1';
-    const wallet = r.wallet as Record<string, unknown> | undefined;
-    const partner = r.partner as Record<string, unknown> | undefined;
+    const j = (await this.post('sendsms', {
+      api_key: this.apiKey,
+      service_id: 0,
+      mobile: '0',
+      response_type: 'json',
+      shortcode: this.sender,
+      message: 'key check',
+    })) as Record<string, unknown> | Record<string, unknown>[];
+    const r = ((Array.isArray(j) ? j[0] : j) ?? {}) as Record<string, unknown>;
+    const code = String(r.status_code ?? '0');
+    const balance = r.credit_balance != null && String(r.credit_balance) !== '' ? String(r.credit_balance) : null;
     return {
-      ok,
-      balance: wallet?.credit_balance != null ? String(wallet.credit_balance) : null,
-      company: partner?.company != null ? String(partner.company) : null,
+      ok: code !== '1006' && code !== '1011' && code !== '0',
+      balance,
+      company: null,
       desc: String(r.status_desc ?? ''),
     };
   }

@@ -31,7 +31,13 @@ export async function requirePartner(): Promise<Session> {
   if (!s) redirect('/login');
   const [row] = await db()<{ active: boolean }[]>`select app_staff_active(${s.uid}) as active`;
   if (!row?.active) redirect('/logout');
-  if (!s.partner) redirect('/');
+  if (!s.partner) {
+    // Signed in before this account became a partner/platform admin: a fresh sign-in picks up the new role.
+    const [p] = await db()<
+      { ok: boolean }[]
+    >`select exists (select 1 from app_partner_clubs(${s.uid})) or app_is_platform(${s.uid}) as ok`;
+    redirect(p?.ok ? '/logout' : '/');
+  }
   return s;
 }
 
