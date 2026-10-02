@@ -10,8 +10,8 @@ Researched 2026-10-01 from https://merchants.taifapay.africa/docs (all 7 guides 
 ## 2. Environments [V]
 | Env | Base URL |
 |---|---|
-| Sandbox | `https://sandbox.merchants.taifapay.africa/v1` |
-| Live | `https://merchants.taifapay.africa/v1` |
+| Sandbox | `https://sandbox.merchants.taifapay.africa/v1` (docs) → use `/api/v1` [U] |
+| Live | `https://merchants.taifapay.africa/v1` (docs) → **actually `/api/v1`** [V, lab 2026-10-02: `/v1/auth/token` returns the dashboard HTML with 200; `/api/v1/auth/token` returns JSON 401 for bad keys] |
 
 Each environment has its own credential pair, and tokens only work in the environment that issued them.
 

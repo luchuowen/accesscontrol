@@ -8,7 +8,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { rebuildAccessState } from './access.js';
 import { handleAck, handleDrift, handleEvents, handlePair, handleSync } from './bridge-api.js';
 import { recordPayment } from './payments.js';
-import { handleTaifaWebhook, TaifaPay } from './taifapay.js';
+import { handleTaifaWebhook, TaifaAuthError, TaifaPay } from './taifapay.js';
 
 /**
  * Walking skeleton, end to end: payment → entitlement → AccessState → bridge long-poll → AxTraxNG (fake)
@@ -318,5 +318,19 @@ describe('walking skeleton: pay → door', () => {
     expect(a).toEqual({ entity: 'TP-ODD-1' });
     const [fn] = await owner`select has_function_privilege('public', 'app_staff_login(text)', 'execute') as p`;
     expect(fn).toEqual({ p: false });
+  });
+  it('TaifaPay key check: an HTML page is "wrong address", a 401 is "rejected", and the /api/v1 base is used', async () => {
+    const seen: string[] = [];
+    const html = (async (u: string) => {
+      seen.push(String(u));
+      return new Response('<!DOCTYPE html><html></html>', { status: 200 });
+    }) as typeof fetch;
+    const e1 = await new TaifaPay({ env: 'live', clientId: 'h1', clientSecret: 's' }, html).verify().catch((e) => e);
+    expect(e1).toBeInstanceOf(Error);
+    expect(e1).not.toBeInstanceOf(TaifaAuthError);
+    expect(seen[0]).toBe('https://merchants.taifapay.africa/api/v1/auth/token');
+    const denied = (async () => new Response('{"message":"invalid client"}', { status: 401 })) as typeof fetch;
+    const e2 = await new TaifaPay({ env: 'live', clientId: 'h2', clientSecret: 's' }, denied).verify().catch((e) => e);
+    expect(e2).toBeInstanceOf(TaifaAuthError);
   });
 });

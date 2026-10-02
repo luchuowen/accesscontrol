@@ -12,7 +12,8 @@ export interface TaifaCreds {
   clientSecret: string;
 }
 const base = (env: TaifaCreds['env']) =>
-  env === 'live' ? 'https://merchants.taifapay.africa/v1' : 'https://sandbox.merchants.taifapay.africa/v1';
+  // The guides say /v1, but on the live host /v1 is the dashboard web app; the API answers under /api/v1 (lab, 2 Oct 2026).
+  env === 'live' ? 'https://merchants.taifapay.africa/api/v1' : 'https://sandbox.merchants.taifapay.africa/api/v1';
 const tokens = new Map<string, { token: string; exp: number }>();
 const TIMEOUT_MS = 15_000; // never leave a webhook or a staff click hanging on a slow provider
 /** The provider answered and refused the credentials (as opposed to being unreachable). */
@@ -37,8 +38,16 @@ export class TaifaPay {
       body: JSON.stringify({ grant_type: 'client_credentials' }),
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
-    if (!r.ok) throw new TaifaAuthError(`TaifaPay auth failed: HTTP ${r.status}`);
-    const j = (await r.json()) as { access_token?: string; expires_in?: string | number };
+    if (r.status === 400 || r.status === 401 || r.status === 403)
+      throw new TaifaAuthError(`TaifaPay auth failed: HTTP ${r.status}`);
+    if (!r.ok) throw new Error(`TaifaPay auth endpoint error: HTTP ${r.status}`);
+    const text = await r.text();
+    let j: { access_token?: string; expires_in?: string | number };
+    try {
+      j = JSON.parse(text);
+    } catch {
+      throw new Error('TaifaPay auth endpoint did not return JSON (wrong API address?)');
+    }
     if (!j.access_token) throw new TaifaAuthError('TaifaPay auth returned no access token');
     tokens.set(k, { token: j.access_token, exp: Date.now() + (Number(j.expires_in) || 300) * 1000 });
     return j.access_token;

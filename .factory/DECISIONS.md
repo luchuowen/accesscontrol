@@ -37,3 +37,5 @@
 - Bridge: acks deduped per member and retried; events paged with 10-min overlap; hourly full resync (cursor 0);
   Tamper Guard every 10 min. Group reader updates are best-effort (members still converge).
 - Rate limits: per-IP (last X-Forwarded-For hop, Caddy) for all attempts; per-account for failures only.
+- TaifaPay live API base is `https://merchants.taifapay.africa/api/v1` (the documented `/v1` serves the dashboard
+  HTML with HTTP 200). Key checks treat non-JSON or 5xx as "unreachable", 400/401/403 as "rejected".
