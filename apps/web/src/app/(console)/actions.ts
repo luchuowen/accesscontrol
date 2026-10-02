@@ -4,7 +4,6 @@ import {
   assignPayment,
   can,
   clubNotify,
-  importMembers,
   initiatedTransactionId,
   newPairCode,
   rebuildAccessState,
@@ -276,9 +275,14 @@ const zoneKey = (name: string) =>
     .slice(0, 30);
 
 /** Create a zone or change which AxTraxNG readers it opens (readers come from the Site Bridge's inventory). */
+/**
+ * Add or rename an area. Club owners and managers name their areas; only the installer links door readers to them
+ * (doors.setup): for anyone else the readers already linked are kept as they are.
+ */
 export async function saveZone(form: FormData) {
   const s = await requireSession();
-  if (!can(s, 'doors.setup')) redirect('/access?n=forbidden');
+  if (!can(s, 'doors.manage') && !can(s, 'doors.setup')) redirect('/access?n=forbidden');
+  const installer = can(s, 'doors.setup');
   const zoneId = id(form, 'zoneId');
   const siteId = id(form, 'siteId');
   const name = String(form.get('name') ?? '')
@@ -293,12 +297,14 @@ export async function saveZone(form: FormData) {
   );
   if (!siteId || !name || (!zoneId && !zoneKey(name))) redirect('/access?n=zone-invalid');
   const r = await withTenant(db(), s.tid, async (tx) => {
-    if (zoneId) {
+    if (zoneId && installer) {
       await tx`update zones set name = ${name}, reader_ids = ${readers} where id = ${zoneId} and site_id = ${siteId}`;
+    } else if (zoneId) {
+      await tx`update zones set name = ${name} where id = ${zoneId} and site_id = ${siteId}`;
     } else {
       const [dup] = await tx`select 1 from zones where site_id = ${siteId} and key = ${zoneKey(name)}`;
       if (dup) return 'zone-taken';
-      await tx`insert into zones (tenant_id, site_id, key, name, reader_ids) values (${s.tid}, ${siteId}, ${zoneKey(name)}, ${name}, ${readers})`;
+      await tx`insert into zones (tenant_id, site_id, key, name, reader_ids) values (${s.tid}, ${siteId}, ${zoneKey(name)}, ${name}, ${installer ? readers : []})`;
     }
     await tx`insert into audit_log (tenant_id, actor, action, entity, data) values (${s.tid}, ${s.uid}, 'zone.saved', ${zoneId ?? zoneKey(name)}, ${tx.json({ name, readers } as never)})`;
     return 'saved';
@@ -316,19 +322,6 @@ export async function requestInventory(form: FormData) {
   await withTenant(db(), s.tid, (tx) => tx`update sites set inventory_requested_at = now() where id = ${siteId}`);
   revalidatePath('/access');
   redirect('/access?n=inventory-requested');
-}
-
-/** Bring the club's existing AxTraxNG users in as members, keeping the access they have today. */
-export async function importFromAxtrax(form: FormData) {
-  const s = await requireSession();
-  if (!can(s, 'doors.setup')) redirect('/access?n=forbidden');
-  const siteId = id(form, 'siteId');
-  const groupIds = form.getAll('groups').map(Number).filter(Number.isInteger);
-  const graceDays = Math.min(90, Math.max(0, Number(form.get('graceDays') ?? 14) || 0));
-  if (!siteId || groupIds.length === 0) redirect('/access?n=invalid');
-  const r = await importMembers(db(), s.tid, { siteId, graceDays, groupIds, actor: s.uid });
-  revalidatePath('/access');
-  redirect(`/access?imported=${r.created}&withAccess=${r.withAccess}&existing=${r.existing}&skipped=${r.skipped}`);
 }
 
 /** A fresh pairing code, e.g. when the AxTraxNG PC is replaced (the old bridge must then be reinstalled). */

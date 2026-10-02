@@ -1,366 +1,448 @@
-import { withTenant } from '@lango/db';
-import { can, inventorySummary, planImport } from '@lango/server';
-import { DoorOpen, Download, RefreshCw, Server, ShieldCheck, UserPlus } from 'lucide-react';
+import { can } from '@lango/server';
+import {
+  CircleCheck,
+  DoorOpen,
+  Download,
+  MonitorSmartphone,
+  Plus,
+  RefreshCw,
+  ShieldCheck,
+  Smartphone,
+  Wrench,
+} from 'lucide-react';
 import { headers } from 'next/headers';
+import Link from 'next/link';
 import { CopyField } from '@/components/copy-field';
 import { Notice } from '@/components/notice';
 import { SubmitButton } from '@/components/submit-button';
-import { Badge, PageHeader, Stat } from '@/components/ui';
-import { accessOverview } from '@/lib/data';
-import { ago, dateTime } from '@/lib/format';
+import { PageHeader } from '@/components/ui';
+import { type DoorEvent, doorsBoard } from '@/lib/data';
+import { ago, kes } from '@/lib/format';
 import { requirePerm } from '@/lib/session';
 import { db } from '@/server/db';
-import { importFromAxtrax, reissuePairCode, requestInventory, saveZone } from '../actions';
+import { reissuePairCode, requestInventory, saveZone } from '../actions';
 
-/** "stop 2027-12-31T23:59:59 -> 2026-09-04T23:59:59" → what the person in AxTraxNG had set. */
-function describe(change: string): string {
-  const m = /^(start|stop|group) (.+?) (?:->|→) (.+)$/.exec(change);
-  const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  const when = (v: string) => {
-    const d = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}:\d{2})/.exec(v); // naive club-local time from AxTraxNG
-    return d ? `${Number(d[3])} ${MONTHS[Number(d[2]) - 1]} ${d[1]}, ${d[4]}` : 'no date';
-  };
-  if (!m) return change === 'bValidDate' ? 'Date checking switched off' : `${change} changed`;
-  if (m[1] === 'stop') return `Valid until set to ${when(m[2] as string)}`;
-  if (m[1] === 'start') return `Valid from set to ${when(m[2] as string)}`;
-  return 'Door group changed';
+/**
+ * Doors & access, design A "Control room" (approved 2 Oct 2026). What it is for: are the doors letting in the right
+ * people? Paid members get in, unpaid ones are stopped, and the owner hears when something breaks. Door PC health
+ * and payments-on-doors at the top; today at the doors with everyone turned away (and why, with a way to ask them to
+ * pay); what each area opens with "Add area"; changes made directly in the door software that Lango put back.
+ * Pairing the door PC and linking readers to areas are the installer's (doors.setup); member import lives on Members.
+ */
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+/** A Tamper Guard record in plain words: "was given access until 31 Dec 2027", "had date checking switched off". */
+function changed(changes: string[]): string {
+  const parts: string[] = [];
+  for (const c of changes) {
+    const m = /^(start|stop|group) (.+?) (?:->|→) (.+)$/.exec(c);
+    if (c === 'bValidDate') parts.push('had date checking switched off, so the card would open any time');
+    else if (m?.[1] === 'stop') {
+      const d = /^(\d{4})-(\d{2})-(\d{2})/.exec(m[2] as string);
+      const year = Number(d?.[1] ?? 0);
+      parts.push(
+        !d || year <= 2000
+          ? 'had their access cut off'
+          : `was given access until ${Number(d[3])} ${MONTHS[Number(d[2]) - 1]} ${year}`,
+      );
+    } else if (m?.[1] === 'group') parts.push('was moved to another door group');
+    else if (m?.[1] === 'start')
+      continue; // a start date alone tells the owner nothing
+    else parts.push(`had their ${c.replace(/^b(?=[A-Z])/, '').toLowerCase()} changed`);
+  }
+  const uniq = [...new Set(parts)];
+  return uniq.length ? uniq.join(', ') : 'had their door settings changed';
 }
 
-export default async function Access({
-  searchParams,
-}: {
-  searchParams: Promise<{ n?: string; imported?: string; withAccess?: string; existing?: string; skipped?: string }>;
-}) {
+const hm = (d: Date) =>
+  d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Africa/Nairobi' });
+const day = (d: Date) => d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'Africa/Nairobi' });
+const initials = (n: string) =>
+  n
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((w) => w[0]?.toUpperCase())
+    .join('');
+
+function EventRow({ e, canPay }: { e: DoorEvent; canPay: boolean }) {
+  return (
+    <li className="flex items-center gap-3 px-4 py-2.5">
+      <span className="w-11 shrink-0 text-[12.5px] tabular-nums text-ink-500">{hm(e.at)}</span>
+      <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-slate-100 text-[11.5px] font-semibold text-ink-700">
+        {e.name ? initials(e.name) : '?'}
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-[13.5px] font-semibold">
+          {e.memberId ? (
+            <Link href={`/members/${e.memberId}`} className="hover:underline">
+              {e.name}
+            </Link>
+          ) : (
+            `Card ${e.memberNo ?? '?'}`
+          )}
+        </div>
+        <div className="truncate text-[12px] text-ink-500">
+          {e.zone ?? `Reader ${e.readerId}`}
+          {e.reason ? ` · ${e.reason}` : ''}
+        </div>
+      </div>
+      {e.granted ? (
+        <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[11.5px] font-semibold text-emerald-700">In</span>
+      ) : (
+        <>
+          <span className="hidden rounded-full bg-rose-50 px-2 py-0.5 text-[11.5px] font-semibold text-rose-700 sm:inline">
+            Turned away
+          </span>
+          {canPay && e.memberId && e.reason !== 'Wristband not paid for' && (
+            <Link
+              href={`/members/${e.memberId}#pay`}
+              className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-[9px] bg-[#047857] px-2.5 text-[12px] font-semibold text-white hover:bg-[#065F46]"
+            >
+              <Smartphone size={13} />
+              {e.lastPriceKes ? `Prompt ${kes(e.lastPriceKes)}` : 'Ask to pay'}
+            </Link>
+          )}
+        </>
+      )}
+    </li>
+  );
+}
+
+export default async function Access({ searchParams }: { searchParams: Promise<{ n?: string; f?: string }> }) {
   const s = await requirePerm('doors.manage');
   const sp = await searchParams;
-  const d = await accessOverview(s.tid);
-  const base = (process.env.PUBLIC_URL ?? `https://${(await headers()).get('host')}`).replace(/\/$/, '');
-  const install = `irm ${base}/bridge/install.ps1 | iex`;
-  // Club staff see the doors; the installer (partner technician / partner or NAVAC admin) sets them up.
   const setup = can(s, 'doors.setup');
-  const [installer] = await db()<{ name: string | null }[]>`
-    select p.name from tenants t left join partners p on p.id = t.partner_id where t.id = ${s.tid}`;
-  const installerName = installer?.name ?? 'your installer';
-  const sites = await withTenant(db(), s.tid, async (tx) => {
-    const [t] = await tx<{ timezone: string }[]>`select timezone from tenants where id = ${s.tid}`;
-    return Promise.all(
-      d.sites.map(async (site) => {
-        const inv = await inventorySummary(tx, site.id);
-        const defaults = inv ? inv.groups.filter((g) => !g.staff && g.users > 0).map((g) => g.id) : [];
-        const preview = inv ? await planImport(tx, site.id, t?.timezone ?? 'Africa/Nairobi', 14, defaults) : null;
-        return { site, inv, defaults, preview };
-      }),
-    );
-  });
+  const canPay = can(s, 'payments.record');
+  const [d, [installer]] = await Promise.all([
+    doorsBoard(s.tid),
+    db()<{ name: string | null }[]>`
+      select p.name from tenants t left join partners p on p.id = t.partner_id where t.id = ${s.tid}`,
+  ]);
+  const who = installer?.name ?? 'your installer';
+  const lastSeen = d.bridges
+    .map((b) => b.last_seen_at)
+    .filter((x): x is Date => !!x)
+    .sort((a, b) => b.getTime() - a.getTime())[0];
+  const online = !!lastSeen && Date.now() - lastSeen.getTime() < 120_000;
+  const waiting = d.stats.total - d.stats.synced;
+  const away = d.events.filter((e) => !e.granted);
+  const awayOnly = sp.f === 'away';
+  const shown = awayOnly ? away : d.events.slice(0, 40);
+  const site = d.sites[0];
+  const base = (process.env.PUBLIC_URL ?? `https://${(await headers()).get('host')}`).replace(/\/$/, '');
+  const card = 'rounded-2xl border border-[#E7EBF3] bg-white';
+  const head = 'flex items-center gap-2.5 border-b border-[#EEF1F6] px-4 py-3';
+  const tile = (label: string, value: React.ReactNode, sub: string, tone?: string) => (
+    <div className={`${card} px-4 py-3.5`}>
+      <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-500">{label}</div>
+      <div className={`mt-1 flex items-center gap-2 text-[22px] font-semibold tracking-tight ${tone ?? ''}`}>
+        {value}
+      </div>
+      <div className="mt-0.5 text-[12px] text-ink-500">{sub}</div>
+    </div>
+  );
+
   return (
     <>
+      <PageHeader title="Doors & access" subtitle="Who your doors let in, and anything that needs you." />
       <Notice code={sp.n} />
-      {sp.imported && (
-        <div className="mb-4 rounded-xl bg-emerald-50 p-3 text-sm text-emerald-800 ring-1 ring-emerald-200">
-          Imported {sp.imported} member(s) from AxTraxNG; {sp.withAccess} keep their current access. {sp.existing} were
-          already in Lango{Number(sp.skipped) ? `, ${sp.skipped} skipped` : ''}. The Site Bridge takes them over within
-          a minute.
-        </div>
-      )}
-      <PageHeader
-        title="Doors & access"
-        subtitle="Your doors, connected. They decide on their own; Lango keeps them told who has paid."
-      />
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <Stat label="Members on doors" value={d.stats?.total ?? 0} />
-        <Stat label="In sync" value={d.stats?.synced ?? 0} />
-        <Stat label="Waiting" value={(d.stats?.total ?? 0) - (d.stats?.synced ?? 0)} />
-        <Stat label="Errors" value={d.stats?.failed ?? 0} tone={d.stats?.failed ? 'warn' : 'default'} />
-      </div>
-      {d.tamper.length > 0 && (
-        <section className="card mt-6 p-6">
-          <div className="flex items-center gap-2">
-            <ShieldCheck size={18} className="text-emerald-600" />
-            <div className="font-medium">Hand edits in AxTraxNG, undone automatically</div>
-          </div>
-          <p className="mt-1 text-sm text-ink-500">
-            Someone changed these members directly in the access-control software. Lango put back what they have paid
-            for within minutes. Last 30 days.
-          </p>
-          <ul className="mt-4 divide-y divide-ink-100 text-sm">
-            {d.tamper.map((t) => (
-              <li
-                key={`${t.at.getTime()}-${t.member_no}`}
-                className="flex flex-wrap items-baseline gap-x-4 gap-y-1 py-2.5"
-              >
-                <span className="w-32 shrink-0 text-ink-500">{dateTime(t.at)}</span>
-                <span className="font-medium">{t.name ?? `Member ${t.member_no}`}</span>
-                <span className="text-ink-500">{t.changes.map(describe).join(' · ')}</span>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-      {sites.map(({ site, inv, defaults, preview }) => {
-        const b = d.bridges.find((x) => x.site_id === site.id);
-        const online = b?.last_seen_at && Date.now() - b.last_seen_at.getTime() < 120_000;
-        const zones = d.zones.filter((z) => z.site_id === site.id);
-        const readerName = new Map((inv?.readers ?? []).map((r) => [r.id, r.door ? `${r.name} · ${r.door}` : r.name]));
-        return (
-          <div key={site.id} className="mt-6 grid gap-4 lg:grid-cols-3">
-            <section className="card p-6">
-              <div className="flex items-center gap-3">
-                <div className="grid h-10 w-10 place-items-center rounded-xl bg-ink-50">
-                  <Server size={18} />
-                </div>
-                <div className="flex-1">
-                  <div className="font-medium">{site.name}</div>
-                  <div className="text-xs text-ink-500">
-                    AxTraxNG · Site Bridge {online ? 'online' : b?.last_seen_at ? 'offline' : 'not installed'} ·{' '}
-                    {ago(b?.last_seen_at ?? null)}
-                  </div>
-                </div>
-                <Badge tone={online ? 'green' : 'amber'}>{online ? 'online' : 'offline'}</Badge>
-              </div>
-              {setup && b?.pair_code && (
-                <div className="mt-5 space-y-3">
-                  <div>
-                    <span className="label">Pairing code</span>
-                    <div className="mt-1.5">
-                      <CopyField value={b.pair_code} label="Pairing code" />
-                    </div>
-                  </div>
-                  <div>
-                    <span className="label">Install on the AxTraxNG server PC</span>
-                    <div className="mt-1.5">
-                      <CopyField value={install} label="Install command" />
-                    </div>
-                    <p className="mt-1.5 text-xs text-ink-500">
-                      Open PowerShell as Administrator, paste, and answer three questions: the pairing code and the
-                      AxTraxNG operator login. That login stays on the PC.
-                    </p>
-                  </div>
-                </div>
-              )}
-              <div className="mt-5 flex flex-wrap gap-2">
-                {setup && b?.last_seen_at && (
-                  <form action={requestInventory}>
-                    <input type="hidden" name="siteId" value={site.id} />
-                    <SubmitButton pendingText="Asking…" className="btn-ghost px-3 py-2 text-xs">
-                      <RefreshCw size={14} /> Read AxTraxNG again
-                    </SubmitButton>
-                  </form>
-                )}
-                {setup && b?.last_seen_at && (
-                  <form action={reissuePairCode}>
-                    <SubmitButton pendingText="Issuing…" className="btn-ghost px-3 py-2 text-xs">
-                      <Download size={14} /> New PC? New pairing code
-                    </SubmitButton>
-                  </form>
-                )}
-              </div>
-              {!setup && !online && (
-                <div className="mt-5 rounded-xl bg-amber-50 px-3.5 py-3 text-[13px] text-amber-900 ring-1 ring-amber-200">
-                  {b?.last_seen_at ? (
-                    <>
-                      The door PC hasn’t checked in since {ago(b.last_seen_at)}. Doors keep working with what they last
-                      received; new payments reach them once it’s back online.
-                    </>
-                  ) : (
-                    <>The door PC isn’t connected yet.</>
-                  )}{' '}
-                  If it stays offline, call {installerName}.
-                </div>
-              )}
-              {!setup && online && (
-                <p className="mt-4 text-[13px] text-ink-500">
-                  Connected. Payments reach the doors within a minute. Set up by {installerName}.
-                </p>
-              )}
-              {setup && inv && (
-                <p className="mt-4 text-xs text-ink-500">
-                  AxTraxNG read {ago(inv.receivedAt)}: {inv.readers.length} readers, {inv.groups.length} access groups,{' '}
-                  {inv.users} users.
-                </p>
-              )}
-            </section>
 
-            {!setup && (
-              <section className="card p-6 lg:col-span-2">
-                <div className="label">What each area opens</div>
-                <p className="mt-1 text-sm text-ink-500">
-                  Services open areas; each area opens these doors. {installerName} links doors to areas.
-                </p>
-                <ul className="mt-4 divide-y divide-ink-100">
-                  {zones.map((z) => (
-                    <li key={z.id} className="flex flex-wrap items-baseline gap-x-4 gap-y-1 py-2.5 text-sm">
-                      <span className="flex w-44 shrink-0 items-center gap-2 font-medium">
-                        <DoorOpen size={15} className="text-ink-300" />
-                        {z.name}
-                      </span>
-                      <span className={z.reader_ids.length ? 'text-ink-700' : 'text-amber-700'}>
-                        {z.reader_ids.length
-                          ? z.reader_ids.map((r) => readerName.get(r) ?? `Reader ${r}`).join(' · ')
-                          : 'No doors linked yet'}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-                {zones.length === 0 && <p className="mt-3 text-sm text-ink-500">No areas yet.</p>}
-              </section>
-            )}
-            {setup && (
-              <section className="card p-6 lg:col-span-2">
-                <div className="label">Areas → doors</div>
-                <p className="mt-1 text-sm text-ink-500">
-                  An area is a part of the club (gym floor, pool, sauna). Tick the door readers each area opens;
-                  services then open areas.
-                </p>
-                <ul className="mt-4 space-y-3">
-                  {zones.map((z) => (
-                    <li key={z.id} className="rounded-xl p-3 ring-1 ring-ink-100">
-                      <form action={saveZone} className="space-y-2">
-                        <input type="hidden" name="zoneId" value={z.id} />
-                        <input type="hidden" name="siteId" value={site.id} />
-                        <div className="flex items-center gap-2">
-                          <DoorOpen size={15} className="text-ink-300" />
-                          <input
-                            name="name"
-                            defaultValue={z.name}
-                            disabled={!setup}
-                            className="input max-w-xs py-1.5 font-medium"
-                          />
-                          <span className="font-mono text-[11px] text-ink-500">{z.key}</span>
-                        </div>
-                        {inv ? (
-                          <div className="flex flex-wrap gap-2">
-                            {inv.readers.map((r) => (
-                              <label
-                                key={r.id}
-                                className="flex items-center gap-1.5 rounded-full px-3 py-1 text-xs ring-1 ring-ink-100"
-                              >
-                                <input
-                                  type="checkbox"
-                                  name="readers"
-                                  value={r.id}
-                                  disabled={!setup}
-                                  defaultChecked={z.reader_ids.includes(r.id)}
-                                  className="h-3.5 w-3.5 accent-ink-900"
-                                />
-                                {readerName.get(r.id)}
-                              </label>
-                            ))}
-                            {inv.readers.length === 0 && (
-                              <span className="text-xs text-ink-500">
-                                AxTraxNG has no readers yet (no panels added).
-                              </span>
-                            )}
-                          </div>
-                        ) : (
-                          <input
-                            name="readerIds"
-                            disabled={!setup}
-                            defaultValue={z.reader_ids.join(', ')}
-                            placeholder="Reader IDs, e.g. 11, 12 (picked from a list once the bridge is installed)"
-                            className="input py-1.5 text-xs"
-                          />
-                        )}
-                        {setup && (
-                          <SubmitButton pendingText="Saving…" className="btn-ghost px-3 py-1.5 text-xs">
-                            Save
-                          </SubmitButton>
-                        )}
-                      </form>
-                    </li>
-                  ))}
-                </ul>
-                {setup && (
-                  <form action={saveZone} className="mt-4 flex gap-2">
+      <div className="mb-4 grid grid-cols-2 gap-3 xl:grid-cols-4">
+        {tile(
+          'Door PC',
+          <>
+            <i className={`h-2.5 w-2.5 rounded-full ${online ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+            {online ? 'Online' : lastSeen ? 'Offline' : 'Not connected'}
+          </>,
+          online
+            ? `Checked in ${ago(lastSeen ?? null)}`
+            : lastSeen
+              ? `Last seen ${ago(lastSeen)}. Doors keep working; call ${who} if it lasts.`
+              : `${who} connects it when installing.`,
+        )}
+        {tile(
+          'On the doors',
+          d.stats.failed ? `${d.stats.failed} failed` : waiting ? `${waiting} waiting` : `All ${d.stats.total}`,
+          d.stats.failed
+            ? `Couldn’t be written to the doors; ${who} has been alerted`
+            : waiting
+              ? online
+                ? 'Payments on their way to the doors'
+                : 'Reach the doors when the door PC is back'
+              : 'Every payment has reached the doors',
+          d.stats.failed ? 'text-rose-700' : waiting ? 'text-amber-700' : '',
+        )}
+        {tile('Entries today', <span className="tabular-nums">{d.today.entries}</span>, `${d.today.people} people`)}
+        {tile(
+          'Turned away today',
+          <span className="tabular-nums">{d.today.denied}</span>,
+          d.today.denied ? 'See who below and ask them to pay' : 'Nobody',
+          d.today.denied ? 'text-rose-700' : '',
+        )}
+      </div>
+
+      <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1.45fr)_minmax(0,1fr)]">
+        <section className={`${card} overflow-hidden`}>
+          <header className={head}>
+            <h2 className="text-[14px] font-semibold">Today at the doors</h2>
+            <nav className="ml-auto flex rounded-[10px] bg-slate-100 p-[3px] text-[12px] font-semibold">
+              <Link
+                href="/access"
+                className={`rounded-[8px] px-2.5 py-1 ${!awayOnly ? 'bg-white text-ink-900 shadow-sm' : 'text-ink-500'}`}
+              >
+                All {d.today.entries + d.today.denied}
+              </Link>
+              <Link
+                href="/access?f=away"
+                className={`rounded-[8px] px-2.5 py-1 ${awayOnly ? 'bg-white text-ink-900 shadow-sm' : 'text-ink-500'}`}
+              >
+                Turned away {d.today.denied}
+              </Link>
+            </nav>
+          </header>
+          {shown.length ? (
+            <ul className="divide-y divide-[#F0F2F6]">
+              {shown.map((e, i) => (
+                <EventRow key={`${e.at.getTime()}-${i}`} e={e} canPay={canPay} />
+              ))}
+            </ul>
+          ) : (
+            <p className="flex items-center justify-center gap-2 px-4 py-10 text-sm text-ink-500">
+              {awayOnly ? (
+                <>
+                  <CircleCheck size={16} className="text-emerald-600" /> Nobody was turned away today.
+                </>
+              ) : (
+                'No one has come through the doors yet today.'
+              )}
+            </p>
+          )}
+        </section>
+
+        <div className="grid gap-4">
+          <section className={`${card} overflow-hidden`} id="areas">
+            <header className={head}>
+              <h2 className="text-[14px] font-semibold">Areas &amp; doors</h2>
+              {site && (
+                <details className="group relative ml-auto">
+                  <summary className="inline-flex h-8 cursor-pointer list-none items-center gap-1.5 rounded-[9px] border border-[#E5E8EE] bg-white px-2.5 text-[12.5px] font-semibold hover:bg-slate-50">
+                    <Plus size={14} /> Add area
+                  </summary>
+                  <form
+                    action={saveZone}
+                    className="absolute right-0 z-10 mt-2 flex w-72 flex-col gap-2 rounded-xl border border-[#E7EBF3] bg-white p-3 shadow-lg"
+                  >
                     <input type="hidden" name="siteId" value={site.id} />
-                    <input name="name" required placeholder="New area, e.g. Sauna room" className="input py-2" />
-                    <SubmitButton pendingText="Adding…" className="btn-ghost py-2">
+                    <label className="text-[12px] font-semibold text-ink-700" htmlFor="new-area">
+                      Area name
+                    </label>
+                    <input
+                      id="new-area"
+                      name="name"
+                      required
+                      maxLength={60}
+                      placeholder="e.g. Studio 2"
+                      className="input"
+                    />
+                    <p className="text-[11.5px] text-ink-500">{who} links its door when it’s fitted.</p>
+                    <SubmitButton pendingText="Adding…" className="btn-primary">
                       Add area
                     </SubmitButton>
                   </form>
-                )}
-              </section>
-            )}
-
-            {inv && preview && setup && (
-              <section className="card p-6 lg:col-span-3">
-                <div className="flex items-center gap-2">
-                  <UserPlus size={18} />
-                  <div className="font-medium">Bring in members already on AxTraxNG</div>
-                </div>
-                <p className="mt-1 text-sm text-ink-500">
-                  Existing users become Lango members with their cards, and keep the access they have today: an end date
-                  already set in AxTraxNG is kept; users without one get a grace period to pay. Staff groups stay
-                  outside Lango and are never touched.
-                </p>
-                <form action={importFromAxtrax} className="mt-4 space-y-4">
-                  <input type="hidden" name="siteId" value={site.id} />
-                  <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                    {inv.groups.map((g) => (
-                      <label
-                        key={g.id}
-                        className="flex items-center gap-2.5 rounded-xl p-3 text-sm ring-1 ring-ink-100"
-                      >
-                        <input
-                          type="checkbox"
-                          name="groups"
-                          value={g.id}
-                          defaultChecked={defaults.includes(g.id)}
-                          className="h-4 w-4 accent-ink-900"
-                        />
-                        <span className="flex-1">
-                          {g.name}
-                          {g.staff && <span className="ml-1.5 text-[11px] text-amber-700">staff · not imported</span>}
+                </details>
+              )}
+            </header>
+            <ul className="divide-y divide-[#F0F2F6]">
+              {d.zones.map((z) => (
+                <li key={z.id} className="px-4 py-3">
+                  <details className="group">
+                    <summary className="flex cursor-pointer list-none items-center gap-3">
+                      <span className="grid h-9 w-9 shrink-0 place-items-center rounded-[10px] bg-slate-100 text-ink-700">
+                        <DoorOpen size={16} />
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <b className="block text-[13.5px] font-semibold">{z.name}</b>
+                        <span className="mt-1 flex flex-wrap gap-1">
+                          {z.doors.length ? (
+                            z.doors.map((n) => (
+                              <span
+                                key={n}
+                                className="rounded-full bg-slate-100 px-2 py-0.5 text-[11.5px] text-ink-700"
+                              >
+                                {n}
+                              </span>
+                            ))
+                          ) : (
+                            <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11.5px] font-medium text-amber-800 ring-1 ring-amber-200">
+                              No door yet{setup ? '' : `: ${who} links it`}
+                            </span>
+                          )}
                         </span>
-                        <span className="text-xs tabular-nums text-ink-500">{g.users}</span>
-                      </label>
-                    ))}
-                  </div>
-                  <div className="flex flex-wrap items-center gap-3">
-                    <label className="flex items-center gap-2 text-sm">
-                      Grace period for users without an end date
+                      </span>
+                      <span className="shrink-0 text-[12px] tabular-nums text-ink-500">{z.today} today</span>
+                      <span className="shrink-0 text-[12px] font-semibold text-ink-500 group-open:text-ink-900">
+                        Edit
+                      </span>
+                    </summary>
+                    <form action={saveZone} className="mt-3 flex flex-col gap-2 rounded-xl bg-slate-50 p-3">
+                      <input type="hidden" name="zoneId" value={z.id} />
+                      <input type="hidden" name="siteId" value={z.site_id} />
                       <input
-                        name="graceDays"
-                        type="number"
-                        min={0}
-                        max={90}
-                        defaultValue={14}
-                        className="input w-20 py-1.5"
+                        name="name"
+                        required
+                        maxLength={60}
+                        defaultValue={z.name}
+                        aria-label="Area name"
+                        className="input"
                       />
-                      days
-                    </label>
-                    <span className="text-xs text-ink-500">
-                      With the groups ticked above: {preview.create.length} new member(s),{' '}
-                      {preview.create.filter((c) => c.until).length} with access today, {preview.existing} already in
-                      Lango.
+                      {setup && (
+                        <div className="flex flex-wrap gap-1.5">
+                          {(d.readers[z.site_id] ?? []).map((r) => (
+                            <label
+                              key={r.id}
+                              className="flex items-center gap-1.5 rounded-full bg-white px-2.5 py-1 text-[12px] ring-1 ring-[#E5E8EE]"
+                            >
+                              <input
+                                type="checkbox"
+                                name="readers"
+                                value={r.id}
+                                defaultChecked={z.reader_ids.includes(r.id)}
+                                className="h-3.5 w-3.5 accent-[#047857]"
+                              />
+                              {r.name}
+                            </label>
+                          ))}
+                          {(d.readers[z.site_id] ?? []).length === 0 && (
+                            <span className="text-[12px] text-ink-500">No readers read from AxTraxNG yet.</span>
+                          )}
+                        </div>
+                      )}
+                      <SubmitButton pendingText="Saving…" className="btn-ghost w-fit px-3 py-1.5 text-xs">
+                        Save
+                      </SubmitButton>
+                    </form>
+                  </details>
+                </li>
+              ))}
+              {d.zones.length === 0 && (
+                <li className="px-4 py-6 text-center text-[13px] text-ink-500">
+                  No areas yet. Add one, or add a service and its area is created for you.
+                </li>
+              )}
+            </ul>
+          </section>
+
+          <section className={`${card} overflow-hidden`}>
+            <header className={head}>
+              <ShieldCheck size={16} className="text-emerald-600" />
+              <h2 className="text-[14px] font-semibold">Changes made in the door software</h2>
+              {d.tamper.length > 0 && (
+                <span className="ml-auto rounded-full bg-emerald-50 px-2 py-0.5 text-[11.5px] font-semibold text-emerald-700">
+                  {d.tamper.length} put back
+                </span>
+              )}
+            </header>
+            {d.tamper.length === 0 ? (
+              <p className="flex items-center gap-2 px-4 py-5 text-[13px] text-ink-500">
+                <CircleCheck size={15} className="text-emerald-600" /> Nobody changed access in the door software in the
+                last 30 days.
+              </p>
+            ) : (
+              <>
+                <p className="px-4 pt-3 text-[12px] text-ink-500">
+                  Someone changed these directly on the door PC. Lango put back what each person paid for.
+                </p>
+                <ul className="divide-y divide-[#F0F2F6]">
+                  {d.tamper.slice(0, 5).map((t) => (
+                    <li key={`${t.at.getTime()}-${t.member_no}`} className="flex gap-3 px-4 py-2.5 text-[12.5px]">
+                      <span className="w-24 shrink-0 text-ink-500">
+                        {day(t.at)}, {hm(t.at)}
+                      </span>
+                      <span>
+                        <b className="font-semibold">{t.name ?? `Member ${t.member_no}`}</b> {changed(t.changes)}.
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+                {d.tamper.length > 5 && (
+                  <details className="border-t border-[#F0F2F6]">
+                    <summary className="cursor-pointer list-none px-4 py-2.5 text-[12.5px] font-semibold text-ink-500 hover:text-ink-900">
+                      Show all {d.tamper.length}
+                    </summary>
+                    <ul className="divide-y divide-[#F0F2F6]">
+                      {d.tamper.slice(5).map((t) => (
+                        <li key={`${t.at.getTime()}-${t.member_no}`} className="flex gap-3 px-4 py-2.5 text-[12.5px]">
+                          <span className="w-24 shrink-0 text-ink-500">
+                            {day(t.at)}, {hm(t.at)}
+                          </span>
+                          <span>
+                            <b className="font-semibold">{t.name ?? `Member ${t.member_no}`}</b> {changed(t.changes)}.
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
+                )}
+              </>
+            )}
+          </section>
+        </div>
+      </div>
+
+      {setup && (
+        <section className={`${card} mt-6 p-5`}>
+          <div className="flex items-center gap-2.5">
+            <Wrench size={16} className="text-ink-500" />
+            <h2 className="text-[14px] font-semibold">Installer setup</h2>
+            <span className="text-[12px] text-ink-500">Only installers see this</span>
+          </div>
+          <div className="mt-4 grid gap-4 md:grid-cols-2">
+            {d.sites.map((st) => {
+              const b = d.bridges.find((x) => x.site_id === st.id);
+              return (
+                <div key={st.id} className="rounded-xl bg-slate-50 p-4">
+                  <div className="flex items-center gap-2 text-[13.5px] font-semibold">
+                    <MonitorSmartphone size={15} /> {st.name}
+                    <span className="ml-auto text-[12px] font-normal text-ink-500">
+                      {b?.last_seen_at ? `seen ${ago(b.last_seen_at)}` : 'not installed'}
                     </span>
                   </div>
-                  <SubmitButton pendingText="Importing…" className="btn-primary">
-                    Import members
-                  </SubmitButton>
-                </form>
-              </section>
-            )}
+                  {b?.pair_code && (
+                    <div className="mt-3 space-y-2">
+                      <CopyField value={b.pair_code} label="Pairing code" />
+                      <CopyField value={`irm ${base}/bridge/install.ps1 | iex`} label="Install command" />
+                      <p className="text-[11.5px] text-ink-500">
+                        On the AxTraxNG PC: PowerShell as Administrator, paste, then give the pairing code and the
+                        AxTraxNG operator login (it stays on the PC).
+                      </p>
+                    </div>
+                  )}
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {b?.last_seen_at && (
+                      <form action={requestInventory}>
+                        <input type="hidden" name="siteId" value={st.id} />
+                        <SubmitButton pendingText="Asking…" className="btn-ghost px-3 py-1.5 text-xs">
+                          <RefreshCw size={13} /> Read AxTraxNG again
+                        </SubmitButton>
+                      </form>
+                    )}
+                    {b?.last_seen_at && (
+                      <form action={reissuePairCode}>
+                        <SubmitButton pendingText="Issuing…" className="btn-ghost px-3 py-1.5 text-xs">
+                          <Download size={13} /> New PC? New pairing code
+                        </SubmitButton>
+                      </form>
+                    )}
+                  </div>
+                  <p className="mt-2 text-[11.5px] text-ink-500">
+                    Link door readers to areas with Edit under Areas &amp; doors.
+                  </p>
+                </div>
+              );
+            })}
           </div>
-        );
-      })}
-      <section className="card mt-6 p-6">
-        <div className="label">Door activity</div>
-        <table className="mt-3 w-full text-sm">
-          <tbody className="divide-y divide-ink-100">
-            {d.events.map((e, i) => (
-              <tr key={`${e.at.getTime()}-${i}`}>
-                <td className="py-2.5 text-ink-500">{dateTime(e.at)}</td>
-                <td className="py-2.5">{e.name ?? `Card ${e.member_no ?? '?'}`}</td>
-                <td className="py-2.5 text-ink-500">{e.zone ?? `Reader ${e.reader_id}`}</td>
-                <td className="py-2.5 text-right">
-                  {e.granted ? <Badge tone="green">granted</Badge> : <Badge tone="red">denied</Badge>}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {d.events.length === 0 && <p className="mt-3 text-sm text-ink-500">No door activity yet.</p>}
-      </section>
+        </section>
+      )}
     </>
   );
 }

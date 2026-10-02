@@ -1,3 +1,4 @@
+import { DateTime } from 'luxon';
 import 'server-only';
 import { withTenant } from '@lango/db';
 import { db } from '@/server/db';
@@ -260,39 +261,128 @@ export async function payments(tenantId: string) {
   );
 }
 
-export async function accessOverview(tenantId: string) {
+export interface DoorEvent {
+  at: Date;
+  memberId: string | null;
+  memberNo: number | null;
+  name: string | null;
+  zone: string | null;
+  readerId: number;
+  granted: boolean;
+  /** Why the door said no, in plain words (only when turned away). */
+  reason: string | null;
+  /** What they last paid, to suggest when asking them to pay. */
+  lastPriceKes: number | null;
+}
+
+/**
+ * Doors & access (design A "Control room", approved 2 Oct 2026): is the door PC online, have all payments reached the
+ * doors, who went in today and who was turned away (with why), what each area opens, and changes someone made
+ * directly in the door software that Lango put back. Today = since local midnight.
+ */
+export async function doorsBoard(tenantId: string) {
   return T(tenantId, async (tx) => {
-    const sites = await tx<{ id: string; name: string }[]>`select id, name from sites order by name`;
-    const zones = await tx<
-      { id: string; site_id: string; key: string; name: string; reader_ids: number[] }[]
-    >`select * from zones order by name`;
-    const bridges = await tx<
-      { id: string; site_id: string; pair_code: string | null; last_seen_at: Date | null; adapter: string }[]
-    >`select * from app_tenant_bridges()`;
-    const [st] = await tx<{ total: number; synced: number; failed: number }[]>`
-      select count(*)::int as total, count(*) filter (where applied_version = version)::int as synced, count(*) filter (where error is not null)::int as failed from access_states`;
-    const events = await tx<
-      {
-        at: Date;
-        member_no: number | null;
-        name: string | null;
-        zone: string | null;
-        reader_id: number;
-        granted: boolean;
-      }[]
-    >`
-      select e.at, e.member_no, m.first_name || ' ' || m.last_name as name, z.name as zone, e.reader_id, e.granted from access_events e
-      left join members m on m.member_no = e.member_no
-      left join zones z on e.reader_id = any(z.reader_ids) and z.site_id = e.site_id
-      order by e.at desc limit 40`;
-    // Changes someone made directly in AxTraxNG that the Site Bridge undid (Tamper Guard), last 30 days.
-    const tamper = await tx<{ at: Date; member_no: string; name: string | null; changes: string[] }[]>`
-      select a.at, a.entity as member_no, m.first_name || ' ' || m.last_name as name,
-             coalesce(array(select jsonb_array_elements_text(a.data->'changes')), '{}') as changes
-      from audit_log a left join members m on m.member_no::text = a.entity
-      where a.action = 'access.tamper_reverted' and a.at > now() - interval '30 days'
-      order by a.at desc limit 20`;
-    return { sites, zones, bridges, stats: st, events, tamper };
+    const [t] = await tx<{ timezone: string }[]>`select timezone from tenants where id = ${tenantId}`;
+    const tz = t?.timezone ?? 'Africa/Nairobi';
+    const midnight = DateTime.now().setZone(tz).startOf('day').toJSDate();
+    const [sites, zones, bridges, [st], events, [today], perZone, tamper] = await Promise.all([
+      tx<{ id: string; name: string }[]>`select id, name from sites order by name`,
+      tx<{ id: string; site_id: string; key: string; name: string; reader_ids: number[] }[]>`
+        select id, site_id, key, name, reader_ids from zones order by name`,
+      tx<{ id: string; site_id: string; pair_code: string | null; last_seen_at: Date | null; adapter: string }[]>`
+        select * from app_tenant_bridges()`,
+      tx<{ total: number; synced: number; failed: number }[]>`
+        select count(*)::int as total, count(*) filter (where applied_version = version)::int as synced,
+               count(*) filter (where error is not null)::int as failed from access_states`,
+      tx<
+        {
+          at: Date;
+          member_id: string | null;
+          member_no: number | null;
+          name: string | null;
+          zone: string | null;
+          reader_id: number;
+          granted: boolean;
+          last_end: Date | null;
+          now_services: string | null;
+          status: string | null;
+          last_price: number | null;
+        }[]
+      >`
+        select e.at, m.id as member_id, e.member_no, m.first_name || ' ' || m.last_name as name, z.name as zone,
+               e.reader_id, e.granted, m.status, x.last_end, x.now_services,
+               (select l.price_kes from payment_lines l join payments p on p.id = l.payment_id
+                 where p.member_id = m.id and p.status = 'applied' order by p.paid_at desc limit 1) as last_price
+        from access_events e
+        left join members m on m.member_no = e.member_no
+        left join zones z on e.reader_id = any(z.reader_ids) and z.site_id = e.site_id
+        left join lateral (
+          select max(en.ends_at) as last_end,
+                 string_agg(distinct coalesce(sv.name, en.zone_key), ', ')
+                   filter (where en.starts_at <= e.at and en.ends_at > e.at) as now_services
+          from entitlements en left join services sv on sv.id = en.service_id where en.member_id = m.id) x on true
+        where e.at >= ${midnight}
+        order by e.at desc limit 200`,
+      tx<{ entries: number; people: number; denied: number }[]>`
+        select count(*) filter (where granted)::int as entries,
+               count(distinct member_no) filter (where granted)::int as people,
+               count(*) filter (where not granted)::int as denied
+        from access_events where at >= ${midnight}`,
+      tx<{ zone_id: string; n: number }[]>`
+        select z.id as zone_id, count(*)::int as n from access_events e
+        join zones z on e.reader_id = any(z.reader_ids) and z.site_id = e.site_id
+        where e.at >= ${midnight} and e.granted group by z.id`,
+      tx<{ at: Date; member_no: string; name: string | null; changes: string[] }[]>`
+        select a.at, a.entity as member_no, m.first_name || ' ' || m.last_name as name,
+               coalesce(array(select jsonb_array_elements_text(a.data->'changes')), '{}') as changes
+        from audit_log a left join members m on m.member_no::text = a.entity
+        where a.action = 'access.tamper_reverted' and a.at > now() - interval '30 days'
+        order by a.at desc limit 50`,
+    ]);
+    const readers = new Map<string, Map<number, string>>();
+    for (const site of sites) {
+      const [inv] = await tx<{ data: { readers: { id: number; name: string; door?: string | null }[] } }[]>`
+        select data from site_inventory where site_id = ${site.id}`;
+      readers.set(site.id, new Map((inv?.data.readers ?? []).map((r) => [r.id, r.door || r.name])));
+    }
+    const ago = (d: Date) => {
+      const days = Math.floor((Date.now() - d.getTime()) / 86_400_000);
+      return days <= 0 ? 'today' : days === 1 ? 'yesterday' : `${days} days ago`;
+    };
+    const reason = (e: (typeof events)[number]): string => {
+      if (!e.member_id) return 'Card not recognised';
+      if (e.member_no !== null && e.member_no >= 11001 && e.member_no <= 11999) return 'Wristband not paid for';
+      if (e.status && e.status !== 'active') return 'Membership paused';
+      if (!e.last_end) return 'Never paid';
+      if (e.now_services) return `Paid for ${e.now_services} only`;
+      return `Membership ended ${ago(e.last_end)}`;
+    };
+    return {
+      sites,
+      bridges,
+      stats: st ?? { total: 0, synced: 0, failed: 0 },
+      today: today ?? { entries: 0, people: 0, denied: 0 },
+      zones: zones.map((z) => ({
+        ...z,
+        doors: z.reader_ids.map((r) => readers.get(z.site_id)?.get(r) ?? `Reader ${r}`),
+        today: perZone.find((p) => p.zone_id === z.id)?.n ?? 0,
+      })),
+      readers: Object.fromEntries([...readers].map(([k, v]) => [k, [...v].map(([id, name]) => ({ id, name }))])),
+      events: events.map(
+        (e): DoorEvent => ({
+          at: e.at,
+          memberId: e.member_id,
+          memberNo: e.member_no,
+          name: e.name,
+          zone: e.zone,
+          readerId: e.reader_id,
+          granted: e.granted,
+          reason: e.granted ? null : reason(e),
+          lastPriceKes: e.last_price,
+        }),
+      ),
+      tamper,
+    };
   });
 }
 
