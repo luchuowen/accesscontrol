@@ -1,11 +1,13 @@
 import { createHash, randomInt, randomUUID, timingSafeEqual } from 'node:crypto';
-import type { Sql } from '@lango/db';
+import type { Sql, Tx } from '@lango/db';
 import { withTenant } from '@lango/db';
+import { nextCodeAt } from './accounts.js';
 import { platformSmsConfig, type SourceCodeSms, sendNow } from './sms.js';
 
 /**
  * Member portal sign-in by one-time SMS code (club code + member number → 6-digit code to the phone on file).
- * Codes last 10 minutes, allow 5 tries, and a member can ask for one a minute (5 an hour). When the club has
+ * Codes last 10 minutes and allow 5 tries; resends follow the same policy as staff codes (60 s, then 2, 5 and
+ * 10 minutes; at most 5 an hour and 10 a day), and only ever go to the phone on file. When the club has
  * SMS off or no credit, the portal falls back to confirming the phone number.
  */
 const TTL_MIN = 10;
@@ -27,6 +29,31 @@ async function findMember(sql: Sql, slug: string, memberNo: number) {
 
 export type OtpRequest = 'sent' | 'unknown' | 'wait' | 'fallback';
 
+const sentTimes = async (tx: Tx, memberId: string) =>
+  (
+    await tx<{ t: Date }[]>`select created_at as t from member_otps where member_id = ${memberId}
+      and created_at > now() - interval '24 hours' order by created_at desc`
+  ).map((r) => r.t.getTime());
+
+/**
+ * For the code screen: when the live code expires and when another may be sent. Unknown members get the same
+ * answer as a member who was just sent a code, so the screen never reveals who is a member.
+ */
+export async function memberOtpStatus(
+  sql: Sql,
+  slug: string,
+  memberNo: number,
+): Promise<{ expiresAt: number; resendAt: number; capped: boolean }> {
+  const m = await findMember(sql, slug, memberNo);
+  if (!m) return { expiresAt: Date.now() + TTL_MIN * 60_000, resendAt: Date.now() + 60_000, capped: false };
+  return withTenant(sql, m.tenantId, async (tx) => {
+    const [live] = await tx<{ expires_at: Date }[]>`select expires_at from member_otps where member_id = ${m.memberId}
+      and used_at is null and expires_at > now() order by created_at desc limit 1`;
+    const next = nextCodeAt(await sentTimes(tx, m.memberId));
+    return { expiresAt: live?.expires_at.getTime() ?? Date.now(), resendAt: next.at, capped: next.capped };
+  });
+}
+
 export async function requestOtp(
   sql: Sql,
   slug: string,
@@ -38,10 +65,7 @@ export async function requestOtp(
   const id = randomUUID();
   const code = String(randomInt(0, 1_000_000)).padStart(6, '0');
   const ok = await withTenant(sql, m.tenantId, async (tx) => {
-    const [r] = await tx<{ hour: number; minute: number }[]>`
-      select count(*)::int as hour, (count(*) filter (where created_at > now() - interval '60 seconds'))::int as minute
-      from member_otps where member_id = ${m.memberId} and created_at > now() - interval '1 hour'`;
-    if ((r?.hour ?? 0) >= 5 || (r?.minute ?? 0) > 0) return false;
+    if (nextCodeAt(await sentTimes(tx, m.memberId)).at > Date.now()) return false;
     await tx`insert into member_otps (id, tenant_id, member_id, code_hash, expires_at)
              values (${id}, ${m.tenantId}, ${m.memberId}, ${hash(id, code)}, now() + make_interval(mins => ${TTL_MIN}))`;
     return true;
@@ -59,7 +83,8 @@ export async function requestOtp(
     client,
   );
   if (sent) return 'sent';
-  await withTenant(sql, m.tenantId, (tx) => tx`update member_otps set used_at = now() where id = ${id}`);
+  // Not delivered: forget it, so it does not count against the member's resend allowance.
+  await withTenant(sql, m.tenantId, (tx) => tx`delete from member_otps where id = ${id}`);
   return 'fallback';
 }
 

@@ -3,6 +3,7 @@ import {
   acceptInvite,
   checkLink,
   clientIp,
+  codeResendAt,
   createSession,
   hashPassword,
   isLimited,
@@ -31,6 +32,7 @@ import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import {
   clearPending,
+  clearSessionCookie,
   deviceToken,
   getPending,
   publicUrl,
@@ -100,7 +102,13 @@ export async function login(form: FormData) {
     await setPending({ staffId: staff.id, challengeId: null });
     redirect('/login/code?w=1');
   }
-  await setPending({ staffId: staff.id, challengeId: ch.id, channel: ch.channel, masked: ch.masked });
+  await setPending({
+    staffId: staff.id,
+    challengeId: ch.id,
+    channel: ch.channel,
+    masked: ch.masked,
+    expiresAt: ch.expiresAt,
+  });
   redirect('/login/code');
 }
 
@@ -117,12 +125,29 @@ export async function verifyCode(form: FormData) {
   }
   const staff = await staffById(db(), p.staffId);
   if (!staff?.active) redirect('/login?e=1');
-  if (form.get('remember') === 'on') {
-    const h = await headers();
-    const d = await rememberDevice(db(), staff, h.get('user-agent') ?? undefined);
-    await setDeviceCookie(d.token, d.days);
+  const next = await startSession(staff);
+  // As Apple does: after the code, ask once whether to trust this browser (skip the code here next time).
+  redirect(`/login/trust?next=${encodeURIComponent(next)}`);
+}
+
+const NEXT = new Set(['/', '/choose', '/partner']);
+
+/** "Trust this browser?" answered. Trusting skips the code on this browser for 30 days (7 for NAVAC/partners). */
+export async function trustBrowser(form: FormData) {
+  const token = await sessionToken();
+  const s = token ? await readSession(db(), token) : null;
+  if (!s) redirect('/login?m=signed-out');
+  const next = String(form.get('next') ?? '/');
+  if (form.get('trust') === 'yes') {
+    const staff = await staffById(db(), s.uid);
+    if (staff) {
+      const h = await headers();
+      const d = await rememberDevice(db(), staff, h.get('user-agent') ?? undefined);
+      await setDeviceCookie(d.token, d.days);
+      await logAuth(db(), { kind: 'device.trusted', staffId: s.uid, ip: clientIp(h) });
+    }
   }
-  redirect(await startSession(staff));
+  redirect(NEXT.has(next) ? next : '/');
 }
 
 /** Send the code again, by SMS or by email. */
@@ -132,10 +157,19 @@ export async function resendCode(form: FormData) {
   const staff = await staffById(db(), p.staffId);
   if (!staff?.active) redirect('/login?e=1');
   const via = form.get('via') === 'email' ? 'email' : 'sms';
+  // Never more often than the resend policy allows, and at most 10 resend requests an hour from one network.
+  if (!rateLimit(`code-resend-ip:${clientIp(await headers())}`, 10, 60 * 60_000)) redirect('/login/code?w=1');
+  if ((await codeResendAt(db(), staff.id)).at > Date.now()) redirect('/login/code?w=1');
   const ch = await startSignInCode(db(), staff, via);
   if (ch === 'wait') redirect('/login/code?w=1');
   if (ch === null) redirect('/login/code?e=3');
-  await setPending({ staffId: staff.id, challengeId: ch.id, channel: ch.channel, masked: ch.masked });
+  await setPending({
+    staffId: staff.id,
+    challengeId: ch.id,
+    channel: ch.channel,
+    masked: ch.masked,
+    expiresAt: ch.expiresAt,
+  });
   redirect('/login/code?r=1');
 }
 
@@ -212,6 +246,7 @@ export async function signOut(form: FormData) {
     }
     await revokeSession(db(), token);
   }
+  await clearSessionCookie();
   redirect('/login?m=signed-out-ok');
 }
 

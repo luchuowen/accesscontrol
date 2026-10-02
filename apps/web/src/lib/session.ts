@@ -59,6 +59,7 @@ export async function setPending(p: {
   challengeId: string | null;
   channel?: string;
   masked?: string;
+  expiresAt?: number;
 }) {
   const body = Buffer.from(JSON.stringify({ ...p, exp: Date.now() + 10 * 60_000 })).toString('base64url');
   (await cookies()).set(PENDING_COOKIE, `${body}.${sign(body)}`, { ...cookieBase, maxAge: 600 });
@@ -68,6 +69,7 @@ export async function getPending(): Promise<{
   challengeId: string | null;
   channel?: string;
   masked?: string;
+  expiresAt?: number;
 } | null> {
   const raw = (await cookies()).get(PENDING_COOKIE)?.value ?? '';
   const [body, sig] = raw.split('.');
@@ -79,7 +81,8 @@ export async function getPending(): Promise<{
   return p.exp > Date.now() ? p : null;
 }
 export async function clearPending() {
-  (await cookies()).delete({ name: PENDING_COOKIE, path: '/' });
+  // __Host- cookies are only removed when the removal carries the same Secure/path attributes.
+  (await cookies()).set(PENDING_COOKIE, '', { ...cookieBase, maxAge: 0 });
 }
 
 /** Where to send someone whose session is gone, saying why (signed out elsewhere, idle, removed, expired). */
@@ -129,4 +132,9 @@ export async function requireSignedIn(): Promise<Session> {
   const s = await getSession();
   if (!s) return signedOut();
   return s;
+}
+
+/** Remove the session cookie (with the same attributes it was set with, as __Host- cookies require). */
+export async function clearSessionCookie() {
+  (await cookies()).set(SESSION_COOKIE, '', { ...cookieBase, maxAge: 0 });
 }

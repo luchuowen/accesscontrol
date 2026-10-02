@@ -11,6 +11,7 @@ import { rebuildAccessState } from './access.js';
 import {
   acceptInvite,
   checkLink,
+  codeResendAt,
   createSession,
   inviteStaff,
   noteFailedSignIn,
@@ -907,6 +908,13 @@ describe('walking skeleton: pay → door', () => {
     // Sign-in code by email (no phone): wrong code refused, right code accepted once.
     const ch = await startSignInCode(app, desk as NonNullable<typeof desk>, 'sms', null);
     expect(ch).toMatchObject({ channel: 'email' });
+    // Resend policy: the next code only after a pause, and asking again straight away reuses the live code.
+    const wait = await codeResendAt(app, desk?.id as string);
+    expect(wait.capped).toBe(false);
+    expect(wait.at).toBeGreaterThan(Date.now() + 50_000);
+    expect(await startSignInCode(app, desk as NonNullable<typeof desk>, 'sms', null)).toMatchObject({
+      id: (ch as { id: string }).id,
+    });
     const code = mails.at(-1)?.subject.match(/(\d{6})/)?.[1] as string;
     const id = (ch as { id: string }).id;
     expect(await verifySignInCode(app, id, desk?.id as string, code === '000000' ? '111111' : '000000')).toBe(false);

@@ -613,6 +613,8 @@ export interface CodeChallenge {
   id: string;
   channel: 'sms' | 'email';
   masked: string;
+  /** when the code stops working (ms since epoch), for the countdown on the code screen */
+  expiresAt: number;
 }
 
 const maskPhone = (p: string) => `0${p.slice(3, 4)}•• ••• ${p.slice(-3)}`;
@@ -620,8 +622,32 @@ const maskEmail = (e: string) =>
   e.replace(/^(.)(.*)(@.*)$/, (_m, a, b, c) => `${a}${'•'.repeat(Math.min(6, b.length))}${c}`);
 
 /**
- * Send a 6-digit sign-in code by SMS (NAVAC's sender) or, failing that, email. Valid 10 minutes, 5 tries,
- * at most one a minute and 5 an hour. Returns null when no channel can reach this person (the caller then
+ * Resend policy for sign-in codes (in line with OWASP's MFA guidance and SMS providers' anti-abuse defaults):
+ * the 2nd code may follow after 60 s, then 2, 5 and 10 minutes; at most 5 codes an hour and 10 in 24 hours per
+ * account. Codes only ever go to the number already on the account, never to one typed on the page, so the form
+ * cannot be used to send SMS to strangers. Returns when the next code may be sent and whether a cap was reached.
+ */
+const RESEND_AFTER_S = [0, 60, 120, 300, 600];
+export async function codeResendAt(sql: Sql, staffId: string): Promise<{ at: number; capped: boolean }> {
+  const sent = (
+    await sql<{ t: Date }[]>`select created_at as t from auth_tokens where staff_id = ${staffId}
+      and kind = 'signin_code' and created_at > now() - interval '24 hours' order by created_at desc`
+  ).map((r) => r.t.getTime());
+  return nextCodeAt(sent);
+}
+
+/** The resend policy itself, over the times (newest first, last 24 hours) codes were sent. */
+export function nextCodeAt(sent: number[], now = Date.now()): { at: number; capped: boolean } {
+  const lastHour = sent.filter((t) => t > now - 3600_000);
+  if (sent.length >= 10) return { at: (sent[9] as number) + 24 * 3600_000, capped: true };
+  if (lastHour.length >= 5) return { at: (lastHour[4] as number) + 3600_000, capped: true };
+  if (!sent.length) return { at: 0, capped: false };
+  return { at: (sent[0] as number) + (RESEND_AFTER_S[lastHour.length] ?? 600) * 1000, capped: false };
+}
+
+/**
+ * Send a 6-digit sign-in code by SMS (NAVAC's sender) or, failing that, email. Valid 10 minutes, 5 tries;
+ * resends follow codeResendAt. Returns null when no channel can reach this person (the caller then
  * signs them in on the password alone and asks them to add a phone).
  */
 export async function startSignInCode(
@@ -630,17 +656,18 @@ export async function startSignInCode(
   prefer: 'sms' | 'email' = 'sms',
   sms?: SourceCodeSms | null,
 ): Promise<CodeChallenge | 'wait' | null> {
-  const [r] = await sql<{ hour: number; minute: number }[]>`
-    select count(*)::int as hour, (count(*) filter (where created_at > now() - interval '60 seconds'))::int as minute
-    from auth_tokens where staff_id = ${staff.id} and kind = 'signin_code' and created_at > now() - interval '1 hour'`;
-  if ((r?.minute ?? 0) > 0) {
-    // A code went out under a minute ago (e.g. the person pressed Sign in twice): keep using that one.
-    const [live] = await sql<{ id: string; data: { channel: 'sms' | 'email'; masked: string } | null }[]>`
-      select id, data from auth_tokens where staff_id = ${staff.id} and kind = 'signin_code' and used_at is null
+  const wait = await codeResendAt(sql, staff.id);
+  if (wait.at > Date.now()) {
+    // Too soon for another code (e.g. Sign in pressed twice): keep using the live one if there is one.
+    const [live] = await sql<
+      { id: string; expires_at: Date; data: { channel: 'sms' | 'email'; masked: string } | null }[]
+    >`
+      select id, expires_at, data from auth_tokens where staff_id = ${staff.id} and kind = 'signin_code' and used_at is null
         and expires_at > now() and data is not null order by created_at desc limit 1`;
-    return live?.data ? { id: live.id, channel: live.data.channel, masked: live.data.masked } : 'wait';
+    return live?.data
+      ? { id: live.id, channel: live.data.channel, masked: live.data.masked, expiresAt: live.expires_at.getTime() }
+      : 'wait';
   }
-  if ((r?.hour ?? 0) >= 5) return 'wait';
   const code = String(randomInt(0, 1_000_000)).padStart(6, '0');
   const id = (
     await sql<{ id: string }[]>`
@@ -648,9 +675,10 @@ export async function startSignInCode(
     values ('signin_code', ${sha(`pending:${newToken()}`)}, ${staff.id}, now() + interval '10 minutes') returning id`
   )[0]?.id as string;
   await sql`update auth_tokens set token_hash = ${sha(`${id}:${code}`)} where id = ${id}`;
-  const sentVia = async (c: CodeChallenge) => {
+  const expiresAt = Date.now() + 10 * 60_000;
+  const sentVia = async (c: Omit<CodeChallenge, 'expiresAt'>): Promise<CodeChallenge> => {
     await sql`update auth_tokens set data = ${sql.json({ channel: c.channel, masked: c.masked } as never)} where id = ${id}`;
-    return c;
+    return { ...c, expiresAt };
   };
   const phone = msisdn(staff.phone);
   if (prefer === 'sms' && phone) {

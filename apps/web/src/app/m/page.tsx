@@ -1,9 +1,12 @@
 import { withTenant } from '@lango/db';
+import { memberOtpStatus } from '@lango/server';
 import { CheckCircle2, Smartphone } from 'lucide-react';
+import { AuthHeading, AuthNotice, AuthShell } from '@/components/auth-shell';
 import { LangoMark } from '@/components/logo';
 import { SubmitButton } from '@/components/submit-button';
 import { date, daysLeft, kes } from '@/lib/format';
 import { db } from '@/server/db';
+import { Checking, CodeTimer, OtpInput, ResendButton } from '../login/code/otp';
 import { memberLogin, memberLogout, memberPay, memberStart, memberVerify, readMember, setNews } from './actions';
 
 export const dynamic = 'force-dynamic';
@@ -30,8 +33,6 @@ export default async function MemberPortal({
     const step = sp.step === 'code' || sp.step === 'phone' ? sp.step : 'start';
     const club = (sp.c ?? '').slice(0, 40);
     const no = (sp.n ?? '').replace(/\D/g, '').slice(0, 10);
-    const field = 'input bg-white/5 text-white ring-white/10';
-    const button = 'btn w-full bg-brand-500 text-ink-950 hover:bg-brand-600';
     const Hidden = () => (
       <>
         <input type="hidden" name="club" value={club} />
@@ -43,90 +44,130 @@ export default async function MemberPortal({
         ? 'Too many attempts. Wait a few minutes and try again.'
         : sp.e === '1'
           ? step === 'code'
-            ? 'That code is not right or has expired. Check the SMS or ask for a new code.'
-            : 'We couldn\u2019t find an active membership with those details. Check your number and phone.'
+            ? 'That code isn’t right or has expired. Check the latest SMS and try again.'
+            : 'We couldn’t find an active membership with those details. Check your club code and member number.'
           : null;
-    return (
-      <Shell>
-        <h1 className="text-2xl font-semibold tracking-tight">Your membership</h1>
-        <p className="mt-1 text-sm text-ink-300">
-          {step === 'code'
-            ? 'We\u2019ve sent a 6-digit code by SMS to the phone number your club has for you.'
-            : step === 'phone'
-              ? 'Confirm the phone number your club has for you.'
-              : 'Check your access and renew with M-Pesa before you arrive.'}
-        </p>
-        {error && <div className="mt-4 rounded-xl bg-rose-500/15 p-3 text-sm text-rose-200">{error}</div>}
-        {sp.w && !error && (
-          <div className="mt-4 rounded-xl bg-white/5 p-3 text-sm text-ink-200">
-            A code was sent a moment ago. Use that one, or wait a minute for a new one.
+    if (step === 'code') {
+      const st = await memberOtpStatus(db(), club.toLowerCase(), Number.parseInt(no, 10));
+      const minutes = Math.max(1, Math.ceil((st.resendAt - Date.now()) / 60_000));
+      return (
+        <AuthShell>
+          <div className="text-center">
+            <CodeTimer expiresAt={st.expiresAt} />
+            <h1 className="text-[26px] font-semibold tracking-tight text-ink-900">Enter your code</h1>
+            <p className="mt-1.5 text-sm text-ink-500">Sent by SMS to the phone number your club has for you.</p>
           </div>
-        )}
-        {step === 'start' && (
-          <form action={memberStart} className="mt-6 space-y-3">
-            <input
-              name="club"
-              defaultValue={club}
-              placeholder="Club code (e.g. demo-club)"
-              required
-              className={field}
-            />
-            <input
-              name="memberNo"
-              defaultValue={no}
-              inputMode="numeric"
-              placeholder="Member number"
-              required
-              className={field}
-            />
-            <SubmitButton pendingText="Checking…" className={button}>
-              Continue
-            </SubmitButton>
-          </form>
-        )}
-        {step === 'code' && (
-          <>
-            <form action={memberVerify} className="mt-6 space-y-3">
-              <Hidden />
-              <input
-                name="code"
-                inputMode="numeric"
-                autoComplete="one-time-code"
-                pattern="[0-9 ]{6,7}"
-                maxLength={7}
-                placeholder="6-digit code"
-                required
-                autoFocus
-                className={`${field} text-center font-mono text-xl tracking-[0.4em]`}
-              />
-              <SubmitButton pendingText="Checking…" className={button}>
-                Sign in
-              </SubmitButton>
-            </form>
-            <form action={memberStart} className="mt-4 flex items-center justify-between text-sm text-ink-300">
-              <Hidden />
-              <a href="/m" className="underline">
-                Change details
-              </a>
-              <button type="submit" className="underline">
-                Send a new code
-              </button>
-            </form>
-          </>
-        )}
-        {step === 'phone' && (
-          <form action={memberLogin} className="mt-6 space-y-3">
+          {error && <AuthNotice tone="error">{error}</AuthNotice>}
+          {!error && sp.w && !st.capped && (
+            <AuthNotice tone="info">A code was sent a moment ago. Use that one, or wait to ask for another.</AuthNotice>
+          )}
+          <form action={memberVerify}>
             <Hidden />
-            <input name="phone" inputMode="tel" placeholder="Phone number" required autoFocus className={field} />
-            <SubmitButton pendingText="Checking…" className={button}>
-              Continue
-            </SubmitButton>
-            <a href="/m" className="block text-center text-sm text-ink-300 underline">
+            <OtpInput />
+            <Checking />
+          </form>
+          <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-center text-[13px] text-slate-600">
+            {st.capped ? (
+              <>
+                You’ve asked for several codes. For your security, try again in about {minutes} minute
+                {minutes === 1 ? '' : 's'}.
+              </>
+            ) : (
+              <span className="inline-flex flex-wrap items-center justify-center gap-x-1.5">
+                Didn’t get it?
+                <form action={memberStart} className="inline">
+                  <Hidden />
+                  <ResendButton resendAt={st.resendAt} label="Resend SMS" />
+                </form>
+              </span>
+            )}
+          </div>
+          <p className="mt-3 text-center text-[13px]">
+            <a href="/m" className="text-slate-500 hover:text-ink-900">
               Change details
             </a>
+          </p>
+        </AuthShell>
+      );
+    }
+    return (
+      <AuthShell>
+        <AuthHeading
+          title={step === 'phone' ? 'Confirm your phone' : 'Your membership'}
+          sub={
+            step === 'phone'
+              ? 'Enter the phone number your club has for you.'
+              : 'Check your access and renew with M-Pesa before you arrive.'
+          }
+        />
+        {error && <AuthNotice tone="error">{error}</AuthNotice>}
+        {step === 'start' ? (
+          <form action={memberStart} className="mt-8 grid gap-[18px]">
+            <div>
+              <label htmlFor="club" className="auth-label">
+                Club code
+              </label>
+              <input
+                id="club"
+                name="club"
+                defaultValue={club}
+                required
+                autoCapitalize="none"
+                placeholder="Enter club code, e.g. demo-club"
+                className="auth-input"
+              />
+            </div>
+            <div>
+              <label htmlFor="memberNo" className="auth-label">
+                Member number
+              </label>
+              <input
+                id="memberNo"
+                name="memberNo"
+                defaultValue={no}
+                inputMode="numeric"
+                required
+                placeholder="Enter member number"
+                className="auth-input"
+              />
+            </div>
+            <SubmitButton pendingText="Checking…" className="auth-btn mt-1">
+              Continue
+            </SubmitButton>
+            <p className="text-center text-[12.5px] text-slate-500">
+              Your club code and member number are on your membership card or receipt.
+            </p>
+          </form>
+        ) : (
+          <form action={memberLogin} className="mt-8 grid gap-[18px]">
+            <Hidden />
+            <div>
+              <label htmlFor="phone" className="auth-label">
+                Phone number
+              </label>
+              <input
+                id="phone"
+                name="phone"
+                type="tel"
+                inputMode="tel"
+                autoComplete="tel"
+                required
+                autoFocus
+                placeholder="Enter phone number"
+                className="auth-input"
+              />
+            </div>
+            <SubmitButton pendingText="Checking…" className="auth-btn mt-1">
+              Continue
+            </SubmitButton>
+            <p className="text-center text-[13px]">
+              <a href="/m" className="text-slate-500 hover:text-ink-900">
+                Change details
+              </a>
+            </p>
           </form>
         )}
-      </Shell>
+      </AuthShell>
     );
   }
   const d = await withTenant(db(), who.tenantId, async (tx) => {
