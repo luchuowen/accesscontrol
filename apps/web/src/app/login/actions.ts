@@ -147,7 +147,7 @@ export async function forgot(form: FormData) {
   const ip = clientIp(await headers());
   if (rateLimit(`forgot-ip:${ip}`, 10, 60 * 60_000) && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
     await requestPasswordReset(db(), email, publicUrl());
-  redirect(`/forgot/sent?to=${encodeURIComponent(email.slice(0, 120))}`);
+  redirect('/forgot/sent');
 }
 
 export interface PasswordState {

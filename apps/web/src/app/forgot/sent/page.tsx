@@ -4,8 +4,8 @@ import { AuthHeading, AuthShell } from '@/components/auth-shell';
 export const metadata = { title: 'Check your email · Lango' };
 
 /** The same answer whether or not the email has an account (nobody can probe which emails exist). */
-export default async function Sent({ searchParams }: { searchParams: Promise<{ to?: string; invite?: string }> }) {
-  const { to, invite } = await searchParams;
+export default async function Sent({ searchParams }: { searchParams: Promise<{ invite?: string }> }) {
+  const { invite } = await searchParams;
   return (
     <AuthShell>
       <div className="mb-6 grid h-12 w-12 place-items-center rounded-2xl bg-emerald-50 text-emerald-600">
@@ -25,31 +25,15 @@ export default async function Sent({ searchParams }: { searchParams: Promise<{ t
       <AuthHeading
         title="Check your email"
         sub={
-          invite ? (
-            'If that invitation is still waiting to be accepted, a new link is on its way. The earlier link no longer works.'
-          ) : (
-            <>
-              If <span className="font-medium text-ink-900">{to || 'that address'}</span> has a Lango account, a link to
-              reset the password is on its way. It works once and expires in 30 minutes.
-            </>
-          )
+          invite
+            ? 'If your invitation is still pending, we’ve sent you a new link. Check your inbox and follow the link to set up your account.'
+            : 'If an account exists for this email, we’ve sent a password reset link. Check your inbox and follow the link to reset your password.'
         }
       />
-      <ul className="mt-6 grid gap-2 text-sm text-slate-600">
-        <li>• It comes from Lango &lt;lango@navac.co.ke&gt;.</li>
-        <li>• Nothing after a few minutes? Check spam or promotions.</li>
-        <li>• Still nothing? Email support@navac.co.ke.</li>
-      </ul>
-      <div className="mt-8 flex flex-wrap gap-x-5 gap-y-2 text-[13px]">
-        <Link href="/login" className="auth-link">
-          Back to sign in
-        </Link>
-        {!invite && (
-          <Link href="/forgot" className="auth-link">
-            Use a different email
-          </Link>
-        )}
-      </div>
+      <p className="mt-4 text-sm text-slate-500">Didn’t get it? Check your spam folder.</p>
+      <Link href="/login" className="auth-btn mt-8">
+        Back to sign in
+      </Link>
     </AuthShell>
   );
 }
