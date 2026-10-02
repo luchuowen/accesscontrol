@@ -5,6 +5,7 @@ import { ownerDashboard } from '@/lib/data';
 import { ago, kes } from '@/lib/format';
 import { requireSession } from '@/lib/session';
 import { LiveRefresh, RefreshButton } from './_dash/live-refresh';
+import { MoneyIn } from './_dash/money-in';
 
 /**
  * Dashboard, design B "Business health" (approved 2 Oct 2026): live "in the club now", revenue, active members and
@@ -36,15 +37,19 @@ const Label = ({ children }: { children: React.ReactNode }) => (
   <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-500">{children}</div>
 );
 
-export default async function Dashboard({ searchParams }: { searchParams: Promise<{ p?: string; denied?: string }> }) {
+export default async function Dashboard({
+  searchParams,
+}: {
+  searchParams: Promise<{ p?: string; v?: string; denied?: string }>;
+}) {
   const s = await requireSession();
-  const { p, denied } = await searchParams;
+  const { p, v, denied } = await searchParams;
   const days = PERIODS.find((x) => String(x) === p) ?? 30;
   const d = await ownerDashboard(s.tid, days);
+  const weekly = days > 7 && v !== 'd';
   const full = can(s, 'reports.all');
   const change = pct(d.revenue.now, d.revenue.prev);
   const rate = d.renewals.ended ? Math.round((d.renewals.renewed / d.renewals.ended) * 100) : null;
-  const max = Math.max(1, ...d.daily.map((x) => x.mpesa + x.cash));
   const bridgeOff = !d.attention.bridgeLastSeen || Date.now() - d.attention.bridgeLastSeen.getTime() > 10 * 60_000;
   const attention = [
     d.attention.unmatched > 0 &&
@@ -114,7 +119,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
               {PERIODS.map((x) => (
                 <Link
                   key={x}
-                  href={`/?p=${x}`}
+                  href={`/?p=${x}${v === 'd' ? '&v=d' : ''}`}
                   aria-current={x === days ? 'page' : undefined}
                   className={`rounded-[7px] px-2.5 py-1.5 ${x === days ? 'bg-white font-semibold text-ink-950' : 'text-[#C7D2E1] hover:text-white'}`}
                 >
@@ -194,32 +199,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
       {full && (
         <div className="mt-3.5 grid gap-3.5 xl:grid-cols-[2fr_1fr]">
           <Card className="min-w-0">
-            <div className="flex flex-wrap items-baseline justify-between gap-2">
-              <Label>Money in</Label>
-              <span className="font-mono text-[11.5px] text-slate-500">
-                MPESA {d.revenue.mpesa.toLocaleString('en-KE')} · CASH {d.revenue.cash.toLocaleString('en-KE')}
-              </span>
-            </div>
-            <div
-              className="mt-4 flex h-40 items-end gap-[3px] border-b border-slate-100"
-              role="img"
-              aria-label={`Daily money in for the last ${days} days`}
-            >
-              {d.daily.map((x) => (
-                <div key={x.day} className="flex flex-1 flex-col-reverse" title={`${x.day}: ${kes(x.mpesa + x.cash)}`}>
-                  <i className="block bg-brand-500" style={{ height: `${(x.mpesa / max) * 160}px` }} />
-                  <i className="block bg-ink-950" style={{ height: `${(x.cash / max) * 160}px` }} />
-                </div>
-              ))}
-            </div>
-            <div className="mt-2.5 flex gap-4 text-xs text-ink-500">
-              <span className="inline-flex items-center gap-1.5">
-                <i className="h-2.5 w-2.5 rounded-sm bg-brand-500" /> MPESA
-              </span>
-              <span className="inline-flex items-center gap-1.5">
-                <i className="h-2.5 w-2.5 rounded-sm bg-ink-950" /> CASH
-              </span>
-            </div>
+            <MoneyIn daily={d.daily} days={days} weekly={weekly} />
           </Card>
           <Card>
             <Label>Renewals</Label>
