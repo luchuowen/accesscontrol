@@ -196,64 +196,91 @@ const esc = (s: string) =>
   s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string);
 
 /**
- * Lango's one email layout ("Editorial", approved 2 Oct 2026): a navy header with an optional eyebrow, the
- * heading and an optional large amount; the body; one button; a shaded, centred footer. Tables and inline
- * styles so it renders in Gmail and Outlook; a plain-text twin is always sent.
+ * Lango's one email layout (Editorial, final version approved 2 Oct 2026): a centred navy header with a subtle
+ * gradient (plain navy where gradients are not shown, e.g. Outlook), the logo, an eyebrow and the heading; a white
+ * body with a centred button; a centred note; a hairline fact line; and a plain white footer below the card. Type
+ * is the reader's own system font, kept small. Tables and inline styles so it renders in Gmail and Outlook; a
+ * plain-text twin is always sent. In any string, **text** is shown bold (and plain in the text twin).
  */
 export function accountEmail(e: {
   heading: string;
   eyebrow?: string;
   amount?: string;
+  /** a one-time code shown large in its own box */
+  code?: string;
   paragraphs: string[];
   button?: { label: string; url: string };
+  /** small centred lines under the button; the last one sits under a hairline as the fact line */
   after?: string[];
   footer?: string[];
 }): { html: string; text: string } {
-  const font = "-apple-system,'Segoe UI',Helvetica,Arial,sans-serif";
-  const p = (t: string) =>
-    `<p style="margin:0 0 16px;font:15px/1.65 ${font};color:#3C4657">${esc(t).replace(/^Please note:/, '<b>Please note:</b>')}</p>`;
-  const small = (t: string) =>
-    `<p style="margin:0 0 12px;font:13px/1.6 ${font};color:#6B7586">${esc(t).replace(/^Please note:/, '<b style="color:#3C4657">Please note:</b>')}</p>`;
+  const font = "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif";
+  const mono = "ui-monospace,'SF Mono',Menlo,Consolas,monospace";
+  const rich = (t: string, strong = '#3B4556') =>
+    esc(t)
+      .replace(/\*\*(.+?)\*\*/g, `<b style="color:${strong};font-weight:600">$1</b>`)
+      .replace(/^Please note:/, `<b style="color:${strong};font-weight:600">Please note:</b>`);
+  const plain = (t: string) => t.replace(/\*\*(.+?)\*\*/g, '$1');
+  const para = (t: string, i: number) =>
+    `<p style="margin:0 0 14px;font:${i === 0 && /^Hi\b/.test(t) ? 500 : 400} 14px/1.65 ${font};color:${i === 0 && /^Hi\b/.test(t) ? '#0B0F19' : '#3B4556'}">${rich(t, '#0B0F19')}</p>`;
+  const after = (e.after ?? []).filter(Boolean);
+  const notes = after.slice(0, after.length > 1 ? -1 : after.length);
+  const fact = after.length > 1 ? after[after.length - 1] : undefined;
   const foot = e.footer ?? DEFAULT_FOOTER;
   const base = (process.env.PUBLIC_URL ?? '').replace(/\/$/, '');
   // Gmail does not show SVG, so the mark is a hosted PNG; without a public address a plain emerald tile stands in.
   const logo = base
-    ? `<img src="${esc(base)}/brand/lango-mark.png" width="30" height="30" alt="Lango" style="display:block;border:0;border-radius:8px">`
-    : '<div style="width:30px;height:30px;background:#10B981;border-radius:8px"></div>';
-  const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta name="color-scheme" content="light"></head>
-<body style="margin:0;background:#F5F6F8;padding:28px 12px">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center">
-<table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#FFFFFF;border:1px solid #E6E9EE;border-radius:16px;border-collapse:separate;overflow:hidden">
-<tr><td style="background:#0B1629;border-radius:16px 16px 0 0;padding:32px 36px 36px">
-<table role="presentation" cellpadding="0" cellspacing="0"><tr>
-<td style="width:30px;height:30px">${logo}</td>
-<td style="padding-left:10px;font:600 16px ${font};color:#FFFFFF">Lango</td></tr></table>
-<div style="height:32px;line-height:32px">&nbsp;</div>
-${e.eyebrow ? `<div style="font:600 11px ${font};letter-spacing:2px;color:#34D399;margin-bottom:10px">${esc(e.eyebrow.toUpperCase())}</div>` : ''}
-<h1 style="margin:0;font:600 27px/1.25 ${font};color:#FFFFFF">${esc(e.heading)}</h1>
-${e.amount ? `<div style="margin-top:14px;font:600 36px ${font};color:#FFFFFF">${esc(e.amount)}</div>` : ''}
+    ? `<img src="${esc(base)}/brand/lango-mark.png" width="26" height="26" alt="" style="display:block;border:0;border-radius:7px">`
+    : '<div style="width:26px;height:26px;background:#10B981;border-radius:7px"></div>';
+  const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta name="color-scheme" content="light"><meta name="supported-color-schemes" content="light"></head>
+<body style="margin:0;background:#FFFFFF;padding:28px 12px">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#FFFFFF"><tr><td align="center">
+<table role="presentation" width="560" cellpadding="0" cellspacing="0" style="max-width:560px;width:100%;background:#FFFFFF;border:1px solid #E5E8EE;border-radius:16px;border-collapse:separate;overflow:hidden">
+<tr><td align="center" bgcolor="#0B1629" style="background-color:#0B1629;background-image:linear-gradient(135deg,#0B1629 0%,#11284A 58%,#0E3A33 100%);border-radius:16px 16px 0 0;padding:34px 28px 0;text-align:center">
+<table role="presentation" cellpadding="0" cellspacing="0" align="center"><tr>
+<td style="width:26px;height:26px">${logo}</td>
+<td style="padding-left:8px;font:600 15px ${font};color:#FFFFFF">Lango</td></tr></table>
+<div style="height:24px;line-height:24px">&nbsp;</div>
+${e.eyebrow ? `<div style="font:600 11px ${font};letter-spacing:2px;color:#34D399;margin-bottom:8px">${esc(e.eyebrow.toUpperCase())}</div>` : ''}
+<h1 style="margin:0;font:650 22px/1.3 ${font};color:#FFFFFF;letter-spacing:-0.2px">${esc(e.heading)}</h1>
+${e.amount ? `<div style="margin-top:12px;font:650 30px ${font};color:#FFFFFF">${esc(e.amount)}</div>` : ''}
+<div style="height:30px;line-height:30px">&nbsp;</div>
+<table role="presentation" cellpadding="0" cellspacing="0" align="center"><tr><td style="width:64px;height:3px;background:#10B981;border-radius:3px 3px 0 0;font-size:0;line-height:0">&nbsp;</td></tr></table>
 </td></tr>
-<tr><td style="padding:30px 36px 10px">
-${e.paragraphs.map(p).join('')}
+<tr><td style="padding:30px 34px 28px">
+${e.paragraphs.map(para).join('')}
 ${
-  e.button
-    ? `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:6px 0 24px"><tr><td style="background:#0B1629;border-radius:10px">
-<a href="${esc(e.button.url)}" style="display:inline-block;padding:13px 24px;font:600 15px ${font};color:#FFFFFF;text-decoration:none">${esc(e.button.label)} &rarr;</a></td></tr></table>`
+  e.code
+    ? `<table role="presentation" cellpadding="0" cellspacing="0" align="center" style="margin:20px auto 16px"><tr><td style="border:1px solid #E5E8EE;background:#F8FAF9;border-radius:12px;padding:14px 18px 14px 26px;font:600 28px ${mono};letter-spacing:9px;color:#0B0F19">${esc(e.code)}</td></tr></table>`
     : ''
 }
-${(e.after ?? []).filter(Boolean).map(small).join('')}
-${e.button ? small(`If the button does not work, copy this link into your browser: ${e.button.url}`) : ''}
-</td></tr>
-<tr><td align="center" style="background:#F3F5F8;border-top:1px solid #E6E9EE;border-radius:0 0 16px 16px;padding:22px 36px 26px;font:12.5px/1.6 ${font};color:#6B7586;text-align:center">
-${foot.map(esc).join('<br>').replace('support@navac.co.ke', '<a href="mailto:support@navac.co.ke" style="color:#2563EB">support@navac.co.ke</a>')}
-</td></tr></table></td></tr></table></body></html>`;
+${
+  e.button
+    ? `<table role="presentation" cellpadding="0" cellspacing="0" align="center" style="margin:22px auto 20px"><tr><td align="center" bgcolor="#0B1629" style="background:#0B1629;border-radius:10px">
+<a href="${esc(e.button.url)}" style="display:inline-block;padding:13px 28px;font:600 14px ${font};color:#FFFFFF;text-decoration:none">${esc(e.button.label)}</a></td></tr></table>`
+    : ''
+}
+${notes.map((t) => `<p style="margin:0 0 6px;font:12.5px/1.6 ${font};color:#6B7586;text-align:center">${rich(t)}</p>`).join('')}
+${fact ? `<div style="border-top:1px solid #EEF0F4;margin-top:20px;padding-top:16px;font:12.5px/1.6 ${font};color:#6B7586;text-align:center">${rich(fact)}</div>` : ''}
+${
+  e.button
+    ? `<p style="margin:14px 0 0;font:11.5px/1.6 ${font};color:#8A93A3;text-align:center;word-break:break-all">Button not working? Paste this link into your browser:<br><a href="${esc(e.button.url)}" style="color:#0E9F6E">${esc(e.button.url)}</a></p>`
+    : ''
+}
+</td></tr></table>
+<table role="presentation" width="560" cellpadding="0" cellspacing="0" style="max-width:560px;width:100%"><tr><td align="center" style="padding:22px 28px 6px;font:11.5px/1.7 ${font};color:#8A93A3;text-align:center">
+<div style="color:#5B6680;font-weight:600;letter-spacing:0.2px">${esc(foot[0] ?? '')}</div>
+${foot.slice(1).map(esc).join('<br>').replace('support@navac.co.ke', '<a href="mailto:support@navac.co.ke" style="color:#0E9F6E;text-decoration:none">support@navac.co.ke</a>')}
+</td></tr></table>
+</td></tr></table></body></html>`;
   const text = [
     e.heading,
     ...(e.amount ? [e.amount] : []),
     '',
-    ...e.paragraphs,
+    ...e.paragraphs.map(plain),
+    ...(e.code ? ['', e.code] : []),
     ...(e.button ? ['', `${e.button.label}: ${e.button.url}`] : []),
-    ...(e.after?.filter(Boolean).length ? ['', ...(e.after?.filter(Boolean) ?? [])] : []),
+    ...(after.length ? ['', ...after.map(plain)] : []),
     '',
     ...foot,
   ].join('\n');
@@ -261,6 +288,7 @@ ${foot.map(esc).join('<br>').replace('support@navac.co.ke', '<a href="mailto:sup
 }
 
 export const DEFAULT_FOOTER = [
-  'Sent by Lango, a NAVAC Global service · Nairobi, Kenya',
-  'You’re receiving this email because you have a Lango account. For assistance, contact support@navac.co.ke.',
+  'Lango · a NAVAC Global service · Nairobi, Kenya',
+  'You’re receiving this email because you have a Lango account.',
+  'Need help? support@navac.co.ke',
 ];

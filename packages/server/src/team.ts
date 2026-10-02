@@ -100,7 +100,11 @@ export function teamError(e: unknown): string {
 }
 
 async function tell(sql: Sql, staff: StaffRow, tenantId: string, kind: string, heading: string, lines: string[]) {
-  const mail = accountEmail({ heading, paragraphs: [`Hi ${staff.name.split(' ')[0] || staff.name},`, ...lines] });
+  const mail = accountEmail({
+    eyebrow: 'Team',
+    heading,
+    paragraphs: [`Hi ${staff.name.split(' ')[0] || staff.name},`, ...lines],
+  });
   await sendEmail(sql, {
     to: staff.email,
     subject: heading,
@@ -187,6 +191,7 @@ export async function offerOwnership(sql: Sql, w: Who, toStaffId: string, baseUr
   const token = await issueLink(sql, 'transfer', to.id, w.actorId, { tenantId: w.tenantId, from: w.actorId, club });
   await logAuth(sql, { kind: 'ownership.offered', staffId: to.id, tenantId: w.tenantId, actor: w.actorId, ip: w.ip });
   const mail = accountEmail({
+    eyebrow: 'Ownership',
     heading: `${w.actorName} wants to hand ${club} to you`,
     paragraphs: [
       `Hi ${to.name.split(' ')[0] || to.name},`,

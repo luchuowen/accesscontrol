@@ -257,6 +257,7 @@ export async function sendPlatformTestEmail() {
   const [me] = await db()<{ email: string; name: string }[]>`select email, name from app_staff_get(${s.uid})`;
   if (!me) return back('email-missing');
   const mail = accountEmail({
+    eyebrow: 'Test',
     heading: 'Lango email is working',
     paragraphs: [
       `Hi ${me.name.split(' ')[0]},`,

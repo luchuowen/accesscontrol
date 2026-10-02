@@ -16,7 +16,7 @@ const SLIDES = [
   },
   {
     eyebrow: 'RELIABLE ACCESS',
-    title: 'Access continues even without internet.',
+    title: 'Access works offline.',
     body: 'If the internet goes down, members can still enter. Any changes made at the door are saved and updated when the connection returns.',
     icon: 'shield',
   },

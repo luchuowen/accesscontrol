@@ -320,13 +320,14 @@ async function sendInvite(
     timeZone: 'Africa/Nairobi',
   });
   const mail = accountEmail({
+    eyebrow: 'Invitation',
     heading: `You’re invited to join ${ctx.to}`,
     paragraphs: [
       `Hi ${first},`,
       `${ctx.inviterName} has invited you to join ${ctx.to} on Lango as ${article} ${ctx.roleLabel}.`,
       'Lango brings membership management, payments and door access together in one platform.',
     ],
-    button: { label: 'Accept Invitation', url },
+    button: { label: 'Accept Invitation →', url },
     after: [ctx.next ?? '', `Please note: This invitation link can only be used once and expires on ${expires}.`],
   });
   const emailed = await sendEmail(sql, {
@@ -405,6 +406,7 @@ export async function inviteStaff(
 /** An existing login was given access to another club: no new password, just a note and a sign-in button. */
 export async function sendAddedToClub(sql: Sql, staff: StaffRow, baseUrl: string, ctx: InviteContext) {
   const mail = accountEmail({
+    eyebrow: 'Club access',
     heading: `You now have access to ${ctx.to}`,
     paragraphs: [
       `Hi ${staff.name.split(' ')[0] || staff.name},`,
@@ -505,6 +507,7 @@ export async function acceptInvite(
   const ctx = (link.data?.ctx ?? null) as InviteContext | null;
   if (inviter) {
     const mail = accountEmail({
+      eyebrow: 'Team',
       heading: `${staff.name} accepted your invitation`,
       paragraphs: [
         `${staff.name} (${staff.email}) has joined ${ctx?.to ?? 'Lango'} as ${ctx?.roleLabel ?? 'a team member'}.`,
@@ -535,11 +538,16 @@ export async function requestPasswordReset(sql: Sql, email: string, baseUrl: str
   if ((n?.n ?? 0) >= 3) return;
   const token = await issueLink(sql, 'reset', staff.id, null);
   const mail = accountEmail({
+    eyebrow: 'Password reset',
     heading: 'Reset your Lango password',
-    paragraphs: [`Hi ${staff.name.split(' ')[0]},`, 'Someone asked to reset the password for this Lango account.'],
-    button: { label: 'Set a new password', url: `${baseUrl}/reset/${token}` },
+    paragraphs: [
+      `Hi ${staff.name.split(' ')[0]},`,
+      'We received a request to reset the password for your Lango account. Click the button below to choose a new one.',
+    ],
+    button: { label: 'Reset password', url: `${baseUrl}/reset/${token}` },
     after: [
-      "The link works once and expires in 30 minutes. If you didn't ask, ignore this email; your password stays the same.",
+      'This link expires in 30 minutes and can only be used once.',
+      'Didn’t request this? You can ignore this email. **Your password will stay the same.**',
     ],
   });
   await sendEmail(sql, {
@@ -579,10 +587,15 @@ export async function changedPasswordAftermath(sql: Sql, staff: StaffRow, reason
     timeStyle: 'short',
   });
   const mail = accountEmail({
+    eyebrow: 'Security',
     heading: 'Your Lango password was changed',
     paragraphs: [
-      `The password for ${staff.email} was changed on ${when} (Nairobi time). Other devices have been signed out.`,
-      "If this wasn't you, reply to this email straight away and a real person at NAVAC will lock the account and help you.",
+      `Hi ${staff.name.split(' ')[0] || staff.name},`,
+      `The password for ${staff.email} was changed on ${when} (Nairobi time). For your security, your other devices have been signed out.`,
+    ],
+    after: [
+      'If you made this change, there is nothing else to do.',
+      'Didn’t change your password? **Reply to this email straight away** and NAVAC will lock the account and help you.',
     ],
   });
   await sendEmail(sql, {
@@ -655,11 +668,14 @@ export async function startSignInCode(
     }
   }
   const mail = accountEmail({
-    heading: `Your sign-in code is ${code}`,
+    eyebrow: 'Sign-in code',
+    heading: 'Your Lango sign-in code',
     paragraphs: [
-      'Enter this code on the Lango sign-in page. It expires in 10 minutes.',
-      'Never share it. NAVAC will never ask you for it.',
+      `Hi ${staff.name.split(' ')[0] || staff.name},`,
+      'Enter this code on the Lango sign-in page to finish signing in.',
     ],
+    code: `${code.slice(0, 3)} ${code.slice(3)}`,
+    after: ['The code expires in 10 minutes.', 'Never share this code. **NAVAC will never ask you for it.**'],
   });
   const sent = await sendEmail(sql, {
     to: staff.email,
@@ -728,6 +744,7 @@ export async function noteFailedSignIn(sql: Sql, email: string, ip?: string, use
     where email = ${staff.email} and kind = 'signin.fail' and at > now() - interval '15 minutes'`;
   if (n?.n !== 5) return;
   const mail = accountEmail({
+    eyebrow: 'Security',
     heading: 'Several failed sign-ins on your account',
     paragraphs: [
       `Hi ${staff.name.split(' ')[0] || staff.name},`,
