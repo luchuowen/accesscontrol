@@ -159,9 +159,10 @@ export default async function Access({
             </section>
 
             <section className="card p-6 lg:col-span-2">
-              <div className="label">Zones → readers</div>
+              <div className="label">Areas → doors</div>
               <p className="mt-1 text-sm text-ink-500">
-                A zone is what a plan sells (gym, pool, golf). Tick the AxTraxNG readers each zone opens.
+                An area is a part of the club (gym floor, pool, sauna). Tick the door readers each area opens; services
+                then open areas.
               </p>
               <ul className="mt-4 space-y-3">
                 {zones.map((z) => (
@@ -222,9 +223,9 @@ export default async function Access({
               {manage && (
                 <form action={saveZone} className="mt-4 flex gap-2">
                   <input type="hidden" name="siteId" value={site.id} />
-                  <input name="name" required placeholder="New zone, e.g. Golf course" className="input py-2" />
+                  <input name="name" required placeholder="New area, e.g. Sauna room" className="input py-2" />
                   <SubmitButton pendingText="Adding…" className="btn-ghost py-2">
-                    Add zone
+                    Add area
                   </SubmitButton>
                 </form>
               )}

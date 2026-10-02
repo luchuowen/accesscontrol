@@ -175,6 +175,59 @@ export class Bridge {
     return drift;
   }
 
+  private lastSwitch: DateTime | null = null;
+
+  /**
+   * Exact-time switch: a service starting or ending (a 2-hour sauna, a day pass at 23:59) changes what AxTraxNG
+   * must hold at that minute. Only members with a segment boundary since the last check are re-converged, so this
+   * runs every loop (seconds of lag) without re-reading everyone; the 10-minute guard stays as the safety net.
+   */
+  async switchDue(): Promise<number> {
+    const now = this.now();
+    const since = this.lastSwitch ?? now.minus({ minutes: 1 });
+    this.lastSwitch = now;
+    const zone = now.zone;
+    const keys = (this.j.data.wantKeys ??= {});
+    let n = 0;
+    for (const s of Object.values(this.j.data.states)) {
+      if ((this.j.data.applied[s.memberNo] ?? -1) < s.version) continue; // applyPending owns unapplied states
+      const crosses = s.segments.some((x) => {
+        const from = DateTime.fromISO(x.from, { zone });
+        const until = DateTime.fromISO(x.until, { zone });
+        return (from > since && from <= now) || (until >= since && until < now);
+      });
+      if (!crosses) continue;
+      try {
+        const r = await converge(this.ax, s, this.j.data.zones, now);
+        keys[s.memberNo] = r.wantKey;
+        if (r.changes.length)
+          this.log(`member ${s.memberNo}: switch at ${now.toFormat('HH:mm')} ${r.changes.join(', ')}`);
+        n++;
+      } catch (e) {
+        this.log(`switch ${s.memberNo}: ${(e as Error).message}`);
+      }
+    }
+    if (n) this.j.save();
+    return n;
+  }
+
+  /** Seconds until the next service starts or ends for anyone (so the loop wakes in time), or null if none. */
+  secondsToNextSwitch(): number | null {
+    const now = this.now();
+    const zone = now.zone;
+    let next: number | null = null;
+    for (const s of Object.values(this.j.data.states))
+      for (const x of s.segments)
+        for (const t of [
+          DateTime.fromISO(x.from, { zone }),
+          DateTime.fromISO(x.until, { zone }).plus({ milliseconds: 1 }),
+        ]) {
+          const sec = t.diff(now, 'seconds').seconds;
+          if (sec > 0 && (next === null || sec < next)) next = sec;
+        }
+    return next;
+  }
+
   async pushAcks() {
     if (!this.j.data.pendingAcks.length) return;
     // Only the latest result per member matters; this also bounds the queue during a long outage.

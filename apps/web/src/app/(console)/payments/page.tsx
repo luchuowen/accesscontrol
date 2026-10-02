@@ -55,7 +55,7 @@ export default async function Payments({ searchParams }: { searchParams: Promise
           <div className="font-medium">Payments to assign</div>
           <p className="mt-1 text-sm text-ink-500">
             Money that arrived but could not be matched, usually a mistyped account number. Nothing is lost: point each
-            one at the right member and plan, and their access updates straight away.
+            one at the right member and service, and their access updates straight away.
           </p>
           <ul className="mt-4 divide-y divide-ink-100">
             {queue.map((q) => {
@@ -94,7 +94,7 @@ export default async function Payments({ searchParams }: { searchParams: Promise
                       </form>
                     ) : (
                       <span className="text-xs text-ink-500">
-                        No plan costs {kes(q.amount_kes)}: refund it or add a matching plan.
+                        No price is {kes(q.amount_kes)}: refund it or add that price under Services.
                       </span>
                     ))}
                 </li>
@@ -107,7 +107,7 @@ export default async function Payments({ searchParams }: { searchParams: Promise
         <table className="w-full text-sm">
           <thead className="bg-ink-50/60 text-left">
             <tr>
-              {['When', 'Member', 'Account', 'Plan', 'Amount', 'Source', 'Reference', 'Status'].map((h) => (
+              {['When', 'Member', 'Account', 'For', 'Amount', 'Source', 'Reference', 'Status'].map((h) => (
                 <th key={h} className="label px-5 py-3 font-medium">
                   {h}
                 </th>

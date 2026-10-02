@@ -82,9 +82,14 @@ for (;;) {
     lastInventory = Date.now();
     bridge.inventoryWanted = true; // keeps the club's door list and import preview current
   }
+  // Wake in time for the next service starting or ending, then switch exactly those members.
+  const due = bridge.secondsToNextSwitch();
+  const wait = due === null ? 25 : Math.max(1, Math.min(25, Math.ceil(due)));
   const t0 = Date.now();
-  await bridge.cycle(25).catch((e) => console.error(`cycle: ${(e as Error).message}`));
-  if (Date.now() - t0 < 2000) await new Promise((r) => setTimeout(r, 5000)); // back off when offline
+  await bridge.cycle(wait).catch((e) => console.error(`cycle: ${(e as Error).message}`));
+  await bridge.switchDue().catch((e) => console.error(`switch: ${(e as Error).message}`));
+  if (Date.now() - t0 < Math.min(2000, wait * 1000))
+    await new Promise((r) => setTimeout(r, Math.min(5000, wait * 1000))); // back off when offline
   if (Date.now() - lastGuard > GUARD_MS) {
     lastGuard = Date.now();
     for (const d of await bridge.guard().catch(() => []))

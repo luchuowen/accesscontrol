@@ -94,19 +94,37 @@ export async function seed(o: SeedOptions) {
       ['spa', 'Spa'],
     ] as const)
       await owner`insert into zones (tenant_id, site_id, key, name, reader_ids) values (${tenantId}, ${s?.id}, ${key}, ${name}, ${r[key] ?? []})`;
-    const products: [string, string, number, 'day' | 'month', number, string[]][] = [
-      ['membership', 'Gym · 1 month', 5000, 'month', 1, ['gym']],
-      ['membership', 'Gym · 6 months', 30000, 'month', 6, ['gym']],
-      ['membership', 'Gym · 12 months', 60000, 'month', 12, ['gym']],
-      ['bundle', 'All-inclusive · 1 month', 9000, 'month', 1, ['gym', 'sauna', 'pool', 'spa']],
-      ['day_pass', 'Gym · day pass', 500, 'day', 1, ['gym']],
-      ['day_pass', 'Swimming · day pass', 200, 'day', 1, ['pool']],
-      ['addon', 'Sauna · 1 week', 600, 'day', 7, ['sauna']],
-      ['day_pass', 'Test · 1 day gym (KES 10)', 10, 'day', 1, ['gym']],
+    // Services the club sells, each with its prices (name · length, KES, unit, count).
+    const services: [string, string[], [string, number, 'hour' | 'day' | 'week' | 'month' | 'year', number][]][] = [
+      [
+        'Gym',
+        ['gym'],
+        [
+          ['1 month', 5000, 'month', 1],
+          ['6 months', 30000, 'month', 6],
+          ['1 year', 60000, 'year', 1],
+          ['day pass', 500, 'day', 1],
+          ['test 1 day (KES 10)', 10, 'day', 1],
+        ],
+      ],
+      ['All-inclusive', ['gym', 'sauna', 'pool', 'spa'], [['1 month', 9000, 'month', 1]]],
+      ['Swimming', ['pool'], [['day pass', 200, 'day', 1]]],
+      [
+        'Sauna',
+        ['sauna'],
+        [
+          ['2 hours', 350, 'hour', 2],
+          ['1 week', 600, 'week', 1],
+        ],
+      ],
     ];
-    for (const [kind, name, price, unit, count, zones] of products)
-      await owner`insert into products (tenant_id, kind, name, price_kes, duration_unit, duration_count, zone_keys)
-                  values (${tenantId}, ${kind}, ${name}, ${price}, ${unit}, ${count}, ${zones})`;
+    for (const [svc, zones, prices] of services) {
+      const [sv] =
+        await owner`insert into services (tenant_id, name, zone_keys) values (${tenantId}, ${svc}, ${zones}) returning id`;
+      for (const [label, price, unit, count] of prices)
+        await owner`insert into products (tenant_id, service_id, name, price_kes, duration_unit, duration_count, zone_keys)
+                    values (${tenantId}, ${sv?.id}, ${`${svc} · ${label}`}, ${price}, ${unit}, ${count}, ${zones})`;
+    }
     // The club's owner (one login, one club) and, optionally, a NAVAC admin login for the partner console.
     const [own] = await owner`insert into staff_users (tenant_id, email, name, role, password_hash, accepted_at)
                 values (${tenantId}, ${o.ownerEmail.toLowerCase()}, ${o.ownerName ?? 'Club Owner'}, 'club',

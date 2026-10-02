@@ -2,7 +2,8 @@ import { can } from '@lango/server';
 import { Check, CreditCard, DoorOpen, type LucideIcon, MessageSquare, Monitor } from 'lucide-react';
 import Link from 'next/link';
 import { AddMember } from '@/components/add-member';
-import { nextMemberNo, ownerDashboard } from '@/lib/data';
+import { WalkIn } from '@/components/walk-in';
+import { nextMemberNo, ownerDashboard, walkinPrices } from '@/lib/data';
 import { ago, kes, kesShort } from '@/lib/format';
 import { requireSession } from '@/lib/session';
 import { LiveRefresh, RefreshButton } from './_dash/live-refresh';
@@ -54,7 +55,11 @@ export default async function Dashboard({
   const s = await requireSession();
   const { p, v, denied } = await searchParams;
   const days = PERIODS.find((x) => String(x) === p) ?? 30;
-  const [d, nextNo] = await Promise.all([ownerDashboard(s.tid, days), nextMemberNo(s.tid)]);
+  const [d, nextNo, walkins] = await Promise.all([
+    ownerDashboard(s.tid, days),
+    nextMemberNo(s.tid),
+    walkinPrices(s.tid),
+  ]);
   const weekly = days > 7 && v === 'w';
   const full = can(s, 'reports.all');
   const change = pct(d.revenue.now, d.revenue.prev);
@@ -122,6 +127,7 @@ export default async function Dashboard({
           <p className="mt-1 text-[13px] text-[#A3B3C9]">{today}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {can(s, 'payments.record') && <WalkIn prices={walkins} />}
           {can(s, 'members.edit') && <AddMember club={d.tenantName} nextNo={nextNo} />}
           {full && (
             <nav
@@ -276,7 +282,7 @@ export default async function Dashboard({
             </Card>
             <Card className="flex-1">
               <div className="flex items-baseline justify-between">
-                <Label>Top plans</Label>
+                <Label>Top services</Label>
                 <span className="text-xs text-ink-500">by money in</span>
               </div>
               <div className="mt-3.5 flex flex-col gap-3">

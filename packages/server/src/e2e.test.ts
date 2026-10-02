@@ -588,7 +588,7 @@ describe('walking skeleton: pay → door', () => {
     expect(await dispatchSms(app, client, () => {})).toBe(0);
     expect(sent).toHaveLength(0);
 
-    await owner`insert into tenant_settings (tenant_id, data) values (${tenantId}, '{"notifications":{"enabled":true,"reminderDays":3}}')
+    await owner`insert into tenant_settings (tenant_id, data) values (${tenantId}, '{"notifications":{"enabled":true,"reminderDays":3,"quietFrom":0,"quietTo":0}}')
       on conflict (tenant_id) do update set data = tenant_settings.data || excluded.data`;
     await recordPayment(app, tenantId, {
       provider: 'taifapay',
@@ -607,7 +607,7 @@ describe('walking skeleton: pay → door', () => {
     await app`select app_platform_grant_sms(${pa?.id}, ${tenantId}, 3, 'test credit')`;
     await app`select app_platform_set_club_sms(${pa?.id}, ${tenantId}, 'DEMOCLUB', 1.5)`;
     const [m] = await owner`insert into members (tenant_id, member_no, first_name, last_name, phone) values
-      (${tenantId}, 21077, 'Bad', 'Number', '0700000666') returning id`;
+      (${tenantId}, 29977, 'Bad', 'Number', '0700000666') returning id`;
     await owner`insert into entitlements (tenant_id, member_id, zone_key, starts_at, ends_at, source)
       values (${tenantId}, ${m?.id}, 'gym', now() - interval '20 days', now() + interval '2 days', 'override')`;
     expect(await queueReminders(app, 'https://lango.test')).toBeGreaterThanOrEqual(1);
@@ -668,6 +668,8 @@ describe('walking skeleton: pay → door', () => {
     });
   });
   it('SMS etiquette: quiet hours, one message a day, nothing twice; staff and NAVAC alerts; portal sign-in codes', async () => {
+    // The previous test switched quiet hours off to run at any time of day; this one tests them.
+    await owner`update tenant_settings set data = jsonb_set(data, '{notifications}', (data->'notifications') - 'quietFrom' - 'quietTo') where tenant_id = ${tenantId}`;
     const sent: { mobile: string; message: string }[] = [];
     const fakeFetch = (async (_u: string, i: RequestInit) => {
       const b = JSON.parse(String(i.body));
@@ -1068,5 +1070,90 @@ describe('walking skeleton: pay → door', () => {
     expect(mails.slice(before).map((m) => m.subject)).toEqual(['Failed sign-ins on your Lango account']);
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
+  });
+  it('services: equal prices are fine, a paybill renews what the member usually buys, the rest is held', async () => {
+    const [gym] = await owner`select id, service_id from products where name = 'Gym · 1 month'`;
+    const [sv] =
+      await owner`insert into services (tenant_id, name, zone_keys) values (${tenantId}, 'Steam', '{sauna}') returning id`;
+    const [steam] =
+      await owner`insert into products (tenant_id, service_id, name, price_kes, duration_unit, duration_count, zone_keys)
+      values (${tenantId}, ${sv?.id}, 'Steam · 1 month', 5000, 'month', 1, '{sauna}') returning id`;
+    // Jane has bought the gym month before: KES 5000 on paybill renews the gym, not the new steam room.
+    const usual = await recordPayment(app, tenantId, {
+      provider: 'test',
+      providerTxnId: 'SVC-1',
+      amountKes: 5000,
+      accountRef: '21001',
+      paidAt: new Date(),
+    });
+    expect(usual).toMatchObject({ status: 'applied', product: 'Gym · 1 month' });
+    // Someone new paying KES 5000 could mean either: held for staff, never guessed.
+    await owner`insert into members (tenant_id, member_no, first_name, last_name) values (${tenantId}, 28461, 'New', 'Person')`;
+    const held = await recordPayment(app, tenantId, {
+      provider: 'test',
+      providerTxnId: 'SVC-2',
+      amountKes: 5000,
+      accountRef: '28461',
+      paidAt: new Date(),
+    });
+    expect(held.status).toBe('unmatched');
+    // One payment for two services: both lines are kept with their own dates.
+    const two = await recordPayment(app, tenantId, {
+      provider: 'test',
+      providerTxnId: 'SVC-3',
+      amountKes: 5600,
+      accountRef: '28461',
+      lines: [
+        { productId: steam?.id as string, priceKes: 5000 },
+        { productId: (await owner`select id from products where price_kes = 600`)[0]?.id as string, priceKes: 600 },
+      ],
+      paidAt: new Date(),
+    });
+    expect(two.status).toBe('applied');
+    const lines =
+      await owner`select label from payment_lines where payment_id = ${(two as { paymentId: string }).paymentId} order by created_at`;
+    expect(lines.length).toBe(2);
+    expect(gym?.id).toBeTruthy();
+  });
+
+  it('walk-in wristbands start fresh for every visitor (never pushed to tomorrow)', async () => {
+    const [band] =
+      await owner`insert into members (tenant_id, member_no, first_name, last_name) values (${tenantId}, 11901, 'Wristband', '01') returning id`;
+    const [pass] = await owner`select id from products where price_kes = 600`;
+    for (const tx of ['BAND-1', 'BAND-2'])
+      await recordPayment(app, tenantId, {
+        provider: 'test',
+        providerTxnId: tx,
+        amountKes: 600,
+        accountRef: '11901',
+        productId: pass?.id as string,
+        paidAt: new Date(),
+      });
+    const starts = await owner`select distinct starts_at::date as d from entitlements where member_id = ${band?.id}`;
+    expect(starts.length).toBe(1);
+  });
+  it('a short service ends on the minute: the bridge switches the door group without waiting for the guard', async () => {
+    const [m] =
+      await owner`insert into members (tenant_id, member_no, first_name, last_name) values (${tenantId}, 28777, 'Short', 'Sauna') returning id`;
+    await owner`insert into credentials (tenant_id, member_id, card_code) values (${tenantId}, ${m?.id}, 28777)`;
+    const tz = 'Africa/Nairobi';
+    const start = DateTime.now().setZone(tz).minus({ hours: 1 });
+    const end = DateTime.now().setZone(tz).plus({ minutes: 1 });
+    await owner`insert into entitlements (tenant_id, member_id, zone_key, starts_at, ends_at, source) values
+      (${tenantId}, ${m?.id}, 'sauna', ${start.toJSDate()}, ${end.toJSDate()}, 'override'),
+      (${tenantId}, ${m?.id}, 'gym', ${start.toJSDate()}, ${start.plus({ days: 30 }).toJSDate()}, 'override')`;
+    await withTenant(app, tenantId, (tx) => rebuildAccessState(tx, tenantId, m?.id as string));
+    await bridge.cycle(0);
+    expect(fake.swipe(28777, 0, 12, today())).toBe(true);
+    await bridge.switchDue(); // marks "now" as checked
+    const later = DateTime.now().setZone(tz).plus({ minutes: 2 });
+    const realNow = bridge.now.bind(bridge);
+    bridge.now = () => later;
+    expect(bridge.secondsToNextSwitch()).not.toBe(0);
+    expect(await bridge.switchDue()).toBeGreaterThanOrEqual(1);
+    bridge.now = realNow;
+    const at = later.toFormat("yyyy-MM-dd'T'HH:mm:ss");
+    expect(fake.swipe(28777, 0, 12, at)).toBe(false);
+    expect(fake.swipe(28777, 0, 11, at)).toBe(true);
   });
 });

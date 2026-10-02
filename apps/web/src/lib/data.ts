@@ -142,7 +142,8 @@ export async function members(tenantId: string, q = ''): Promise<MemberRow[]> {
              (select array_agg(distinct zone_key) from entitlements e where e.member_id = m.id and now() between starts_at and ends_at) as zones,
              coalesce((select bool_and(applied_version is not distinct from version) from access_states s where s.member_id = m.id), true) as synced
       from members m
-      where ${q} = '' or lower(m.first_name || ' ' || m.last_name) like ${like} or m.member_no::text like ${like} or coalesce(m.phone, '') like ${like}
+      where m.member_no not between 11001 and 11999
+        and (${q} = '' or lower(m.first_name || ' ' || m.last_name) like ${like} or m.member_no::text like ${like} or coalesce(m.phone, '') like ${like})
       order by m.member_no limit 300`;
     return rows.map((r) => ({
       id: r.id,
@@ -189,7 +190,7 @@ export async function member(tenantId: string, id: string) {
         provider_txn_id: string;
       }[]
     >`
-      select p.id, p.amount_kes, p.paid_at, p.status, p.channel, pr.name as product, p.provider_txn_id
+      select p.id, p.amount_kes, p.paid_at, p.status, p.channel, coalesce((select string_agg(l.label, ' + ' order by l.created_at) from payment_lines l where l.payment_id = p.id), pr.name) as product, p.provider_txn_id
       from payments p left join products pr on pr.id = p.product_id where p.member_id = ${id} or p.account_ref = ${String(m.member_no)}
       order by p.paid_at desc limit 30`;
     const visits = await tx<{ at: Date; zone: string | null; granted: boolean }[]>`
@@ -245,7 +246,7 @@ export async function payments(tenantId: string) {
       }[]
     >`
     select p.id, p.paid_at, p.amount_kes, p.status, p.channel, p.provider, p.provider_txn_id, p.account_ref, p.member_id,
-           m.first_name || ' ' || m.last_name as member, pr.name as product, st.name as recorded_by
+           m.first_name || ' ' || m.last_name as member, coalesce((select string_agg(l.label, ' + ' order by l.created_at) from payment_lines l where l.payment_id = p.id), pr.name) as product, st.name as recorded_by
     from payments p left join members m on m.id = p.member_id left join products pr on pr.id = p.product_id
     left join app_staff_names() st on st.id::text = p.recorded_by
     order by p.paid_at desc limit 200`,
@@ -451,12 +452,13 @@ export async function ownerDashboard(tenantId: string, days: number): Promise<Ow
           from members m join entitlements e on e.member_id = m.id
           where e.ends_at > now() and m.member_no not between 11001 and 11999
           group by m.id having max(e.ends_at) <= now() + interval '7 days') x
-        left join lateral (select pr.name, pr.price_kes from payments p join products pr on pr.id = p.product_id
+        left join lateral (select coalesce(pr.name, l.label) as name, coalesce(pr.price_kes, l.price_kes) as price_kes
+                           from payment_lines l join payments p on p.id = l.payment_id left join products pr on pr.id = l.product_id and pr.active
                            where p.member_id = x.id and p.status = 'applied' order by p.paid_at desc limit 1) lp on true
         order by x.ends`,
       tx<{ name: string; kes: number }[]>`
-        select coalesce(pr.name, 'Other') as name, sum(p.amount_kes)::int as kes
-        from payments p left join products pr on pr.id = p.product_id
+        select coalesce(sv.name, l.label) as name, sum(l.price_kes)::int as kes
+        from payment_lines l join payments p on p.id = l.payment_id left join services sv on sv.id = l.service_id
         where p.status = 'applied' and p.paid_at >= ${start}
         group by 1 order by 2 desc limit 4`,
       // Not seen 14+ days: paid up, but no entry for 14+ days (counted from the start of their current plan if they
@@ -563,5 +565,123 @@ export async function nextMemberNo(tenantId: string) {
     const [n] = await tx<{ next: number }[]>`
       select coalesce(max(member_no), 21000) + 1 as next from members where member_no between 21001 and 65535`;
     return n?.next ?? 21001;
+  });
+}
+
+export interface ServicePrice {
+  id: string;
+  name: string;
+  price_kes: number;
+  duration_unit: 'hour' | 'day' | 'week' | 'month' | 'year';
+  duration_count: number;
+  active: boolean;
+  sold: number;
+}
+export interface ServiceRow {
+  id: string;
+  name: string;
+  zone_keys: string[];
+  active: boolean;
+  prices: ServicePrice[];
+}
+
+/** Services with their prices (cheapest first) and how often each price was sold. */
+export async function servicesOverview(tenantId: string) {
+  return T(tenantId, async (tx) => {
+    const [services, areas] = await Promise.all([
+      tx<ServiceRow[]>`
+        select s.id, s.name, s.zone_keys, s.active,
+          coalesce((select json_agg(x order by x.price_kes) from (
+            select p.id, p.name, p.price_kes, p.duration_unit, p.duration_count, p.active,
+                   (select count(*)::int from payment_lines l where l.product_id = p.id) as sold
+            from products p where p.service_id = s.id) x), '[]') as prices
+        from services s order by s.active desc, s.created_at`,
+      tx<{ key: string; name: string; readers: number }[]>`
+        select key, min(name) as name, sum(cardinality(reader_ids))::int as readers from zones group by key order by min(name)`,
+    ]);
+    return { services, areas };
+  });
+}
+
+/** Prices on sale, grouped by service, for selling at the desk. */
+export async function sellablePrices(tenantId: string) {
+  return T(
+    tenantId,
+    (tx) => tx<
+      {
+        id: string;
+        service: string;
+        service_id: string;
+        name: string;
+        price_kes: number;
+        duration_unit: string;
+        duration_count: number;
+        zone_keys: string[];
+      }[]
+    >`
+    select p.id, s.name as service, s.id as service_id, p.name, p.price_kes, p.duration_unit, p.duration_count, p.zone_keys
+    from products p join services s on s.id = p.service_id
+    where p.active and s.active order by s.created_at, p.price_kes`,
+  );
+}
+
+/** Prices a walk-in can buy: anything up to one day (hours, or a 1-day pass), grouped by service. */
+export async function walkinPrices(tenantId: string) {
+  return (await sellablePrices(tenantId)).filter(
+    (p) => p.duration_unit === 'hour' || (p.duration_unit === 'day' && p.duration_count === 1),
+  );
+}
+
+export interface BandRow {
+  id: string;
+  no: number;
+  visitor: string | null;
+  phone: string | null;
+  until: Date | null;
+  status: 'free' | 'in_use' | 'awaiting';
+  passes: string | null;
+}
+
+/** Every wristband with who has it now (if anyone), plus today's day-pass figures. */
+export async function dayPassBoard(tenantId: string) {
+  return T(tenantId, async (tx) => {
+    const [bands, [today], visits] = await Promise.all([
+      tx<BandRow[]>`
+        select m.id, m.member_no as no,
+          case when act.ends is not null then 'in_use' when wait.id is not null then 'awaiting' else 'free' end as status,
+          coalesce(dp.visitor_name, wait.visitor_name) as visitor, coalesce(dp.visitor_phone, wait.visitor_phone) as phone,
+          act.ends as until,
+          (select string_agg(x->>'label', ' + ') from jsonb_array_elements(coalesce(dp.lines, wait.lines)) x) as passes
+        from members m
+        left join lateral (select max(ends_at) as ends from entitlements e
+                           where e.member_id = m.id and e.ends_at > now() and e.starts_at <= now()) act on true
+        left join lateral (select * from day_passes d where d.band_id = m.id and d.status = 'active' and d.ends_at > now()
+                           order by d.created_at desc limit 1) dp on true
+        left join lateral (select * from day_passes d where d.band_id = m.id and d.status = 'awaiting_payment'
+                           and d.created_at > now() - interval '15 minutes' order by d.created_at desc limit 1) wait on true
+        where m.member_no between 11001 and 11999 order by m.member_no`,
+      tx<{ sold: number; kes: number }[]>`
+        select count(*)::int as sold, coalesce(sum(total_kes), 0)::int as kes from day_passes
+        where status = 'active' and created_at >= date_trunc('day', now() at time zone 'Africa/Nairobi') at time zone 'Africa/Nairobi'`,
+      tx<
+        {
+          id: string;
+          visitor_name: string;
+          visitor_phone: string | null;
+          total_kes: number;
+          channel: string;
+          status: string;
+          band: number;
+          created_at: Date;
+          ends_at: Date | null;
+          passes: string | null;
+        }[]
+      >`
+        select d.id, d.visitor_name, d.visitor_phone, d.total_kes, d.channel, d.status, m.member_no as band, d.created_at, d.ends_at,
+               (select string_agg(x->>'label', ' + ') from jsonb_array_elements(d.lines) x) as passes
+        from day_passes d join members m on m.id = d.band_id
+        order by d.created_at desc limit 50`,
+    ]);
+    return { bands, today: today ?? { sold: 0, kes: 0 }, visits };
   });
 }

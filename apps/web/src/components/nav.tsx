@@ -26,7 +26,7 @@ export const ITEMS = [
     icon: CreditCard,
     any: ['payments.record', 'payments.assign', 'reports.all'],
   },
-  { href: '/plans', label: 'Plans & pricing', icon: Layers, any: ['plans.manage', 'reports.all'] },
+  { href: '/services', label: 'Services', icon: Layers, any: ['plans.manage', 'reports.all'] },
   { href: '/access', label: 'Doors & access', icon: DoorOpen, any: ['doors.manage'] },
   { href: '/messages', label: 'Messages', icon: MessageSquare, any: ['messages.manage'] },
   { href: '/team', label: 'Team', icon: UsersRound, any: ['team.manage'] },

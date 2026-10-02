@@ -219,17 +219,28 @@ export async function settleTaifaTransaction(
   // Intents carry member + product; they only count when TaifaPay itself echoes our id and the amount matches.
   let productId: string | null = null;
   let intentId: string | null = null;
+  let expectedKes: number | null = null;
+  let lines: { productId: string; priceKes: number }[] | null = null;
   let ref = rec.accountReference ?? '';
   const externalRef = rec.externalReference ?? '';
   if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(externalRef)) {
     const [it] = await withTenant(
       sql,
       t.id,
-      (tx) => tx<{ product_id: string; member_no: number; amount_kes: number }[]>`
-      select i.product_id, m.member_no, i.amount_kes from payment_intents i join members m on m.id = i.member_id where i.id = ${externalRef}`,
+      (tx) => tx<
+        {
+          product_id: string | null;
+          member_no: number;
+          amount_kes: number;
+          lines: { productId: string; priceKes: number }[] | null;
+        }[]
+      >`
+      select i.product_id, m.member_no, i.amount_kes, i.lines from payment_intents i join members m on m.id = i.member_id where i.id = ${externalRef}`,
     );
     if (it && it.amount_kes === amount) {
       productId = it.product_id;
+      lines = it.lines;
+      expectedKes = it.amount_kes;
       intentId = externalRef;
       ref = String(it.member_no);
     }
@@ -247,6 +258,8 @@ export async function settleTaifaTransaction(
     phone: rec.phone,
     externalRef,
     productId,
+    expectedKes,
+    lines,
     intentId,
     channel: rec.channel,
     paidAt: paid,

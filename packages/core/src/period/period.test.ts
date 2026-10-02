@@ -41,3 +41,16 @@ describe('nextPeriod (renewal anchor)', () => {
     expect(ymd(nextPeriod(at('2026-10-01T06:00'), null, month).end)).toBe('2026-10-31 23:59:59');
   });
 });
+
+describe('hours, weeks, years', () => {
+  it('hours end exactly N hours later and stack from the minute the last one ends', () => {
+    const p = nextPeriod(at('2026-10-02T14:10'), null, { unit: 'hour', count: 2 });
+    expect(p.end.toFormat('yyyy-MM-dd HH:mm')).toBe('2026-10-02 16:10');
+    const q = nextPeriod(at('2026-10-02T15:00'), p.end, { unit: 'hour', count: 2 });
+    expect(q.end.toFormat('yyyy-MM-dd HH:mm')).toBe('2026-10-02 18:10');
+  });
+  it('a week is seven calendar days including today; a year is twelve months', () => {
+    expect(ymd(periodEnd(at('2026-10-02T09:00'), { unit: 'week', count: 1 }))).toBe('2026-10-08 23:59:59');
+    expect(ymd(periodEnd(at('2026-10-01T09:00'), { unit: 'year', count: 1 }))).toBe('2027-09-30 23:59:59');
+  });
+});

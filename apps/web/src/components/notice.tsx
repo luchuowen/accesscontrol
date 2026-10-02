@@ -27,19 +27,18 @@ const MESSAGES: Record<string, { tone: 'ok' | 'warn' | 'err'; text: string }> = 
   gone: { tone: 'warn', text: 'That payment was already handled.' },
   'still-unmatched': {
     tone: 'err',
-    text: 'Not applied: the member was not found or is inactive, or the amount does not equal that plan’s price.',
+    text: 'Not applied: the member was not found or is inactive, or the amount does not equal that price.',
   },
   saved: { tone: 'ok', text: 'Saved.' },
-  'plan-price': {
+  'service-saved': { tone: 'ok', text: 'Service saved. Anyone already paid keeps exactly what they bought.' },
+  'price-saved': { tone: 'ok', text: 'Price saved. It applies to new sales; anyone already paid is not affected.' },
+  'service-invalid': { tone: 'err', text: 'Give the service a name and at least one area.' },
+  'price-invalid': {
     tone: 'err',
-    text: 'Another active plan already has that price. Prices must be unique so paybill payments match one plan.',
+    text: 'Give the price a length (hours, days, weeks, months or years) and an amount in KES.',
   },
-  'plan-invalid': {
-    tone: 'err',
-    text: 'Give the plan a name, a price in whole shillings, a duration and at least one zone.',
-  },
-  'zone-invalid': { tone: 'err', text: 'Give the zone a name (letters and numbers).' },
-  'zone-taken': { tone: 'err', text: 'A zone with that name already exists at this site.' },
+  'zone-invalid': { tone: 'err', text: 'Give the area a name (letters and numbers).' },
+  'zone-taken': { tone: 'err', text: 'An area with that name already exists at this site.' },
   'inventory-requested': {
     tone: 'ok',
     text: 'Asked the Site Bridge to read AxTraxNG again. The list updates within a minute while the bridge is online.',

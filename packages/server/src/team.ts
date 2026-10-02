@@ -23,7 +23,7 @@ export const PERMISSIONS = [
   { key: 'payments.record', label: 'Record cash, send M-Pesa prompts' },
   { key: 'payments.assign', label: 'Assign unmatched payments' },
   { key: 'access.comp', label: 'Give complimentary access' },
-  { key: 'plans.manage', label: 'Plans and prices' },
+  { key: 'plans.manage', label: 'Services and prices' },
   { key: 'doors.manage', label: 'Doors and Site Bridge' },
   { key: 'messages.manage', label: 'Messages and club news' },
   { key: 'sms.buy', label: 'Buy SMS credit' },
