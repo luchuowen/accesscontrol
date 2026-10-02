@@ -83,7 +83,7 @@ export function PartnerNav({
             <CircleUserRound size={13} /> Your account
           </Link>
           <form action="/logout" method="post" className="mt-1.5">
-            <button type="submit" className="flex items-center gap-1.5 text-xs text-[#7B8799] hover:text-white">
+            <button type="submit" className="flex items-center gap-1.5 text-xs text-[#7B8799] hover:text-rose-400">
               <LogOut size={13} /> Sign out
             </button>
           </form>

@@ -1,11 +1,11 @@
 'use client';
-import { Bell, CircleHelp, CircleUserRound, LogOut, Search } from 'lucide-react';
+import { CircleHelp, CircleUserRound, LogOut, Search } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
+import { HealthBell } from '@/components/health-drawer';
 import { pageFor } from '@/components/nav';
-
-export type Alert = { text: string; meta?: string; href?: string; tone: 'red' | 'amber' };
+import type { HealthArea } from '@/lib/alerts';
 
 /** Opens one small panel under a bar button; closes on outside click or Escape. */
 function Menu({ button, label, children }: { button: ReactNode; label: string; children: ReactNode }) {
@@ -49,12 +49,12 @@ function Menu({ button, label, children }: { button: ReactNode; label: string; c
 export function TopBar({
   user,
   roleLabel,
-  alerts,
+  health,
   canSearch,
 }: {
   user: string;
   roleLabel: string;
-  alerts: Alert[];
+  health: HealthArea[];
   canSearch: boolean;
 }) {
   const path = usePathname();
@@ -95,44 +95,7 @@ export function TopBar({
             <Search size={19} />
           </button>
         ))}
-      <Menu
-        label={alerts.length ? `${alerts.length} alerts` : 'Alerts'}
-        button={
-          <>
-            <Bell size={19} />
-            {alerts.length > 0 && (
-              <span className="absolute right-2 top-1.5 h-2 w-2 rounded-full bg-rose-600 ring-2 ring-white" />
-            )}
-          </>
-        }
-      >
-        <div className="px-2.5 pb-1 pt-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-500">
-          Needs attention
-        </div>
-        {alerts.length === 0 && <div className="px-2.5 py-2 text-ink-500">All clear</div>}
-        {alerts.map((a) => {
-          const body = (
-            <>
-              <span className={`h-2 w-2 shrink-0 rounded-full ${a.tone === 'red' ? 'bg-rose-600' : 'bg-amber-500'}`} />
-              <span className="min-w-0 flex-1">{a.text}</span>
-              {a.meta && <span className="font-mono text-[11.5px] text-slate-500">{a.meta}</span>}
-            </>
-          );
-          return a.href ? (
-            <Link
-              key={a.text}
-              href={a.href}
-              className="flex items-center gap-2.5 rounded-lg px-2.5 py-2 hover:bg-slate-50"
-            >
-              {body}
-            </Link>
-          ) : (
-            <div key={a.text} className="flex items-center gap-2.5 px-2.5 py-2">
-              {body}
-            </div>
-          );
-        })}
-      </Menu>
+      <HealthBell areas={health} />
       <Menu label="Help" button={<CircleHelp size={19} />}>
         <div className="px-2.5 py-2">
           <div className="font-semibold text-ink-900">Need help?</div>
@@ -159,9 +122,9 @@ export function TopBar({
         <form action="/logout" method="post">
           <button
             type="submit"
-            className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left hover:bg-slate-50"
+            className="group flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition hover:bg-rose-50 hover:text-rose-700"
           >
-            <LogOut size={16} className="text-ink-500" /> Sign out
+            <LogOut size={16} className="text-ink-500 group-hover:text-rose-600" /> Sign out
           </button>
         </form>
       </Menu>

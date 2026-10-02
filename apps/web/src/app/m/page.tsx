@@ -217,7 +217,7 @@ export default async function MemberPortal({
           <form action={memberLogout}>
             <button
               type="submit"
-              className="rounded-lg px-2.5 py-1.5 text-[12.5px] font-medium text-ink-500 hover:bg-white"
+              className="rounded-lg px-2.5 py-1.5 text-[12.5px] font-medium text-ink-500 hover:bg-rose-50 hover:text-rose-700"
             >
               Sign out
             </button>

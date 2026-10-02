@@ -709,27 +709,87 @@ export async function ownerDashboard(tenantId: string, days: number): Promise<Ow
   });
 }
 
-/** The few things that need someone's attention, for the bell in the top bar (same rules as the Dashboard list). */
+/**
+ * Everything the Club health drawer can show, in one round trip. Each figure is a live condition (it disappears
+ * once fixed), so nothing needs marking as read.
+ */
 export async function consoleAlerts(tenantId: string) {
   return T(tenantId, async (tx) => {
-    const [um] = await tx<{ n: number; kes: number }[]>`
-      select count(*)::int as n, coalesce(sum(amount_kes), 0)::int as kes from payments where status = 'unmatched'`;
-    const [st] = await tx<
-      { failed: number }[]
-    >`select count(*) filter (where error is not null)::int as failed from access_states`;
-    const [br] = await tx<{ last: Date | null }[]>`select max(last_seen_at) as last from app_tenant_bridges()`;
-    const [sms] = await tx<{ units: string | null }[]>`select sum(units) as units from sms_ledger`;
+    const [[um], [st], [br], [sms], [cfg], [chat], [end], [away], [tamper]] = await Promise.all([
+      tx<{ n: number; kes: number }[]>`
+        select count(*)::int as n, coalesce(sum(amount_kes), 0)::int as kes from payments where status = 'unmatched'`,
+      tx<{ failed: number; who: string | null; member_id: string | null }[]>`
+        select count(*)::int as failed, min(m.first_name || ' ' || m.last_name) as who,
+               (array_agg(m.id))[1] as member_id
+        from access_states a join members m on m.id = a.member_id where a.error is not null`,
+      tx<
+        { last: Date | null; n: number }[]
+      >`select max(last_seen_at) as last, count(*)::int as n from app_tenant_bridges()`,
+      tx<{ units: string | null }[]>`select sum(units) as units from sms_ledger`,
+      tx<{ low: number | null; on: boolean | null; gateway: boolean }[]>`
+        select (data->'notifications'->>'lowBalance')::int as low, (data->'notifications'->>'enabled')::boolean as on,
+               (data ? 'taifapay') as gateway
+        from tenant_settings`,
+      tx<{ n: number; who: string | null; body: string | null; channel: string | null; id: string | null }[]>`
+        select count(*)::int as n, (array_agg(coalesce(m.first_name || ' ' || m.last_name, c.name, c.address) order by c.last_at desc))[1] as who,
+               (array_agg(x.body order by c.last_at desc))[1] as body,
+               (array_agg(c.channel order by c.last_at desc))[1] as channel,
+               (array_agg(c.id::text order by c.last_at desc))[1] as id
+        from conversations c left join members m on m.id = c.member_id
+        join lateral (select body, direction from comm_messages where conversation_id = c.id
+                      order by created_at desc limit 1) x on x.direction = 'in'
+        where c.status = 'open'`,
+      tx<{ n: number; kes: number; who: string | null; days: number | null }[]>`
+        with e as (
+          select m.id, m.first_name || ' ' || m.last_name as who, max(en.ends_at) as ends
+          from members m join entitlements en on en.member_id = m.id
+          where m.member_no not between 11001 and 11999 group by m.id
+          having max(en.ends_at) > now() and max(en.ends_at) <= now() + interval '7 days')
+        select count(*)::int as n,
+               coalesce(sum((select l.price_kes from payment_lines l join payments p on p.id = l.payment_id
+                             where p.member_id = e.id and p.status = 'applied' order by p.paid_at desc limit 1)), 0)::int as kes,
+               (array_agg(who order by ends))[1] as who,
+               min(ceil(extract(epoch from ends - now()) / 86400))::int as days
+        from e`,
+      tx<{ n: number }[]>`
+        select count(*)::int as n from members m
+        join lateral (select min(e.starts_at) as since from entitlements e
+                      where e.member_id = m.id and e.ends_at > now() and e.starts_at <= now()) cur on cur.since is not null
+        left join lateral (select max(a.at) as last from access_events a where a.member_no = m.member_no and a.granted) la on true
+        where m.member_no not between 11001 and 11999 and coalesce(la.last, cur.since) < now() - interval '21 days'`,
+      tx<{ n: number; who: string | null }[]>`
+        select count(*)::int as n, (array_agg(coalesce(m.first_name || ' ' || m.last_name, '#' || a.entity) order by a.at desc))[1] as who
+        from audit_log a left join members m on m.member_no::text = a.entity
+        where a.action = 'access.tamper_reverted' and a.at > now() - interval '7 days'`,
+    ]);
     return {
       unmatched: um?.n ?? 0,
       unmatchedKes: um?.kes ?? 0,
+      bridges: br?.n ?? 0,
       bridgeLastSeen: br?.last ?? null,
       syncFailed: st?.failed ?? 0,
+      syncWho: st?.who ?? null,
+      syncMemberId: st?.member_id ?? null,
       smsUnits: Number(sms?.units ?? 0),
+      smsLow: cfg?.low ?? 100,
+      smsOn: !!cfg?.on,
+      gateway: !!cfg?.gateway,
+      waiting: chat?.n ?? 0,
+      waitingWho: chat?.who ?? null,
+      waitingBody: chat?.body ?? null,
+      waitingChannel: chat?.channel ?? null,
+      waitingId: chat?.id ?? null,
+      ending: end?.n ?? 0,
+      endingKes: end?.kes ?? 0,
+      endingWho: end?.who ?? null,
+      endingDays: end?.days ?? null,
+      away: away?.n ?? 0,
+      tamper: tamper?.n ?? 0,
+      tamperWho: tamper?.who ?? null,
     };
   });
 }
 
-/** The member number the next new member gets when none is typed (same rule as createMember). */
 export async function nextMemberNo(tenantId: string) {
   return T(tenantId, async (tx) => {
     const [n] = await tx<{ next: number }[]>`
