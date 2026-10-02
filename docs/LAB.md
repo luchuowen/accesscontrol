@@ -61,3 +61,16 @@ Every `.ps1` job reboots the Windows VM; the REST service answers ~2 min after b
 - Found and fixed: users created with no validity dates (never paid) stored 1900-01-01 / bValidDate false, and later
   updates did not stick, so the Tamper Guard reported them every pass. Never-paid members now get a past one-day
   window (2000-01-01 00:00–23:59) and the bridge re-reads after every user update and fails loudly if it did not land.
+
+## Proof 4 (2026-10-02): real TaifaPay money
+- Lango merchant on TaifaPay Live; keys verified through `/api/v1/auth/token`.
+- Real KES 10 STK to 0726049097 → TaifaPay "Complete", but **no webhook arrived**. Settling the transaction by id
+  (re-query) applied it: 21002 extended to 4 Oct 23:59, intent completed. The 60 s reconciliation poller now does
+  this automatically.
+
+## Onboarding a club (partner)
+1. Sign in → Clubs → **Add a club** (name, owner name + email) → hand over console address, one-time password,
+   pairing code.
+2. On the AxTraxNG server PC (PowerShell as Administrator): `irm https://<lango>/bridge/install.ps1 | iex`.
+3. In the club console: Doors & access → map zones to readers → import members; Plans; Settings → TaifaPay keys,
+   paybill/till, settlement. The checklist on Overview shows what is left.

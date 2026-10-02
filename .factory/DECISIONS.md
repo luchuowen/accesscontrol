@@ -39,3 +39,14 @@
 - Rate limits: per-IP (last X-Forwarded-For hop, Caddy) for all attempts; per-account for failures only.
 - TaifaPay live API base is `https://merchants.taifapay.africa/api/v1` (the documented `/v1` serves the dashboard
   HTML with HTTP 200). Key checks treat non-JSON or 5xx as "unreachable", 400/401/403 as "rejected".
+- TaifaPay is the only fee-bearing gateway: card/bank go through TaifaPay; the desk records cash only (with who).
+  A club's own paybill/till is linked on TaifaPay (Path A); clubs without one use TaifaPay links/prompts (Path B).
+- TaifaPay webhooks can be missed (seen live 2026-10-02): a 60 s poller settles pending STK/invoice requests through
+  the same code path as the webhook, exactly once.
+- Onboarding: partner_admin (partner_id null = NAVAC platform) creates clubs in one step (`app_create_club`) and opens
+  any club as owner. The Site Bridge sends an AxTraxNG inventory (readers, groups, users+cards) for zone mapping and
+  member import; staff groups are never imported; imported users keep today's end date or get a grace period.
+- Site Bridge installs with `irm <lango>/bridge/install.ps1 | iex`; the AxTraxNG login stays in
+  C:\ProgramData\Lango\site.json (SYSTEM/Administrators only).
+- Active plans have unique prices (a paybill payment must match exactly one plan); mismatches go to the
+  missed-payment queue, where staff assign them (amount must equal the plan price).
