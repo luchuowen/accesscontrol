@@ -1,6 +1,7 @@
 import { withTenant } from '@lango/db';
 import { CheckCircle2, CreditCard, MessageSquare } from 'lucide-react';
 import { headers } from 'next/headers';
+import { CopyField } from '@/components/copy-field';
 import { SubmitButton } from '@/components/submit-button';
 import { Badge, PageHeader } from '@/components/ui';
 import { requireSession } from '@/lib/session';
@@ -20,7 +21,9 @@ export default async function Settings({ searchParams }: { searchParams: Promise
   );
   const [t] = await db()<{ slug: string }[]>`select slug from tenants where id = ${s.tid}`;
   const host = (await headers()).get('host');
-  const webhook = `https://${host}/api/webhooks/taifapay/${t?.slug}`;
+  // Same for every club: the public address of this Lango server + the club's own code.
+  const base = (process.env.PUBLIC_URL ?? `https://${host}`).replace(/\/$/, '');
+  const webhook = `${base}/api/webhooks/taifapay/${t?.slug}`;
   const tp = row?.data.taifapay;
   const msg: Record<string, [string, string]> = {
     ok: ['green', 'TaifaPay connected — the keys were verified and stored encrypted.'],
@@ -61,26 +64,46 @@ export default async function Settings({ searchParams }: { searchParams: Promise
             )}
           </div>
           {s.role === 'owner' ? (
-            <form action={saveTaifaPay} className="mt-6 space-y-3">
-              <select name="env" defaultValue={tp?.env ?? 'sandbox'} className="input">
-                <option value="sandbox">Sandbox (testing)</option>
-                <option value="live">Live</option>
-              </select>
-              <input
-                name="clientId"
-                type="password"
-                placeholder={tp ? `Client ID ••••${tp.clientId.slice(-4)} (stored — enter to replace)` : 'Client ID'}
-                className="input"
-                autoComplete="off"
-                spellCheck={false}
-              />
-              <input
-                name="clientSecret"
-                type="password"
-                placeholder={tp ? '•••••••• (stored — enter to replace)' : 'Client secret'}
-                className="input"
-                autoComplete="new-password"
-              />
+            <form action={saveTaifaPay} className="mt-6 space-y-4">
+              <label className="block">
+                <span className="label">Environment</span>
+                <select name="env" defaultValue={tp?.env ?? 'live'} className="input mt-1.5">
+                  <option value="live">Live</option>
+                  <option value="sandbox">Sandbox (testing)</option>
+                </select>
+              </label>
+              <label className="block">
+                <span className="label">Client ID</span>
+                <input
+                  name="clientId"
+                  type="password"
+                  placeholder={
+                    tp ? `••••${tp.clientId.slice(-4)} · stored, enter to replace` : 'From TaifaPay › API Integration'
+                  }
+                  className="input mt-1.5"
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+              </label>
+              <label className="block">
+                <span className="label">Client secret</span>
+                <input
+                  name="clientSecret"
+                  type="password"
+                  placeholder={
+                    tp ? '•••••••• · stored, enter to replace' : 'Shown once when the credential is generated'
+                  }
+                  className="input mt-1.5"
+                  autoComplete="new-password"
+                />
+              </label>
+              <div>
+                <span className="label">Deposit webhook URL</span>
+                <div className="mt-1.5">
+                  <CopyField value={webhook} label="Deposit webhook URL" />
+                </div>
+                <p className="mt-1.5 text-xs text-ink-500">Set this as the Deposit URL under TaifaPay › Webhooks.</p>
+              </div>
               <SubmitButton pendingText="Checking the keys with TaifaPay…" className="btn-primary w-full">
                 Verify &amp; save
               </SubmitButton>
@@ -88,10 +111,6 @@ export default async function Settings({ searchParams }: { searchParams: Promise
           ) : (
             <p className="mt-6 text-sm text-ink-500">Only the club owner can change payment settings.</p>
           )}
-          <div className="mt-6 rounded-xl bg-ink-50 p-3 text-xs text-ink-500">
-            In the TaifaPay merchant dashboard, set the webhook URL to:
-            <div className="mt-1 select-all break-all font-mono text-[11px] text-ink-900">{webhook}</div>
-          </div>
         </section>
         <section className="card p-6">
           <div className="flex items-center gap-3">
