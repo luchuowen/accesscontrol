@@ -1,13 +1,26 @@
 import { onboardingChecklist } from '@lango/server';
-import { Mail, MessageCircle, MessageSquare } from 'lucide-react';
-import { Checklist } from '@/components/checklist';
+import {
+  Building2,
+  CalendarDays,
+  CheckCircle2,
+  Circle,
+  Globe2,
+  Handshake,
+  Hash,
+  Mail,
+  MessageCircle,
+  MessageSquare,
+} from 'lucide-react';
+import Link from 'next/link';
 import { channelState } from '@/lib/comms-data';
 import { date } from '@/lib/format';
 import type { Session } from '@/lib/session';
 import { db } from '@/server/db';
-import { TabHead } from './bits';
+import { Group, Pill, Row, SectionHead } from './bits';
 
-/** Settings › Club: setup progress, the club's details and which ways of reaching members are connected. */
+const BY = { navac: 'NAVAC', installer: 'Installer', club: '' } as const;
+
+/** Settings › Club profile: details, setup progress and the ways members can be reached. */
 export async function ClubTab({ s }: { s: Session }) {
   const [[t], checklist, ch] = await Promise.all([
     db()<{ name: string; slug: string; timezone: string; created_at: Date; partner: string | null }[]>`
@@ -17,81 +30,90 @@ export async function ClubTab({ s }: { s: Session }) {
     channelState(s.tid),
   ]);
   const by = t?.partner ?? 'NAVAC';
-  const row = (k: string, v: React.ReactNode) => (
-    <div className="flex items-center justify-between gap-4 py-3">
-      <dt className="text-[13px] text-ink-500">{k}</dt>
-      <dd className="text-right text-[13.5px] font-medium">{v}</dd>
-    </div>
-  );
-  const channel = (I: typeof Mail, name: string, on: boolean, detail: string) => (
-    <li className="flex items-center gap-3 py-3">
-      <span
-        className={`grid h-9 w-9 place-items-center rounded-xl ${on ? 'bg-emerald-50 text-emerald-700' : 'bg-ink-50 text-ink-300'}`}
-      >
-        <I size={16} />
-      </span>
-      <div className="min-w-0 flex-1">
-        <b className="block text-[13.5px]">{name}</b>
-        <span className="text-[12px] text-ink-500">{detail}</span>
-      </div>
-      <span
-        className={`rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${on ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-ink-500'}`}
-      >
-        {on ? 'Connected' : 'Not connected'}
-      </span>
-    </li>
-  );
+  const done = checklist.filter((i) => i.done).length;
   return (
     <>
-      <TabHead title="Club" sub="Setup progress and the club’s details." />
-      <div className="space-y-4">
-        <Checklist items={checklist} />
-        <div className="grid gap-4 xl:grid-cols-2">
-          <section className="card p-6">
-            <div className="font-medium">Details</div>
-            <dl className="mt-2 divide-y divide-ink-100">
-              {row('Club name', t?.name)}
-              {row('Club code', <span className="font-mono">{t?.slug}</span>)}
-              {row('Time zone', t?.timezone)}
-              {row('Set up by', by)}
-              {row('On Lango since', t ? date(t.created_at) : '')}
-            </dl>
-            <p className="mt-3 text-[12px] text-ink-500">To change the club’s name or code, ask {by}.</p>
-          </section>
-          <section className="card p-6">
-            <div className="font-medium">Ways to reach members</div>
-            <p className="mt-0.5 text-[12px] text-ink-500">
-              Connected by {by}. Conversations are under Communications.
-            </p>
-            <ul className="mt-2 divide-y divide-ink-100">
-              {channel(
-                MessageSquare,
-                'SMS',
-                ch.sms.on,
-                ch.sms.on ? 'Receipts, reminders, news and replies' : (ch.sms.why ?? ''),
+      <SectionHead
+        icon={Building2}
+        title="Club profile"
+        sub={`Set up by ${by}. Ask them to change the name or code.`}
+      />
+      <Group title="Details">
+        <Row icon={Building2} label="Club name">
+          {t?.name}
+        </Row>
+        <Row icon={Hash} label="Club code" hint="Members use it to sign in to their portal">
+          <span className="font-mono">{t?.slug}</span>
+        </Row>
+        <Row icon={Globe2} label="Time zone">
+          {t?.timezone}
+        </Row>
+        <Row icon={Handshake} label="Partner">
+          {by}
+        </Row>
+        <Row icon={CalendarDays} label="On Lango since">
+          {t ? date(t.created_at) : ''}
+        </Row>
+      </Group>
+
+      <Group
+        title="Setup"
+        action={
+          <span className="flex items-center gap-2 text-[12px] font-semibold text-ink-500">
+            <span className="h-1.5 w-24 overflow-hidden rounded-full bg-slate-200">
+              <i
+                className="block h-full rounded-full bg-emerald-500"
+                style={{ width: `${(done / checklist.length) * 100}%` }}
+              />
+            </span>
+            {done}/{checklist.length}
+          </span>
+        }
+      >
+        {checklist.map((i) => {
+          const body = (
+            <>
+              {i.done ? (
+                <CheckCircle2 size={17} className="shrink-0 text-emerald-600" />
+              ) : (
+                <Circle size={17} className="shrink-0 text-ink-300" />
               )}
-              {channel(
-                MessageCircle,
-                'WhatsApp',
-                ch.whatsapp.on,
-                ch.whatsapp.on
-                  ? (ch.whatsapp.number ?? 'The club’s WhatsApp Business number')
-                  : 'Members can message the club on WhatsApp',
+              <span className="min-w-0 flex-1">
+                <span className={`block text-[13.5px] ${i.done ? 'text-ink-500' : 'text-ink-900'}`}>{i.label}</span>
+              </span>
+              {!i.done && i.by !== 'club' && <Pill ok={null}>{BY[i.by]}</Pill>}
+              {!i.done && i.by === 'club' && (
+                <span className="text-[12.5px] font-semibold text-emerald-700">Do it →</span>
               )}
-              {channel(
-                Mail,
-                'Email',
-                ch.email.on,
-                ch.email.on
-                  ? ch.email.address
-                    ? `Replies arrive at ${ch.email.address}`
-                    : 'Sending only'
-                  : 'Write to members by email, under the club’s name',
-              )}
-            </ul>
-          </section>
-        </div>
-      </div>
+            </>
+          );
+          return !i.done && i.by === 'club' ? (
+            <Link key={i.key} href={i.href} className="flex items-center gap-3 px-4 py-3 hover:bg-slate-50">
+              {body}
+            </Link>
+          ) : (
+            <div key={i.key} className="flex items-center gap-3 px-4 py-3">
+              {body}
+            </div>
+          );
+        })}
+      </Group>
+
+      <Group title="Ways to reach members">
+        <Row icon={MessageSquare} label="SMS" hint={ch.sms.on ? undefined : ch.sms.why}>
+          <Pill ok={ch.sms.on}>{ch.sms.on ? 'On' : 'Off'}</Pill>
+        </Row>
+        <Row icon={MessageCircle} label="WhatsApp" hint={ch.whatsapp.number}>
+          <Pill ok={ch.whatsapp.on ? true : null}>{ch.whatsapp.on ? 'Connected' : 'Not connected'}</Pill>
+        </Row>
+        <Row
+          icon={Mail}
+          label="Email"
+          hint={ch.email.on && ch.email.address ? `Replies to ${ch.email.address}` : undefined}
+        >
+          <Pill ok={ch.email.on ? true : null}>{ch.email.on ? 'Connected' : 'Not connected'}</Pill>
+        </Row>
+      </Group>
     </>
   );
 }

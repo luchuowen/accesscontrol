@@ -17,12 +17,12 @@ import { db } from '@/server/db';
 
 export async function sendTestSms(form: FormData) {
   const s = await requireSession();
-  if (!can(s, 'messages.manage')) redirect('/settings?tab=messages&sms=forbidden');
+  if (!can(s, 'messages.manage')) redirect('/settings?tab=sms&sms=forbidden');
   const to = msisdn(String(form.get('phone') ?? ''));
-  if (!to) redirect('/settings?tab=messages&sms=number');
-  if (!rateLimit(`sms-test:${s.tid}`, 5, 10 * 60_000)) redirect('/settings?tab=messages&sms=wait');
+  if (!to) redirect('/settings?tab=sms&sms=number');
+  if (!rateLimit(`sms-test:${s.tid}`, 5, 10 * 60_000)) redirect('/settings?tab=sms&sms=wait');
   const client = await platformSms(db());
-  if (!client) redirect('/settings?tab=messages&sms=platform');
+  if (!client) redirect('/settings?tab=sms&sms=platform');
   const [t] = await db()<{ name: string }[]>`select name from tenants where id = ${s.tid}`;
   const body = `${t?.name}: this is a test message from Lango. SMS receipts and reminders are working.`;
   // Sent under the club's own sender ID, so this also proves the sender is registered.
@@ -39,13 +39,13 @@ export async function sendTestSms(form: FormData) {
                      ${r.ok ? null : `${r.code} ${r.desc}`.slice(0, 300)}, 1, ${r.ok ? new Date() : null})`;
   });
   revalidatePath('/settings');
-  redirect(`/settings?tab=messages&sms=${r.ok ? 'test-sent' : 'test-failed'}`);
+  redirect(`/settings?tab=sms&sms=${r.ok ? 'test-sent' : 'test-failed'}`);
 }
 
 /** Buy SMS credit: M-Pesa prompt to the given phone, paid to NAVAC; credit lands when TaifaPay confirms. */
 export async function buySms(form: FormData) {
   const s = await requireSession();
-  if (!can(s, 'sms.buy')) redirect('/settings?tab=messages&sms=forbidden');
+  if (!can(s, 'sms.buy')) redirect('/settings?tab=sms&sms=forbidden');
   const amountKes = Number(String(form.get('amountKes') ?? '').replace(/[,\s]/g, ''));
   const r = await startTopup(db(), s.tid, {
     amountKes,
@@ -54,7 +54,7 @@ export async function buySms(form: FormData) {
     actor: s.uid,
   });
   revalidatePath('/settings');
-  redirect(`/settings?tab=messages&sms=${r.ok ? 'topup-sent' : `topup-${r.reason}`}`);
+  redirect(`/settings?tab=sms&sms=${r.ok ? 'topup-sent' : `topup-${r.reason}`}`);
 }
 
 const hour = (v: FormDataEntryValue | null, d: number) => {
@@ -64,7 +64,7 @@ const hour = (v: FormDataEntryValue | null, d: number) => {
 
 export async function saveNotifications(form: FormData) {
   const s = await requireSession();
-  if (!can(s, 'messages.manage')) redirect('/settings?tab=messages&m=forbidden');
+  if (!can(s, 'messages.manage')) redirect('/settings?tab=notifications&m=forbidden');
   const on = (k: string) => form.get(k) === 'on';
   const notifications: NotifySettings = {
     enabled: on('enabled'),
@@ -85,12 +85,12 @@ export async function saveNotifications(form: FormData) {
     quietTo: hour(form.get('quietTo'), 7),
   };
   const staffAlerts = notifications.autoTopup || notifications.dailySummary;
-  if (staffAlerts && !notifications.alertPhone) redirect('/settings?tab=messages&m=alert-phone');
+  if (staffAlerts && !notifications.alertPhone) redirect('/settings?tab=notifications&m=alert-phone');
   await withTenant(db(), s.tid, async (tx) => {
     await tx`insert into tenant_settings (tenant_id, data) values (${s.tid}, ${tx.json({ notifications } as never)})
              on conflict (tenant_id) do update set data = tenant_settings.data || excluded.data`;
     await tx`insert into audit_log (tenant_id, actor, action, data) values (${s.tid}, ${s.uid}, 'settings.notifications', ${tx.json(notifications as never)})`;
   });
   revalidatePath('/settings');
-  redirect('/settings?tab=messages&m=saved');
+  redirect('/settings?tab=notifications&m=saved');
 }

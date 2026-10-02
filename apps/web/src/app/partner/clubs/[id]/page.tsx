@@ -586,8 +586,8 @@ async function Comms({ tenantId, uid, admin, slug }: { tenantId: string; uid: st
           !!smsCfg?.apiKey,
         )}
         <p className="mt-3 text-[12px] text-ink-500">
-          The club switches SMS on in Settings › Messages. NAVAC sets sender IDs and prices under Platform settings ›
-          Club pricing.
+          The club switches SMS on in Settings › Notifications. NAVAC sets sender IDs and prices under Platform settings
+          › Club pricing.
         </p>
       </section>
 

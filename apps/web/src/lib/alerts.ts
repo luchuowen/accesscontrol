@@ -127,7 +127,7 @@ export async function clubHealth(s: LiveSession): Promise<HealthArea[]> {
           a.smsUnits <= 0
             ? '0 SMS left. Receipts and reminders are paused until you top up.'
             : `${a.smsUnits.toLocaleString('en-KE')} SMS left, below your alert level of ${a.smsLow.toLocaleString('en-KE')}.`,
-        href: '/settings?tab=messages',
+        href: '/settings?tab=sms',
         action: 'Top up',
       },
     a.waiting > 0 &&

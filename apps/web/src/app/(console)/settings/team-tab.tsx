@@ -8,13 +8,13 @@ import {
   roleDefaults,
   roleLabel,
 } from '@lango/server';
-import { Crown, ShieldCheck } from 'lucide-react';
+import { Crown, ShieldCheck, UsersRound } from 'lucide-react';
 import { SubmitButton } from '@/components/submit-button';
 import { Badge } from '@/components/ui';
 import { ago, dateTime } from '@/lib/format';
 import { requirePerm } from '@/lib/session';
 import { db } from '@/server/db';
-import { Banner, TabHead } from './bits';
+import { Banner, SectionHead } from './bits';
 import { InviteForm } from './invite-form';
 import { offerClub, remove, resend, setPerms, setRole } from './team-actions';
 
@@ -64,14 +64,20 @@ export async function TeamTab({ m }: { m?: string }) {
     t.id !== s.uid && t.role !== 'owner' && (t.role !== 'admin' || iAmOwner);
   return (
     <>
-      <TabHead
+      <SectionHead
+        icon={UsersRound}
         title="Team & roles"
-        sub="Who can sign in to this club, and what each person may do. Changes apply on their next page."
+        sub="Who can sign in to this club, and what each person may do."
+        action={
+          <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[12px] font-semibold text-ink-700 tabular-nums">
+            {seats.used} of {seats.cap} seats
+          </span>
+        }
       />
       <Banner note={msg} />
       <div className="grid gap-6 2xl:grid-cols-[1fr_340px]">
         <div className="min-w-0 space-y-6">
-          <section className="card divide-y divide-ink-100">
+          <section className="rounded-2xl border border-[#E7EBF3] divide-y divide-ink-100">
             {team.map((t) => {
               const def = defaults[t.role] ?? [];
               const effective = new Set(
@@ -204,7 +210,7 @@ export async function TeamTab({ m }: { m?: string }) {
             })}
           </section>
 
-          <section className="card p-5">
+          <section className="rounded-2xl border border-[#E7EBF3] p-5">
             <div className="mb-3 font-medium">Recent activity</div>
             {activity.length === 0 ? (
               <p className="text-sm text-ink-500">Sign-ins, invitations and changes will show here.</p>
@@ -223,7 +229,7 @@ export async function TeamTab({ m }: { m?: string }) {
               </ul>
             )}
           </section>
-          <section className="card p-5">
+          <section className="rounded-2xl border border-[#E7EBF3] p-5">
             <div className="flex items-center gap-2 font-medium">
               <ShieldCheck size={16} className="text-brand-600" /> What each role can do
             </div>
@@ -262,7 +268,7 @@ export async function TeamTab({ m }: { m?: string }) {
         </div>
 
         <div className="min-w-0 space-y-6">
-          <section className="card p-5">
+          <section className="rounded-2xl border border-[#E7EBF3] p-5">
             <div className="font-medium">Invite someone</div>
             <p className="mb-4 mt-0.5 text-xs text-ink-500">
               They get an email (and an SMS if you add a mobile) to set their own password.
@@ -283,7 +289,7 @@ export async function TeamTab({ m }: { m?: string }) {
           </section>
 
           {can(s, 'club.own') && (
-            <section className="card p-5">
+            <section className="rounded-2xl border border-[#E7EBF3] p-5">
               <div className="flex items-center gap-2 font-medium">
                 <Crown size={16} className="text-gold-500" /> Hand over ownership
               </div>

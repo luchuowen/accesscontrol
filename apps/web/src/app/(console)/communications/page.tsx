@@ -28,7 +28,7 @@ import { AutoRefresh, Composer, ListFilters, NewMessage, NewsDialog, ScrollEnd }
 /**
  * Communications (design from NAVAC CRM, 2 Oct 2026): one inbox for SMS, WhatsApp and email with members and anyone
  * who writes to the club. List · thread · who it is. Channels are connected by NAVAC or the club's partner; what
- * the club sends automatically lives under Settings › Messages.
+ * the club sends automatically lives under Settings › Notifications.
  */
 type Params = { c?: string; ch?: string; f?: string; q?: string; view?: string; news?: string; m?: string };
 
@@ -156,7 +156,7 @@ export default async function Communications({ searchParams }: { searchParams: P
       ? 'You can read this conversation but not answer it.'
       : c.channel === 'sms' && !chans.sms.on
         ? chans.sms.why === 'SMS is off for the club.'
-          ? 'SMS is off for the club. Turn it on in Settings › Messages & SMS.'
+          ? 'SMS is off for the club. Turn it on in Settings › Notifications.'
           : 'SMS isn’t connected yet. NAVAC sets it up.'
         : c.channel === 'whatsapp' && !chans.whatsapp.on
           ? 'WhatsApp is not connected for the club. Your partner sets it up.'
@@ -242,7 +242,7 @@ export default async function Communications({ searchParams }: { searchParams: P
       {auto ? (
         <section className="overflow-hidden rounded-2xl border border-[#E7EBF3] bg-white">
           <header className="border-b border-[#EEF1F6] px-5 py-3 text-[12.5px] text-ink-500">
-            Receipts, reminders and news the club sends by SMS. Choose what goes out under Settings › Messages.
+            Receipts, reminders and news the club sends by SMS. Choose what goes out under Settings › Notifications.
           </header>
           {log.length ? (
             <ul className="divide-y divide-[#F0F2F6]">
