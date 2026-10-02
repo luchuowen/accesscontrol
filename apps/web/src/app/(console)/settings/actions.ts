@@ -1,14 +1,19 @@
 'use server';
-import { randomBytes } from 'node:crypto';
 import { withTenant } from '@lango/db';
 import {
+  changedPasswordAftermath,
   clubSms,
   encrypt,
   hashPassword,
+  inviteStaff,
   msisdn,
+  passwordProblem,
   platformSms,
   platformSmsConfig,
   rateLimit,
+  resendInvite,
+  roleLabel,
+  staffById,
   startTopup,
   TaifaAuthError,
   TaifaPay,
@@ -16,7 +21,7 @@ import {
 } from '@lango/server';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
-import { requireSession } from '@/lib/session';
+import { publicUrl, requireSession, sessionToken } from '@/lib/session';
 import { db } from '@/server/db';
 
 export async function saveTaifaPay(form: FormData) {
@@ -72,33 +77,59 @@ const ROLES = ['owner', 'manager', 'reception', 'accountant'] as const;
 
 export interface AddStaffState {
   error?: string;
-  done?: { name: string; email: string; tempPassword: string };
+  done?: { name: string; email: string; emailed: boolean };
 }
 
-/** Owner adds a team member; a one-time password is shown once to hand over. */
+/** Owner invites a colleague: they get an email to set their own password (7-day link). */
 export async function addStaff(_prev: AddStaffState, form: FormData): Promise<AddStaffState> {
   const s = await requireSession();
-  if (s.role !== 'owner') return { error: 'Only the owner can add staff.' };
+  if (s.role !== 'owner') return { error: 'Only the owner can invite people.' };
   const name = String(form.get('name') ?? '')
     .trim()
     .slice(0, 80);
   const email = String(form.get('email') ?? '')
     .trim()
     .toLowerCase();
+  const phone = String(form.get('phone') ?? '').trim();
   const role = String(form.get('role') ?? 'reception');
   if (!name) return { error: 'Enter their name.' };
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { error: 'Enter a valid email.' };
+  if (phone && !msisdn(phone)) return { error: 'Enter their mobile as 07XX XXX XXX, or leave it blank.' };
   if (!(ROLES as readonly string[]).includes(role)) return { error: 'Choose a role.' };
   const [taken] = await db()<{ id: string }[]>`select id from app_staff_login(${email})`;
   if (taken) return { error: 'That email already has a Lango account.' };
-  const a = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789';
-  const tempPassword = [...randomBytes(14)].map((b) => a[b % a.length]).join('');
-  await withTenant(db(), s.tid, async (tx) => {
-    await tx`select app_add_staff(${email}, ${name}, ${role}, ${await hashPassword(tempPassword)})`;
-    await tx`insert into audit_log (tenant_id, actor, action, data) values (${s.tid}, ${s.uid}, 'staff.added', ${tx.json({ email, role } as never)})`;
-  });
-  revalidatePath('/settings');
-  return { done: { name, email, tempPassword } };
+  const [t] = await db()<{ name: string }[]>`select name from tenants where id = ${s.tid}`;
+  try {
+    const r = await inviteStaff(db(), {
+      inviterId: s.uid,
+      email,
+      name,
+      phone: phone || undefined,
+      role,
+      tenantId: s.tid,
+      baseUrl: publicUrl(),
+      ctx: { inviterName: s.name, to: t?.name ?? 'your club', roleLabel: roleLabel(role) },
+    });
+    await withTenant(db(), s.tid, async (tx) => {
+      await tx`insert into audit_log (tenant_id, actor, action, data) values (${s.tid}, ${s.uid}, 'staff.invited', ${tx.json({ email, role } as never)})`;
+    });
+    revalidatePath('/settings');
+    return { done: { name, email, emailed: r.emailed } };
+  } catch (e) {
+    console.error('staff invitation failed', (e as Error).message);
+    return { error: 'The invitation could not be created. Try again.' };
+  }
+}
+
+/** A fresh invitation link for someone who has not accepted yet (the earlier link stops working). */
+export async function resendStaffInvite(form: FormData) {
+  const s = await requireSession();
+  if (s.role !== 'owner') redirect('/settings?team=forbidden#team');
+  const id = String(form.get('staffId') ?? '');
+  const target = await staffById(db(), id);
+  if (!target || target.tenant_id !== s.tid) redirect('/settings?team=forbidden#team');
+  const r = await resendInvite(db(), id, s.uid, publicUrl());
+  redirect(`/settings?team=${r.ok ? 'invite-sent' : 'invite-failed'}#team`);
 }
 
 export async function setStaffActive(form: FormData) {
@@ -115,15 +146,40 @@ export async function setStaffActive(form: FormData) {
   redirect('/settings?team=ok');
 }
 
+const PW_CODE: [RegExp, string][] = [
+  [/at least 10/, 'short'],
+  [/at most/, 'long'],
+  [/too easy/, 'guessable'],
+  [/breach/, 'breached'],
+];
+
+/** Change your own password: this session stays, every other session and remembered device ends. */
 export async function changePassword(form: FormData) {
   const s = await requireSession();
   const current = String(form.get('current') ?? '');
   const next = String(form.get('next') ?? '');
-  if (next.length < 10) redirect('/settings?pw=short');
+  if (!rateLimit(`pw-change:${s.uid}`, 5, 15 * 60_000)) redirect('/settings?pw=wait#account');
   const [row] = await db()<{ h: string | null }[]>`select app_staff_hash(${s.uid}) as h`;
-  if (!row?.h || !(await verifyPassword(current, row.h))) redirect('/settings?pw=wrong');
+  if (!row?.h || !(await verifyPassword(current, row.h))) redirect('/settings?pw=wrong#account');
+  const problem = await passwordProblem(next, s.email);
+  if (problem) redirect(`/settings?pw=${PW_CODE.find(([re]) => re.test(problem))?.[1] ?? 'guessable'}#account`);
   await db()`select app_set_password(${s.uid}, ${await hashPassword(next)})`;
-  redirect('/settings?pw=ok');
+  const me = await staffById(db(), s.uid);
+  if (me) await changedPasswordAftermath(db(), me, 'password-changed', await sessionToken());
+  redirect('/settings?pw=ok#account');
+}
+
+/** Your mobile number: where sign-in codes go. Needs your password, so a borrowed session cannot redirect codes. */
+export async function savePhone(form: FormData) {
+  const s = await requireSession();
+  if (!rateLimit(`pw-change:${s.uid}`, 5, 15 * 60_000)) redirect('/settings?pw=wait#account');
+  const [row] = await db()<{ h: string | null }[]>`select app_staff_hash(${s.uid}) as h`;
+  if (!row?.h || !(await verifyPassword(String(form.get('current') ?? ''), row.h)))
+    redirect('/settings?pw=wrong#account');
+  const phone = msisdn(String(form.get('phone') ?? ''));
+  if (!phone) redirect('/settings?pw=phone#account');
+  await db()`select app_staff_set_phone(${s.uid}, ${phone})`;
+  redirect('/settings?pw=phone-ok#account');
 }
 
 /** Club SMS switches: on/off, receipts, expiry reminders (N days before + last day), welcome message. */

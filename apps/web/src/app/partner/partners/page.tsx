@@ -2,13 +2,15 @@ import { redirect } from 'next/navigation';
 import { Badge, PageHeader } from '@/components/ui';
 import { requirePartner } from '@/lib/session';
 import { db } from '@/server/db';
-import { setPartnerActive } from '../actions';
+import { resendPartnerInvite, setPartnerActive } from '../actions';
 import { AddPartnerForm } from './partner-form';
 
 const MSG: Record<string, [string, string]> = {
   'partner-on': ['green', 'Login switched on.'],
   'partner-off': ['green', 'Login switched off.'],
   self: ['amber', 'You can’t switch off your own login.'],
+  'invite-sent': ['green', 'A new invitation is on its way. The earlier link no longer works.'],
+  'invite-failed': ['amber', 'That invitation could not be sent. It may already have been accepted.'],
 };
 
 export default async function Partners({ searchParams }: { searchParams: Promise<{ m?: string }> }) {
@@ -17,7 +19,9 @@ export default async function Partners({ searchParams }: { searchParams: Promise
   if (!plat?.ok) redirect('/partner');
   const { m } = await searchParams;
   const msg = m ? MSG[m] : undefined;
-  const partners = await db()<{ id: string; name: string; email: string; partner: string; active: boolean }[]>`
+  const partners = await db()<
+    { id: string; name: string; email: string; partner: string; active: boolean; accepted_at: Date | null }[]
+  >`
     select * from app_platform_partners(${s.uid})`;
   return (
     <>
@@ -52,17 +56,30 @@ export default async function Partners({ searchParams }: { searchParams: Promise
                   </td>
                   <td className="px-5 py-3 text-ink-500">{p.partner}</td>
                   <td className="px-5 py-3">
-                    <Badge tone={p.active ? 'green' : 'gray'}>{p.active ? 'active' : 'off'}</Badge>
+                    {p.accepted_at ? (
+                      <Badge tone={p.active ? 'green' : 'gray'}>{p.active ? 'active' : 'off'}</Badge>
+                    ) : (
+                      <Badge tone="amber">invited</Badge>
+                    )}
                   </td>
                   <td className="px-5 py-3 text-right">
-                    {p.id !== s.uid && (
-                      <form action={setPartnerActive}>
+                    {!p.accepted_at ? (
+                      <form action={resendPartnerInvite}>
                         <input type="hidden" name="staffId" value={p.id} />
-                        <input type="hidden" name="active" value={p.active ? 'false' : 'true'} />
                         <button type="submit" className="text-xs font-medium text-ink-500 hover:text-ink-900">
-                          {p.active ? 'Switch off' : 'Switch on'}
+                          Resend invitation
                         </button>
                       </form>
+                    ) : (
+                      p.id !== s.uid && (
+                        <form action={setPartnerActive}>
+                          <input type="hidden" name="staffId" value={p.id} />
+                          <input type="hidden" name="active" value={p.active ? 'false' : 'true'} />
+                          <button type="submit" className="text-xs font-medium text-ink-500 hover:text-ink-900">
+                            {p.active ? 'Switch off' : 'Switch on'}
+                          </button>
+                        </form>
+                      )
                     )}
                   </td>
                 </tr>
@@ -71,8 +88,10 @@ export default async function Partners({ searchParams }: { searchParams: Promise
           </table>
         </section>
         <section className="self-start rounded-[10px] border border-[#E4E8EF] bg-white p-5">
-          <div className="font-medium">Add a login</div>
-          <div className="text-xs text-ink-500">They get a one-time password to change on first sign-in.</div>
+          <div className="font-medium">Invite a partner</div>
+          <div className="text-xs text-ink-500">
+            They get an email to set their own password. The link works for 7 days.
+          </div>
           <AddPartnerForm />
         </section>
       </div>

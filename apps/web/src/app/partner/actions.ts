@@ -4,21 +4,23 @@ import {
   accountEmail,
   encrypt,
   hashPassword,
+  inviteClubOwner,
+  inviteStaff,
   msisdn,
   newPairCode,
   type PlatformEmail,
   type PlatformSms,
   Resend,
   ResendError,
+  resendInvite,
   SourceCodeSms,
   sendEmail,
-  signSession,
+  setSessionClub,
   TaifaAuthError,
   TaifaPay,
 } from '@lango/server';
-import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
-import { requirePartner, sessionCookie, sessionSecret } from '@/lib/session';
+import { publicUrl, requirePartner, sessionToken } from '@/lib/session';
 import { db } from '@/server/db';
 
 /** Open a club's console as its owner (the partner keeps a way back to the clubs list). */
@@ -27,14 +29,23 @@ export async function openClub(form: FormData) {
   const tid = String(form.get('tenantId') ?? '');
   const [c] = await db()<{ id: string }[]>`select id from app_partner_clubs(${s.uid}) where id = ${tid}`;
   if (!c) redirect('/partner');
-  const token = signSession({ uid: s.uid, tid: c.id, role: 'owner', name: s.name, partner: true }, sessionSecret());
-  (await cookies()).set(...sessionCookie(token));
+  const token = await sessionToken();
+  if (!token) redirect('/login?m=signed-out');
+  await setSessionClub(db(), token, c.id, 'owner');
   redirect('/');
 }
 
 export interface CreateClubState {
   error?: string;
-  done?: { name: string; slug: string; ownerEmail: string; tempPassword: string; pairCode: string; tenantId: string };
+  done?: {
+    name: string;
+    slug: string;
+    ownerName: string;
+    ownerEmail: string;
+    emailed: boolean;
+    pairCode: string;
+    tenantId: string;
+  };
 }
 
 const slugify = (s: string) =>
@@ -45,13 +56,14 @@ const slugify = (s: string) =>
     .replace(/^-+|-+$/g, '')
     .slice(0, 36) || 'club';
 
-// Readable one-time password: no look-alike characters; the owner changes it after first sign-in.
-const tempPassword = () => {
-  const a = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789';
-  return [...randomBytes(14)].map((b) => a[b % a.length]).join('');
-};
+/** "John Waweru from Trisol" / "Owen Lu from NAVAC Global": how the invitation names who sent it. */
+async function inviterName(uid: string, name: string) {
+  const [p] = await db()<{ name: string }[]>`
+    select p.name from partners p join app_staff_get(${uid}) s on s.partner_id = p.id`;
+  return `${name} from ${p?.name ?? 'NAVAC Global'}`;
+}
 
-/** One form → a ready club: tenant, site, pairing code for the Site Bridge, owner login. */
+/** One form → a ready club: tenant, site, pairing code for the Site Bridge, and an emailed invitation for the owner. */
 export async function createClub(_prev: CreateClubState, form: FormData): Promise<CreateClubState> {
   const s = await requirePartner();
   const name = String(form.get('name') ?? '')
@@ -63,10 +75,13 @@ export async function createClub(_prev: CreateClubState, form: FormData): Promis
   const ownerEmail = String(form.get('ownerEmail') ?? '')
     .trim()
     .toLowerCase();
+  const ownerPhone = String(form.get('ownerPhone') ?? '').trim();
   const timezone = String(form.get('timezone') ?? 'Africa/Nairobi');
   if (name.length < 2) return { error: 'Enter the club’s name.' };
   if (!ownerName) return { error: 'Enter the name of the club’s owner or manager.' };
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(ownerEmail)) return { error: 'Enter a valid email for the owner.' };
+  if (ownerPhone && !msisdn(ownerPhone))
+    return { error: 'Enter the owner’s mobile as 07XX XXX XXX, or leave it blank.' };
   const base = slugify(String(form.get('slug') ?? '') || name);
   const taken = new Set(
     (await db()<{ slug: string }[]>`select slug from tenants where slug like ${`${base}%`}`).map((r) => r.slug),
@@ -75,17 +90,38 @@ export async function createClub(_prev: CreateClubState, form: FormData): Promis
   for (let i = 2; taken.has(slug); i++) slug = `${base}-${i}`;
   const [exists] = await db()<{ id: string }[]>`select id from app_staff_login(${ownerEmail})`;
   if (exists) return { error: 'That email already has a Lango account. Use another email for this club’s owner.' };
-  const pw = tempPassword();
   const pairCode = newPairCode();
+  let tenantId: string;
   try {
+    // The owner account starts switched off with an unusable password; the invitation below turns it on.
     const [row] = await db()<{ id: string }[]>`
       select app_create_club(${s.uid}, ${slug}, ${name}, ${timezone}, ${ownerEmail}, ${ownerName},
-                             ${await hashPassword(pw)}, ${pairCode}, ${randomBytes(32).toString('hex')}) as id`;
-    return { done: { name, slug, ownerEmail, tempPassword: pw, pairCode, tenantId: row?.id as string } };
+                             ${await hashPassword(randomBytes(32).toString('base64url'))}, ${pairCode},
+                             ${randomBytes(32).toString('hex')}) as id`;
+    tenantId = row?.id as string;
   } catch (e) {
     console.error('create club failed', (e as Error).message);
     return { error: 'The club could not be created. Try again, or use a different club code.' };
   }
+  let emailed = false;
+  try {
+    const r = await inviteClubOwner(db(), {
+      partnerStaffId: s.uid,
+      tenantId,
+      baseUrl: publicUrl(),
+      phone: ownerPhone || undefined,
+      ctx: {
+        inviterName: await inviterName(s.uid, s.name),
+        to: name,
+        roleLabel: 'Owner',
+        next: 'Once you accept the invitation, you’ll be able to review your quote and pay the one-time setup fee.',
+      },
+    });
+    emailed = r.emailed;
+  } catch (e) {
+    console.error('owner invitation failed', (e as Error).message);
+  }
+  return { done: { name, slug, ownerName, ownerEmail, emailed, pairCode, tenantId } };
 }
 
 const platformOnly = async () => {
@@ -296,10 +332,10 @@ export async function setPartnerActive(form: FormData) {
 
 export interface AddPartnerState {
   error?: string;
-  done?: { name: string; email: string; tempPassword: string };
+  done?: { name: string; email: string; emailed: boolean };
 }
 
-/** A login for an installer company (sees only its own clubs) or another NAVAC admin. */
+/** Invite a login for an installer company (sees only its own clubs). */
 export async function addPartner(_prev: AddPartnerState, form: FormData): Promise<AddPartnerState> {
   const s = await platformOnly();
   const name = String(form.get('name') ?? '')
@@ -315,7 +351,34 @@ export async function addPartner(_prev: AddPartnerState, form: FormData): Promis
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { error: 'Enter a valid email.' };
   const [taken] = await db()<{ id: string }[]>`select id from app_staff_login(${email})`;
   if (taken) return { error: 'That email already has a Lango account.' };
-  const pw = tempPassword();
-  await db()`select app_platform_add_partner(${s.uid}, ${company}, ${name}, ${email}, ${await hashPassword(pw)})`;
-  return { done: { name, email, tempPassword: pw } };
+  const [p] = await db()<{ id: string }[]>`select app_platform_partner_id(${s.uid}, ${company}) as id`;
+  try {
+    const r = await inviteStaff(db(), {
+      inviterId: s.uid,
+      email,
+      name,
+      phone: String(form.get('phone') ?? '') || undefined,
+      role: 'partner_admin',
+      tenantId: null,
+      partnerId: p?.id ?? null,
+      baseUrl: publicUrl(),
+      ctx: {
+        inviterName: await inviterName(s.uid, s.name),
+        to: company,
+        roleLabel: 'Partner',
+        next: 'Once you accept, you can add clubs and invite their owners.',
+      },
+    });
+    return { done: { name, email, emailed: r.emailed } };
+  } catch (e) {
+    console.error('partner invitation failed', (e as Error).message);
+    return { error: 'The invitation could not be created. Try again.' };
+  }
+}
+
+/** A fresh invitation link (the earlier one stops working). */
+export async function resendPartnerInvite(form: FormData) {
+  const s = await platformOnly();
+  const r = await resendInvite(db(), String(form.get('staffId') ?? ''), s.uid, publicUrl());
+  backPartners(r.ok ? 'invite-sent' : 'invite-failed');
 }

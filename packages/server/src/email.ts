@@ -136,7 +136,7 @@ export async function sendEmail(
       subject: m.subject,
       html: m.html,
       text: m.text,
-      replyTo: m.replyTo ?? cfg.replyTo,
+      replyTo: m.replyTo ?? cfg.replyTo ?? 'support@navac.co.ke',
       idempotencyKey: m.key,
       tags: [{ name: 'kind', value: m.kind.replace(/[^A-Za-z0-9_-]/g, '_') }],
     });

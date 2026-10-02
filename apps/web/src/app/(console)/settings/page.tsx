@@ -1,5 +1,5 @@
 import { withTenant } from '@lango/db';
-import { clubSms, onboardingChecklist, platformSmsConfig } from '@lango/server';
+import { clubSms, onboardingChecklist, platformSmsConfig, roleLabel, staffById } from '@lango/server';
 import { CheckCircle2, CreditCard, KeyRound, MessageSquare, Smartphone, UsersRound } from 'lucide-react';
 import { headers } from 'next/headers';
 import Link from 'next/link';
@@ -10,7 +10,17 @@ import { Badge, PageHeader } from '@/components/ui';
 import { dateTime, kes } from '@/lib/format';
 import { requireSession } from '@/lib/session';
 import { db } from '@/server/db';
-import { buySms, changePassword, saveChannels, saveTaifaPay, sendTestSms, setStaffActive } from './actions';
+import { signOut } from '../../login/actions';
+import {
+  buySms,
+  changePassword,
+  resendStaffInvite,
+  saveChannels,
+  savePhone,
+  saveTaifaPay,
+  sendTestSms,
+  setStaffActive,
+} from './actions';
 import { AddStaffForm } from './team-form';
 
 export default async function Settings({
@@ -81,9 +91,10 @@ export default async function Settings({
   const staff = await withTenant(
     db(),
     s.tid,
-    (tx) => tx<{ id: string; name: string; email: string; role: string; active: boolean }[]>`
-      select id, name, email, role, active from app_tenant_staff()`,
+    (tx) => tx<{ id: string; name: string; email: string; role: string; active: boolean; accepted_at: Date | null }[]>`
+      select id, name, email, role, active, accepted_at from app_tenant_staff()`,
   );
+  const me = await staffById(db(), s.uid);
   const msg: Record<string, [string, string]> = {
     ok: ['green', 'TaifaPay connected — the keys were verified and stored encrypted.'],
     rejected: ['red', 'TaifaPay rejected those keys. Check the environment (sandbox / live) and try again.'],
@@ -98,9 +109,17 @@ export default async function Settings({
     'team:ok': ['green', 'Team updated.'],
     'team:self': ['amber', 'You can’t deactivate your own account.'],
     'team:forbidden': ['red', 'Only the club owner can change the team.'],
-    'pw:ok': ['green', 'Password changed.'],
+    'team:invite-sent': ['green', 'A new invitation is on its way. The earlier link no longer works.'],
+    'team:invite-failed': ['amber', 'That invitation could not be sent. It may already have been accepted.'],
+    'pw:ok': ['green', 'Password changed. Your other devices have been signed out, and we emailed you a note.'],
     'pw:short': ['red', 'Use at least 10 characters.'],
+    'pw:long': ['red', 'Use at most 128 characters.'],
+    'pw:guessable': ['red', 'That password is too easy to guess. Try a short phrase only you would use.'],
+    'pw:breached': ['red', 'That password has appeared in a data breach elsewhere. Choose another.'],
     'pw:wrong': ['red', 'Your current password is not right.'],
+    'pw:wait': ['amber', 'Too many attempts. Wait 15 minutes and try again.'],
+    'pw:phone': ['red', 'Enter a Kenyan mobile number, e.g. 0712 345 678.'],
+    'pw:phone-ok': ['green', 'Mobile number saved. Sign-in codes go there from now on.'],
     'sms:forbidden': ['red', 'Only the club owner can change this.'],
     'sms:number': ['red', 'Enter a Kenyan mobile number, e.g. 0712 345 678.'],
     'sms:wait': ['amber', 'A few test messages were just sent. Wait a few minutes.'],
@@ -293,7 +312,7 @@ export default async function Settings({
             </p>
           )}
         </section>
-        <section className="card p-6">
+        <section id="team" className="card scroll-mt-6 p-6">
           <div className="flex items-center gap-3">
             <div className="grid h-10 w-10 place-items-center rounded-xl bg-ink-50">
               <UsersRound size={18} />
@@ -307,18 +326,29 @@ export default async function Settings({
             {staff.map((p) => (
               <li key={p.id} className="flex items-center gap-3 py-2.5">
                 <div className="flex-1">
-                  <div className={p.active ? '' : 'text-ink-300 line-through'}>{p.name}</div>
+                  <div className={p.active || !p.accepted_at ? '' : 'text-ink-300 line-through'}>{p.name}</div>
                   <div className="text-xs text-ink-500">{p.email}</div>
                 </div>
-                <Badge>{p.role}</Badge>
-                {owner && p.id !== s.uid && (
-                  <form action={setStaffActive}>
+                {!p.accepted_at && <Badge tone="amber">invited</Badge>}
+                <Badge>{roleLabel(p.role)}</Badge>
+                {owner && !p.accepted_at ? (
+                  <form action={resendStaffInvite}>
                     <input type="hidden" name="staffId" value={p.id} />
-                    <input type="hidden" name="active" value={p.active ? 'false' : 'true'} />
                     <button type="submit" className="text-xs text-ink-500 hover:text-ink-900">
-                      {p.active ? 'Deactivate' : 'Reactivate'}
+                      Resend
                     </button>
                   </form>
+                ) : (
+                  owner &&
+                  p.id !== s.uid && (
+                    <form action={setStaffActive}>
+                      <input type="hidden" name="staffId" value={p.id} />
+                      <input type="hidden" name="active" value={p.active ? 'false' : 'true'} />
+                      <button type="submit" className="text-xs text-ink-500 hover:text-ink-900">
+                        {p.active ? 'Deactivate' : 'Reactivate'}
+                      </button>
+                    </form>
+                  )
                 )}
               </li>
             ))}
@@ -437,17 +467,42 @@ export default async function Settings({
             </form>
           )}
         </section>
-        <section className="card p-6">
+        <section id="account" className="card scroll-mt-6 p-6">
           <div className="flex items-center gap-3">
             <div className="grid h-10 w-10 place-items-center rounded-xl bg-ink-50">
               <KeyRound size={18} />
             </div>
             <div className="flex-1">
-              <div className="font-medium">Your password</div>
-              <div className="text-xs text-ink-500">Change the one-time password you were given</div>
+              <div className="font-medium">Your account</div>
+              <div className="text-xs text-ink-500">{me?.email}</div>
             </div>
           </div>
-          <form action={changePassword} className="mt-6 space-y-3">
+          <form action={savePhone} className="mt-6 space-y-3">
+            <div className="label">Mobile for sign-in codes</div>
+            <input
+              name="phone"
+              type="tel"
+              inputMode="tel"
+              required
+              defaultValue={me?.phone ? `0${me.phone.slice(3)}` : ''}
+              placeholder="0712 345 678"
+              autoComplete="tel"
+              className="input"
+            />
+            <input
+              name="current"
+              type="password"
+              required
+              placeholder="Your password, to confirm"
+              autoComplete="current-password"
+              className="input"
+            />
+            <SubmitButton pendingText="Saving…" className="btn-ghost w-full">
+              Save mobile
+            </SubmitButton>
+          </form>
+          <form action={changePassword} className="mt-6 space-y-3 border-t border-ink-100 pt-6">
+            <div className="label">Change password</div>
             <input
               name="current"
               type="password"
@@ -468,6 +523,13 @@ export default async function Settings({
             <SubmitButton pendingText="Saving…" className="btn-ghost w-full">
               Change password
             </SubmitButton>
+          </form>
+          <form action={signOut} className="mt-6 border-t border-ink-100 pt-6">
+            <input type="hidden" name="everywhere" value="on" />
+            <button type="submit" className="text-sm font-medium text-rose-700 hover:text-rose-800">
+              Sign out on every device
+            </button>
+            <p className="mt-1 text-xs text-ink-500">Use this if you signed in on a shared or lost device.</p>
           </form>
         </section>
       </div>

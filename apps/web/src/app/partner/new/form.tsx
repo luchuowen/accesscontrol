@@ -15,26 +15,29 @@ export function NewClubForm({ consoleUrl }: { consoleUrl: string }) {
           <CheckCircle2 size={18} />
           <span className="font-medium">{d.name} is ready</span>
         </div>
-        <p className="mt-2 text-sm text-ink-500">
-          Give these to the club now. The password is shown only once; the owner should change it after signing in.
+        <div
+          className={`mt-4 rounded-xl p-3 text-sm ring-1 ${d.emailed ? 'bg-emerald-50/60 text-emerald-900 ring-emerald-100' : 'bg-amber-50 text-amber-900 ring-amber-200'}`}
+        >
+          {d.emailed ? (
+            <>
+              Invitation sent to <b>{d.ownerName}</b> at {d.ownerEmail}. The link works for 7 days; they choose their
+              own password.
+            </>
+          ) : (
+            <>
+              The club is created, but the invitation email to {d.ownerEmail} did not go out. Resend it from the club’s
+              Team settings once email is working.
+            </>
+          )}
+        </div>
+        <p className="mt-4 text-sm text-ink-500">
+          For the installer: keep these for the door PC and the member portal.
         </p>
         <div className="mt-6 space-y-4">
           <div>
             <span className="label">Console</span>
             <div className="mt-1.5">
               <CopyField value={consoleUrl || '/'} label="Console address" />
-            </div>
-          </div>
-          <div>
-            <span className="label">Owner email</span>
-            <div className="mt-1.5">
-              <CopyField value={d.ownerEmail} label="Owner email" />
-            </div>
-          </div>
-          <div>
-            <span className="label">One-time password</span>
-            <div className="mt-1.5">
-              <CopyField value={d.tempPassword} label="One-time password" />
             </div>
           </div>
           <div>
@@ -84,6 +87,13 @@ export function NewClubForm({ consoleUrl }: { consoleUrl: string }) {
         </label>
       </div>
       <label className="block">
+        <span className="label">Their mobile (optional)</span>
+        <input name="ownerPhone" type="tel" inputMode="tel" placeholder="0712 345 678" className="input mt-1.5" />
+        <span className="mt-1 block text-xs text-ink-500">
+          We text them a heads-up so the invitation email isn’t missed. Their sign-in codes go here.
+        </span>
+      </label>
+      <label className="block">
         <span className="label">Time zone</span>
         <select name="timezone" defaultValue="Africa/Nairobi" className="input mt-1.5">
           <option value="Africa/Nairobi">East Africa (Nairobi)</option>
@@ -93,7 +103,7 @@ export function NewClubForm({ consoleUrl }: { consoleUrl: string }) {
         </select>
       </label>
       <SubmitButton pendingText="Creating the club…" className="btn-primary w-full">
-        Create club
+        Create club and invite the owner
       </SubmitButton>
     </form>
   );

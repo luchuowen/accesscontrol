@@ -1,47 +1,66 @@
-import { LangoMark } from '@/components/logo';
+import Link from 'next/link';
+import { redirect } from 'next/navigation';
+import { AuthHeading, AuthNotice, AuthShell } from '@/components/auth-shell';
+import { PasswordField } from '@/components/password-field';
 import { SubmitButton } from '@/components/submit-button';
+import { getSession } from '@/lib/session';
 import { login } from './actions';
 
-export default async function Login({ searchParams }: { searchParams: Promise<{ e?: string }> }) {
-  const { e } = await searchParams;
+export const metadata = { title: 'Sign in · Lango' };
+
+const ERRORS: Record<string, string> = {
+  '1': 'That email and password don’t match an active account.',
+  '2': 'Too many attempts. Wait 15 minutes and try again, or reset your password.',
+};
+const NOTES: Record<string, [tone: 'ok' | 'info', text: string]> = {
+  'signed-out-ok': ['ok', 'You’re signed out.'],
+  'signed-out': ['info', 'Your session ended. Sign in again to continue.'],
+  expired: ['info', 'That sign-in took too long. Start again.'],
+  reset: ['ok', 'Your password has been changed. Sign in with the new one.'],
+};
+
+export default async function Login({ searchParams }: { searchParams: Promise<{ e?: string; m?: string }> }) {
+  const { e, m } = await searchParams;
+  const s = await getSession();
+  if (s) redirect(s.partner && !s.tid ? '/partner' : '/');
+  const note = m ? NOTES[m] : undefined;
   return (
-    <div className="grid min-h-screen lg:grid-cols-2">
-      <div className="relative hidden overflow-hidden bg-ink-950 p-12 text-white lg:flex lg:flex-col">
-        <div className="flex items-center gap-2.5">
-          <LangoMark size={36} />
-          <span className="text-lg font-semibold tracking-tight">Lango</span>
-        </div>
-        <div className="mt-auto max-w-md">
-          <h2 className="text-4xl font-semibold leading-tight tracking-tight">Paid members walk straight in.</h2>
-          <p className="mt-4 text-ink-300">
-            Payments, memberships and access control in one place. The doors know who has paid — even when the internet
-            doesn&apos;t.
-          </p>
-        </div>
-        <div className="pointer-events-none absolute -right-24 -top-24 h-96 w-96 rounded-full bg-brand-500/20 blur-3xl" />
-      </div>
-      <div className="flex items-center justify-center p-6">
-        <form action={login} className="w-full max-w-sm">
-          <h1 className="text-2xl font-semibold tracking-tight">Sign in</h1>
-          <p className="mt-1 text-sm text-ink-500">Use the email your club administrator registered.</p>
-          {e && (
-            <div className="mt-6 rounded-xl bg-rose-50 p-3 text-sm text-rose-700 ring-1 ring-rose-200">
-              {e === '2' ? 'Too many attempts. Wait a few minutes and try again.' : 'Email or password is incorrect.'}
-            </div>
-          )}
-          <label className="mt-6 block">
-            <span className="label">Email</span>
-            <input name="email" type="email" required autoComplete="email" className="input mt-1.5" />
+    <AuthShell>
+      <AuthHeading title="Welcome back" sub="Sign in to your Lango account" />
+      {e && ERRORS[e] && <AuthNotice tone="error">{ERRORS[e]}</AuthNotice>}
+      {!e && note && <AuthNotice tone={note[0]}>{note[1]}</AuthNotice>}
+      <form action={login} className="mt-8 grid gap-[18px]">
+        <div>
+          <label htmlFor="email" className="auth-label">
+            Work email
           </label>
-          <label className="mt-4 block">
-            <span className="label">Password</span>
-            <input name="password" type="password" required autoComplete="current-password" className="input mt-1.5" />
-          </label>
-          <SubmitButton pendingText="Signing in…" className="btn-primary mt-6 w-full">
-            Sign in
-          </SubmitButton>
-        </form>
-      </div>
-    </div>
+          <input
+            id="email"
+            name="email"
+            type="email"
+            required
+            autoComplete="username"
+            inputMode="email"
+            placeholder="you@yourclub.co.ke"
+            className="auth-input"
+          />
+        </div>
+        <div>
+          <div className="auth-label">
+            <label htmlFor="password">Password</label>
+            <Link href="/forgot" className="auth-link">
+              Forgot password?
+            </Link>
+          </div>
+          <PasswordField name="password" autoComplete="current-password" />
+        </div>
+        <SubmitButton pendingText="Signing in…" className="auth-btn mt-1">
+          Sign in
+        </SubmitButton>
+        <p className="text-center text-[12.5px] text-slate-500">
+          New to Lango? Your club or partner sends you an invitation.
+        </p>
+      </form>
+    </AuthShell>
   );
 }
