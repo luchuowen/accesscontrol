@@ -1,6 +1,14 @@
 'use server';
 import { randomBytes } from 'node:crypto';
-import { encrypt, hashPassword, newPairCode, SourceCodeSms, signSession } from '@lango/server';
+import {
+  encrypt,
+  hashPassword,
+  newPairCode,
+  SourceCodeSms,
+  signSession,
+  TaifaAuthError,
+  TaifaPay,
+} from '@lango/server';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { requirePartner, sessionCookie, sessionSecret } from '@/lib/session';
@@ -73,14 +81,25 @@ export async function createClub(_prev: CreateClubState, form: FormData): Promis
   }
 }
 
+const platformOnly = async () => {
+  const s = await requirePartner();
+  const [p] = await db()<{ ok: boolean }[]>`select app_is_platform(${s.uid}) as ok`;
+  if (!p?.ok) redirect('/partner');
+  return s;
+};
+const back = (k: string): never => redirect(`/partner/settings?m=${k}`);
+
 /** Platform SMS account (Source Code): key checked against Source Code before it is stored, encrypted. */
 export async function savePlatformSms(form: FormData) {
-  const s = await requirePartner();
+  const s = await platformOnly();
   const apiKey = String(form.get('apiKey') ?? '').trim();
   const sender =
     String(form.get('sender') ?? 'NAVAC')
       .trim()
       .slice(0, 11) || 'NAVAC';
+  const costKes = Number(form.get('costKes') ?? 0.5);
+  const priceKes = Number(form.get('priceKes') ?? 1);
+  if (!(costKes > 0) || !(priceKes > 0)) back('sms-price');
   const [cur] = await db()<{ data: { apiKey?: string } | null }[]>`select app_platform_get('sms') as data`;
   let stored = cur?.data?.apiKey ?? null;
   if (apiKey) {
@@ -88,16 +107,90 @@ export async function savePlatformSms(form: FormData) {
     try {
       ok = (await new SourceCodeSms(apiKey, sender).profile()).ok;
     } catch {
-      redirect('/partner/settings?sms=unreachable');
+      back('sms-unreachable');
     }
-    if (!ok) redirect('/partner/settings?sms=rejected');
+    if (!ok) back('sms-rejected');
     stored = encrypt(apiKey);
   }
-  if (!stored) redirect('/partner/settings?sms=missing');
+  if (!stored) back('sms-missing');
+  await db()`select app_platform_set(${s.uid}, 'sms', ${db().json({ apiKey: stored, sender, costKes, priceKes } as never)})`;
+  back('sms-ok');
+}
+
+/** NAVAC's own TaifaPay merchant keys: SMS credit purchases are paid here. */
+export async function savePlatformTaifa(form: FormData) {
+  const s = await platformOnly();
+  const env = form.get('env') === 'sandbox' ? 'sandbox' : 'live';
+  const clientId = String(form.get('clientId') ?? '').trim();
+  const clientSecret = String(form.get('clientSecret') ?? '').trim();
+  if (!clientId || !clientSecret) back('taifa-missing');
   try {
-    await db()`select app_platform_set(${s.uid}, 'sms', ${db().json({ apiKey: stored, sender } as never)})`;
-  } catch {
-    redirect('/partner/settings?sms=forbidden');
+    await new TaifaPay({ env, clientId, clientSecret }).verify();
+  } catch (e) {
+    back(e instanceof TaifaAuthError ? 'taifa-rejected' : 'taifa-unreachable');
   }
-  redirect('/partner/settings?sms=ok');
+  await db()`select app_platform_set(${s.uid}, 'taifapay', ${db().json({ env, clientId, clientSecret: encrypt(clientSecret) } as never)})`;
+  back('taifa-ok');
+}
+
+/** A club's sender ID and SMS price (blank = platform defaults). */
+export async function saveClubSms(form: FormData) {
+  const s = await platformOnly();
+  const tenantId = String(form.get('tenantId') ?? '');
+  const sender = String(form.get('sender') ?? '')
+    .trim()
+    .slice(0, 11);
+  const priceRaw = String(form.get('priceKes') ?? '').trim();
+  const price = priceRaw ? Number(priceRaw) : null;
+  if (price !== null && !(price > 0)) back('club-price');
+  await db()`select app_platform_set_club_sms(${s.uid}, ${tenantId}, ${sender}, ${price})`;
+  back('club-ok');
+}
+
+/** Free or corrective SMS units for a club, always with a note (shows in the ledger). */
+export async function grantSms(form: FormData) {
+  const s = await platformOnly();
+  const tenantId = String(form.get('tenantId') ?? '');
+  const units = Number(form.get('units') ?? 0);
+  const note = String(form.get('note') ?? '')
+    .trim()
+    .slice(0, 200);
+  if (!Number.isInteger(units) || units === 0 || Math.abs(units) > 1_000_000 || note.length < 3) back('grant-invalid');
+  await db()`select app_platform_grant_sms(${s.uid}, ${tenantId}, ${units}, ${note})`;
+  back('grant-ok');
+}
+
+export async function setPartnerActive(form: FormData) {
+  const s = await platformOnly();
+  const id = String(form.get('staffId') ?? '');
+  const active = form.get('active') === 'true';
+  if (id === s.uid) back('self');
+  await db()`select app_platform_set_partner_active(${s.uid}, ${id}, ${active})`;
+  back(active ? 'partner-on' : 'partner-off');
+}
+
+export interface AddPartnerState {
+  error?: string;
+  done?: { name: string; email: string; tempPassword: string };
+}
+
+/** A login for an installer company (sees only its own clubs) or another NAVAC admin. */
+export async function addPartner(_prev: AddPartnerState, form: FormData): Promise<AddPartnerState> {
+  const s = await platformOnly();
+  const name = String(form.get('name') ?? '')
+    .trim()
+    .slice(0, 80);
+  const email = String(form.get('email') ?? '')
+    .trim()
+    .toLowerCase();
+  const company = String(form.get('company') ?? '')
+    .trim()
+    .slice(0, 80);
+  if (!name || !company) return { error: 'Enter the person’s name and their company.' };
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { error: 'Enter a valid email.' };
+  const [taken] = await db()<{ id: string }[]>`select id from app_staff_login(${email})`;
+  if (taken) return { error: 'That email already has a Lango account.' };
+  const pw = tempPassword();
+  await db()`select app_platform_add_partner(${s.uid}, ${company}, ${name}, ${email}, ${await hashPassword(pw)})`;
+  return { done: { name, email, tempPassword: pw } };
 }

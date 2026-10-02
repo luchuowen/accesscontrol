@@ -9,7 +9,8 @@ import { rebuildAccessState } from './access.js';
 import { handleAck, handleDrift, handleEvents, handleInventory, handlePair, handleSync } from './bridge-api.js';
 import { importMembers, onboardingChecklist, planImport } from './onboarding.js';
 import { assignPayment, recordPayment } from './payments.js';
-import { dispatchSms, msisdn, queueReminders, SourceCodeSms } from './sms.js';
+import { dispatchSms, msisdn, queueReminders, SourceCodeSms, smsUnits } from './sms.js';
+import { reconcileTopups, startTopup } from './sms-topup.js';
 import { handleTaifaWebhook, reconcileTaifaPay, TaifaAuthError, TaifaPay } from './taifapay.js';
 
 /**
@@ -525,12 +526,12 @@ describe('walking skeleton: pay → door', () => {
       '254712345678',
       null,
     ]);
-    const sent: { mobile: string; message: string }[] = [];
+    const sent: { mobile: string; message: string; sender?: string }[] = [];
     const fakeFetch = (async (_u: string, i: RequestInit) => {
       const b = JSON.parse(String(i.body));
       if (b.mobile === '254700000666')
         return new Response(JSON.stringify({ status_code: '1003', status_desc: 'Invalid mobile number' }));
-      sent.push({ mobile: b.mobile, message: b.message });
+      sent.push({ mobile: b.mobile, message: b.message, sender: b.shortcode });
       return new Response(JSON.stringify({ status_code: '1000', status_desc: 'Success', message_id: sent.length }));
     }) as typeof fetch;
     const client = new SourceCodeSms('key', 'NAVAC', fakeFetch);
@@ -556,6 +557,15 @@ describe('walking skeleton: pay → door', () => {
       accountRef: '21001',
       paidAt: new Date(),
     });
+    // SMS on but no credit yet: messages wait instead of going out.
+    expect(await dispatchSms(app, client, () => {})).toBe(0);
+    const [waiting] =
+      await owner`select status, error from sms_messages where kind = 'receipt' order by created_at desc limit 1`;
+    expect(waiting).toEqual({ status: 'queued', error: 'waiting for SMS credit' });
+    const [pa] =
+      await owner`insert into staff_users (email, name, role, password_hash) values ('sms-admin@navac.test', 'SMS Admin', 'partner_admin', 'x') returning id`;
+    await app`select app_platform_grant_sms(${pa?.id}, ${tenantId}, 3, 'test credit')`;
+    await app`select app_platform_set_club_sms(${pa?.id}, ${tenantId}, 'DEMOCLUB', 1.5)`;
     const [m] = await owner`insert into members (tenant_id, member_no, first_name, last_name, phone) values
       (${tenantId}, 21077, 'Bad', 'Number', '0700000666') returning id`;
     await owner`insert into entitlements (tenant_id, member_id, zone_key, starts_at, ends_at, source)
@@ -563,11 +573,54 @@ describe('walking skeleton: pay → door', () => {
     expect(await queueReminders(app, 'https://lango.test')).toBeGreaterThanOrEqual(1);
     expect(await queueReminders(app, 'https://lango.test')).toBe(0); // never twice for the same end date
     expect(await dispatchSms(app, client, () => {})).toBeGreaterThanOrEqual(1);
-    expect(sent.some((x) => x.mobile === '254700000001' && /received for Sauna/.test(x.message))).toBe(true);
+    expect(
+      sent.some((x) => x.mobile === '254700000001' && /received for Sauna/.test(x.message) && x.sender === 'DEMOCLUB'),
+    ).toBe(true);
+    const [bal] = await owner`select sum(units)::int as n from sms_ledger where tenant_id = ${tenantId}`;
+    expect(bal?.n).toBeLessThan(3); // each SMS sent was paid from the club's credit
     const [bad] = await owner`select status, error from sms_messages where phone = '0700000666'`;
     expect(bad).toMatchObject({ status: 'failed' }); // permanent error: not retried
     const n = sent.length;
     expect(await dispatchSms(app, client, () => {})).toBe(0);
     expect(sent).toHaveLength(n);
+  });
+  it('SMS credit: units are counted per part; an M-Pesa top-up to NAVAC adds credit once', async () => {
+    expect([
+      smsUnits('a'.repeat(160)),
+      smsUnits('a'.repeat(161)),
+      smsUnits('é'.repeat(70)),
+      smsUnits('😀'.repeat(36)),
+    ]).toEqual([1, 2, 1, 2]);
+    let status = 'PENDING';
+    const fakeFetch = (async (u: string) =>
+      new Response(
+        JSON.stringify(
+          String(u).endsWith('/auth/token')
+            ? { access_token: 't', expires_in: '3599' }
+            : { transaction: { id: 'TP-TOPUP-1', status, amount: 1500 } },
+        ),
+      )) as typeof fetch;
+    const client = new TaifaPay({ env: 'live', clientId: 'navac', clientSecret: 's' }, fakeFetch);
+    const [t] =
+      await owner`insert into sms_topups (tenant_id, amount_kes, price_kes, units, phone, trigger, created_by, provider_ref, created_at)
+      values (${tenantId}, 1500, 1.5, 1000, '254726049097', 'manual', 'test', 'TP-TOPUP-1', now() - interval '2 minutes') returning id`;
+    const total = async () =>
+      Number(
+        (await owner`select coalesce(sum(units), 0)::int as n from sms_ledger where tenant_id = ${tenantId}`)[0]?.n,
+      );
+    const before = await total();
+    expect(await reconcileTopups(app, () => {}, client)).toBe(0); // still pending at TaifaPay
+    status = 'COMPLETED';
+    expect(await reconcileTopups(app, () => {}, client)).toBe(1);
+    expect(await reconcileTopups(app, () => {}, client)).toBe(0); // credited once
+    expect((await total()) - before).toBe(1000);
+    const [row] = await owner`select status from sms_topups where id = ${t?.id}`;
+    expect(row).toEqual({ status: 'completed' });
+    expect(
+      await startTopup(app, tenantId, { amountKes: 1000, phone: '0726049097', trigger: 'manual', actor: 'test' }),
+    ).toEqual({
+      ok: false,
+      reason: 'no-platform-taifapay',
+    });
   });
 });

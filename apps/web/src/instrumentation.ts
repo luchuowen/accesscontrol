@@ -2,11 +2,14 @@
  * Background jobs for the web process:
  * - TaifaPay reconciliation (safety net for missed webhooks), every 60 s
  * - SMS dispatch through the platform's Source Code account, every 20 s
+ * - SMS credit top-ups (NAVAC TaifaPay), every 60 s
  * - expiry reminders, every 15 min
  */
 export async function register() {
   if (process.env.NEXT_RUNTIME !== 'nodejs' || !process.env.DATABASE_URL || process.env.LANGO_DISABLE_JOBS) return;
-  const { dispatchSms, platformSms, queueReminders, reconcileTaifaPay } = await import('@lango/server');
+  const { dispatchSms, platformSms, queueReminders, reconcileTaifaPay, reconcileTopups, startTopup } = await import(
+    '@lango/server'
+  );
   const { db } = await import('./server/db');
   const portal = (process.env.PUBLIC_URL ?? '').replace(/\/$/, '');
   const every = (ms: number, first: number, name: string, job: () => Promise<number>, done: (n: number) => string) => {
@@ -39,7 +42,22 @@ export async function register() {
     'sms dispatch',
     async () => {
       const client = await platformSms(db());
-      return client ? dispatchSms(db(), client, (m) => console.warn(m)) : 0;
+      if (!client) return 0;
+      return dispatchSms(
+        db(),
+        client,
+        (m) => console.warn(m),
+        async (tenantId, _balance, n) => {
+          // The club chose automatic top-up: prompt their phone for NAVAC SMS credit (one prompt per hour at most).
+          if (n.autoTopup && n.alertPhone)
+            await startTopup(db(), tenantId, {
+              amountKes: n.autoTopupKes ?? 1000,
+              phone: n.alertPhone,
+              trigger: 'auto',
+              actor: 'system',
+            });
+        },
+      );
     },
     (n) => `sms: sent ${n}`,
   );

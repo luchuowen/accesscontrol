@@ -21,7 +21,7 @@ export default async function PartnerLayout({ children }: { children: React.Reac
           <div className="ml-auto flex items-center gap-5 text-sm text-ink-500">
             {plat?.ok && (
               <Link href="/partner/settings" className="hover:text-ink-900">
-                Platform settings
+                SaaS console
               </Link>
             )}
             <span>{s.name}</span>

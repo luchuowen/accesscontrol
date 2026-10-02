@@ -7,6 +7,7 @@ import {
   msisdn,
   platformSms,
   rateLimit,
+  startTopup,
   TaifaAuthError,
   TaifaPay,
   verifyPassword,
@@ -133,7 +134,12 @@ export async function saveNotifications(form: FormData) {
     reminders: form.get('reminders') === 'on',
     reminderDays: Math.min(14, Math.max(1, Number(form.get('reminderDays') ?? 3) || 3)),
     welcome: form.get('welcome') === 'on',
+    lowBalance: Math.min(100_000, Math.max(0, Number(form.get('lowBalance') ?? 100) || 0)),
+    alertPhone: msisdn(String(form.get('alertPhone') ?? '')) ?? undefined,
+    autoTopup: form.get('autoTopup') === 'on',
+    autoTopupKes: Math.min(150_000, Math.max(100, Number(form.get('autoTopupKes') ?? 1000) || 1000)),
   };
+  if (notifications.autoTopup && !notifications.alertPhone) redirect('/settings?sms=alert-phone');
   await withTenant(db(), s.tid, async (tx) => {
     await tx`insert into tenant_settings (tenant_id, data) values (${s.tid}, ${tx.json({ notifications } as never)})
              on conflict (tenant_id) do update set data = tenant_settings.data || excluded.data`;
@@ -167,4 +173,19 @@ export async function sendTestSms(form: FormData) {
   });
   revalidatePath('/settings');
   redirect(`/settings?sms=${r.ok ? 'test-sent' : 'test-failed'}`);
+}
+
+/** Buy SMS credit: M-Pesa prompt to the given phone, paid to NAVAC; credit lands when TaifaPay confirms. */
+export async function buySms(form: FormData) {
+  const s = await requireSession();
+  if (!['owner', 'manager', 'accountant'].includes(s.role)) redirect('/settings?sms=forbidden');
+  const amountKes = Number(String(form.get('amountKes') ?? '').replace(/[,\s]/g, ''));
+  const r = await startTopup(db(), s.tid, {
+    amountKes,
+    phone: String(form.get('phone') ?? ''),
+    trigger: 'manual',
+    actor: s.uid,
+  });
+  revalidatePath('/settings');
+  redirect(`/settings?sms=${r.ok ? 'topup-sent' : `topup-${r.reason}`}`);
 }

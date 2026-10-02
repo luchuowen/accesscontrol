@@ -1,15 +1,23 @@
 import { withTenant } from '@lango/db';
-import { onboardingChecklist } from '@lango/server';
+import { clubSms, onboardingChecklist, platformSmsConfig } from '@lango/server';
 import { CheckCircle2, CreditCard, KeyRound, MessageSquare, Smartphone, UsersRound } from 'lucide-react';
 import { headers } from 'next/headers';
 import { Checklist } from '@/components/checklist';
 import { CopyField } from '@/components/copy-field';
 import { SubmitButton } from '@/components/submit-button';
 import { Badge, PageHeader } from '@/components/ui';
-import { dateTime } from '@/lib/format';
+import { dateTime, kes } from '@/lib/format';
 import { requireSession } from '@/lib/session';
 import { db } from '@/server/db';
-import { changePassword, saveChannels, saveNotifications, saveTaifaPay, sendTestSms, setStaffActive } from './actions';
+import {
+  buySms,
+  changePassword,
+  saveChannels,
+  saveNotifications,
+  saveTaifaPay,
+  sendTestSms,
+  setStaffActive,
+} from './actions';
 import { AddStaffForm } from './team-form';
 
 export default async function Settings({
@@ -33,6 +41,10 @@ export default async function Settings({
               reminders?: boolean;
               reminderDays?: number;
               welcome?: boolean;
+              lowBalance?: number;
+              alertPhone?: string;
+              autoTopup?: boolean;
+              autoTopupKes?: number;
             };
             channels?: {
               paybill?: string | null;
@@ -53,10 +65,15 @@ export default async function Settings({
   const tp = row?.data.taifapay;
   const channels = row?.data.channels ?? {};
   const notify = row?.data.notifications ?? {};
-  const [platform] = await db()<
-    { data: { sender?: string; apiKey?: string } | null }[]
-  >`select app_platform_get('sms') as data`;
-  const smsSender = platform?.data?.apiKey ? (platform.data.sender ?? 'NAVAC') : null;
+  const platformCfg = await platformSmsConfig(db());
+  const wallet = await withTenant(db(), s.tid, (tx) => clubSms(tx, s.tid, platformCfg));
+  const smsSender = platformCfg?.apiKey ? wallet.sender : null;
+  const topups = await withTenant(
+    db(),
+    s.tid,
+    (tx) => tx<{ id: string; created_at: Date; amount_kes: number; units: number; status: string; trigger: string }[]>`
+      select id, created_at, amount_kes, units, status, trigger from sms_topups order by created_at desc limit 5`,
+  );
   const recentSms = await withTenant(
     db(),
     s.tid,
@@ -94,6 +111,12 @@ export default async function Settings({
     'sms:platform': ['amber', 'SMS is not connected on the platform yet. Ask NAVAC to connect it.'],
     'sms:test-sent': ['green', 'Test SMS sent. It should arrive within a minute.'],
     'sms:test-failed': ['red', 'The test SMS was not accepted. See the list below for the reason.'],
+    'sms:alert-phone': ['red', 'Automatic top-up needs an alert phone for the M-Pesa prompt.'],
+    'sms:topup-sent': ['green', 'M-Pesa prompt sent. The SMS credit is added as soon as the payment is confirmed.'],
+    'sms:topup-phone': ['red', 'Enter a Kenyan mobile number for the M-Pesa prompt.'],
+    'sms:topup-amount': ['red', 'Enter an amount of at least KES 10 that buys at least one SMS.'],
+    'sms:topup-no-platform-taifapay': ['amber', 'SMS credit sales are not switched on yet. Ask NAVAC.'],
+    'sms:topup-failed': ['red', 'M-Pesa could not be reached just now. Try again in a minute.'],
   };
   const m = taifa
     ? msg[taifa]
@@ -326,6 +349,66 @@ export default async function Settings({
               <Badge>off</Badge>
             )}
           </div>
+          <div className="mt-6 grid grid-cols-3 gap-3">
+            <div className="rounded-xl bg-ink-50/60 p-3">
+              <div className="label">Balance</div>
+              <div
+                className={`mt-1 text-xl font-semibold tabular-nums ${wallet.balance < (notify.lowBalance ?? 100) ? 'text-amber-700' : ''}`}
+              >
+                {wallet.balance.toLocaleString('en-KE')}
+              </div>
+              <div className="text-xs text-ink-500">SMS</div>
+            </div>
+            <div className="rounded-xl bg-ink-50/60 p-3">
+              <div className="label">Price</div>
+              <div className="mt-1 text-xl font-semibold tabular-nums">{kes(wallet.priceKes)}</div>
+              <div className="text-xs text-ink-500">per SMS</div>
+            </div>
+            <div className="rounded-xl bg-ink-50/60 p-3">
+              <div className="label">Sender</div>
+              <div className="mt-1 truncate font-mono text-xl font-semibold">{wallet.sender}</div>
+              <div className="text-xs text-ink-500">shown on phones</div>
+            </div>
+          </div>
+          {['owner', 'manager', 'accountant'].includes(s.role) && (
+            <form action={buySms} className="mt-3 flex flex-wrap gap-2">
+              <input
+                name="amountKes"
+                inputMode="numeric"
+                required
+                defaultValue={1000}
+                className="input w-28 py-2"
+                aria-label="Amount (KES)"
+              />
+              <input
+                name="phone"
+                inputMode="tel"
+                required
+                defaultValue={notify.alertPhone ?? ''}
+                placeholder="M-Pesa phone 07…"
+                className="input flex-1 py-2"
+              />
+              <SubmitButton pendingText="Sending prompt…" className="btn-primary py-2">
+                Buy SMS
+              </SubmitButton>
+            </form>
+          )}
+          {topups.length > 0 && (
+            <ul className="mt-2 text-xs text-ink-500">
+              {topups.map((t) => (
+                <li key={t.id} className="flex gap-3 py-1">
+                  <span className="w-24 shrink-0">{dateTime(t.created_at)}</span>
+                  <span className="flex-1">
+                    {kes(t.amount_kes)} → {t.units.toLocaleString('en-KE')} SMS
+                    {t.trigger === 'auto' ? ' · automatic' : ''}
+                  </span>
+                  <Badge tone={t.status === 'completed' ? 'green' : t.status === 'pending' ? 'blue' : 'gray'}>
+                    {t.status}
+                  </Badge>
+                </li>
+              ))}
+            </ul>
+          )}
           {owner ? (
             <form action={saveNotifications} className="mt-6 space-y-3 text-sm">
               <label className="flex items-center gap-2.5 font-medium">
@@ -373,6 +456,47 @@ export default async function Settings({
                     className="h-4 w-4 accent-ink-900"
                   />
                   Welcome message with the member number (new members only)
+                </label>
+              </div>
+              <div className="space-y-2.5 rounded-xl bg-ink-50/60 p-3">
+                <label className="flex flex-wrap items-center gap-2.5">
+                  Alert me when the balance falls below
+                  <input
+                    name="lowBalance"
+                    type="number"
+                    min={0}
+                    defaultValue={notify.lowBalance ?? 100}
+                    className="input w-24 py-1"
+                  />
+                  SMS
+                </label>
+                <label className="flex flex-wrap items-center gap-2.5">
+                  Alert phone
+                  <input
+                    name="alertPhone"
+                    inputMode="tel"
+                    defaultValue={notify.alertPhone ?? ''}
+                    placeholder="07…"
+                    className="input w-40 py-1"
+                  />
+                </label>
+                <label className="flex flex-wrap items-center gap-2.5">
+                  <input
+                    type="checkbox"
+                    name="autoTopup"
+                    defaultChecked={!!notify.autoTopup}
+                    className="h-4 w-4 accent-ink-900"
+                  />
+                  Top up automatically: M-Pesa prompt for KES
+                  <input
+                    name="autoTopupKes"
+                    type="number"
+                    min={100}
+                    step={100}
+                    defaultValue={notify.autoTopupKes ?? 1000}
+                    className="input w-24 py-1"
+                  />
+                  to the alert phone
                 </label>
               </div>
               <SubmitButton pendingText="Saving…" className="btn-ghost w-full">

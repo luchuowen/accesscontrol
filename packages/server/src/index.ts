@@ -5,4 +5,5 @@ export * from './crypto.js';
 export * from './onboarding.js';
 export * from './payments.js';
 export * from './sms.js';
+export * from './sms-topup.js';
 export * from './taifapay.js';
