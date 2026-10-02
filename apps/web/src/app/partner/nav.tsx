@@ -1,0 +1,69 @@
+'use client';
+import { Building2, LogOut, Settings2, UsersRound } from 'lucide-react';
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
+
+/** NAVAC console sidebar (deep navy, emerald accent: the NAVAC BMS look). */
+export function PartnerNav({ name, platform }: { name: string; platform: boolean }) {
+  const path = usePathname();
+  const items = [
+    { href: '/partner', label: 'Clubs', icon: Building2, on: path === '/partner' || path.startsWith('/partner/new') },
+    ...(platform
+      ? [
+          {
+            href: '/partner/settings',
+            label: 'Platform settings',
+            icon: Settings2,
+            on: path.startsWith('/partner/settings'),
+          },
+          { href: '/partner/partners', label: 'Partners', icon: UsersRound, on: path.startsWith('/partner/partners') },
+        ]
+      : []),
+  ];
+  return (
+    <>
+      <header className="flex items-center gap-4 overflow-x-auto bg-[#0B1629] px-4 py-3 text-[13px] text-[#C9D1DE] lg:hidden print:hidden">
+        <div className="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-[#10B981] text-xs font-bold text-[#0B1629]">
+          L
+        </div>
+        {items.map(({ href, label, on }) => (
+          <Link key={href} href={href} className={`whitespace-nowrap ${on ? 'text-white' : ''}`}>
+            {label}
+          </Link>
+        ))}
+      </header>
+      <aside className="fixed inset-y-0 left-0 hidden w-60 flex-col bg-[#0B1629] px-3.5 py-5 text-[#C9D1DE] lg:flex print:hidden">
+        <div className="flex items-center gap-2.5 px-2 pb-6">
+          <div className="grid h-8 w-8 place-items-center rounded-lg bg-[#10B981] text-sm font-bold text-[#0B1629]">
+            L
+          </div>
+          <div>
+            <div className="text-sm font-semibold text-white">Lango</div>
+            <div className="text-[11px] text-[#7B8799]">{platform ? 'NAVAC SaaS console' : 'Partner console'}</div>
+          </div>
+        </div>
+        <div className="px-2.5 pb-1.5 text-[10px] font-medium uppercase tracking-[0.08em] text-[#5D6A7E]">Platform</div>
+        <nav className="flex flex-col gap-0.5">
+          {items.map(({ href, label, icon: Icon, on }) => (
+            <Link
+              key={href}
+              href={href}
+              className={`flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] transition ${on ? 'bg-white/[0.08] text-white' : 'hover:bg-white/[0.05] hover:text-white'}`}
+            >
+              <Icon size={16} className={on ? 'text-[#10B981]' : 'text-[#5D6A7E]'} />
+              {label}
+            </Link>
+          ))}
+        </nav>
+        <div className="mt-auto rounded-xl bg-white/[0.05] p-3">
+          <div className="truncate text-[13px] text-white">{name}</div>
+          <form action="/logout" method="post" className="mt-2">
+            <button type="submit" className="flex items-center gap-1.5 text-xs text-[#7B8799] hover:text-white">
+              <LogOut size={13} /> Sign out
+            </button>
+          </form>
+        </div>
+      </aside>
+    </>
+  );
+}

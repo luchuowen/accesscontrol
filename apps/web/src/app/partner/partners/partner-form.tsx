@@ -7,7 +7,7 @@ import { type AddPartnerState, addPartner } from '../actions';
 export function AddPartnerForm() {
   const [state, action] = useActionState<AddPartnerState, FormData>(addPartner, {});
   return (
-    <form action={action} className="mt-4 space-y-3 border-t border-ink-100 pt-4">
+    <form action={action} className="mt-4 space-y-3">
       {state.error && (
         <div className="rounded-xl bg-rose-50 p-3 text-sm text-rose-700 ring-1 ring-rose-200">{state.error}</div>
       )}
@@ -19,7 +19,7 @@ export function AddPartnerForm() {
           <CopyField value={state.done.tempPassword} label="One-time password" />
         </div>
       )}
-      <div className="grid gap-3 sm:grid-cols-3">
+      <div className="grid gap-3">
         <input name="name" required placeholder="Full name" className="input" />
         <input name="email" type="email" required placeholder="Email" className="input" />
         <input name="company" required placeholder="Company, e.g. Trisol" className="input" />

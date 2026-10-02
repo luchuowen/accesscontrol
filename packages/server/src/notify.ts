@@ -298,7 +298,7 @@ export async function platformAlerts(sql: Sql, client?: SourceCodeSms | null, at
   if (ops.bridgeDigest !== today) {
     const down = (
       await sql<{ club: string; site: string; last_seen_at: Date }[]>`select * from app_bridge_health()`
-    ).filter((b) => b.last_seen_at.getTime() < at.toMillis() - 3600_000);
+    ).filter((b) => b.last_seen_at.getTime() < Date.now() - 3600_000);
     if (down.length) {
       const list = down
         .slice(0, 6)

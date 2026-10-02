@@ -1,21 +1,19 @@
 import { decrypt, platformBilling, platformSmsConfig, SourceCodeSms } from '@lango/server';
-import { ArrowLeft, CreditCard, MessageSquare, UsersRound } from 'lucide-react';
-import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { SubmitButton } from '@/components/submit-button';
-import { Badge, PageHeader, Stat } from '@/components/ui';
+import { Badge } from '@/components/ui';
 import { dateTime, kes } from '@/lib/format';
 import { requirePartner } from '@/lib/session';
 import { db } from '@/server/db';
 import {
   grantSms,
   saveClubSms,
+  savePlatformAlerts,
   savePlatformBilling,
   savePlatformSms,
   savePlatformTaifa,
-  setPartnerActive,
 } from '../actions';
-import { AddPartnerForm } from './partner-form';
+import { type Section, SectionNav } from './section-nav';
 
 const MSG: Record<string, [string, string]> = {
   'sms-ok': ['green', 'SMS account saved.'],
@@ -23,22 +21,55 @@ const MSG: Record<string, [string, string]> = {
   'sms-unreachable': ['amber', 'Source Code did not answer in time; nothing was saved.'],
   'sms-missing': ['amber', 'Paste the API key from Source Code › Developers/API › Show API Key.'],
   'sms-price': ['red', 'Cost and price must be positive amounts.'],
-  'billing-ok': ['green', 'Billing details saved. New and existing SMS invoices show them.'],
-  'billing-name': ['red', 'Enter the business name.'],
-  'taifa-ok': ['green', 'NAVAC TaifaPay account connected. Clubs can now buy SMS credit by M-Pesa.'],
+  'taifa-ok': ['green', 'NAVAC TaifaPay connected. Clubs can now buy SMS credit by M-Pesa.'],
   'taifa-rejected': ['red', 'TaifaPay rejected those keys.'],
   'taifa-unreachable': ['amber', 'TaifaPay did not answer in time; nothing was saved.'],
   'taifa-missing': ['amber', 'Enter both the client ID and the client secret.'],
+  'billing-ok': ['green', 'Billing details saved. Every SMS invoice and receipt shows them.'],
+  'billing-name': ['red', 'Enter the business name.'],
+  'alerts-ok': ['green', 'Alerts saved.'],
+  'alerts-phone': ['red', 'Enter a Kenyan mobile number, e.g. 0712 345 678.'],
+  'alerts-sms': ['amber', 'Connect the SMS account first.'],
   'club-ok': ['green', 'Club SMS settings saved. New messages use them straight away.'],
   'club-price': ['red', 'Price per SMS must be a positive amount, or blank for the default.'],
   'grant-ok': ['green', 'SMS units added to the club’s balance.'],
   'grant-invalid': ['red', 'Enter a whole number of units and a note.'],
-  'partner-on': ['green', 'Login switched on.'],
-  'partner-off': ['green', 'Login switched off.'],
-  self: ['amber', 'You can’t switch off your own login.'],
+};
+const SECTION_OF: Record<string, string> = {
+  sms: 'sms',
+  taifa: 'payments',
+  billing: 'billing',
+  alerts: 'alerts',
+  club: 'pricing',
+  grant: 'pricing',
 };
 
-export default async function SaasConsole({ searchParams }: { searchParams: Promise<{ m?: string }> }) {
+const label = 'mb-1.5 block text-[11px] font-medium text-ink-500';
+const input = 'input py-2';
+
+function Head({ title, desc, badge }: { title: string; desc: React.ReactNode; badge?: React.ReactNode }) {
+  return (
+    <div className="flex flex-wrap items-start gap-3">
+      <div className="min-w-0 flex-1">
+        <h2 className="text-[15px] font-semibold">{title}</h2>
+        <p className="mt-0.5 text-[13px] text-ink-500">{desc}</p>
+      </div>
+      {badge}
+    </div>
+  );
+}
+
+function Status({ ok, on, off }: { ok: boolean; on: string; off: string }) {
+  return ok ? (
+    <Badge tone="green">
+      <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> {on}
+    </Badge>
+  ) : (
+    <Badge tone="amber">{off}</Badge>
+  );
+}
+
+export default async function PlatformSettings({ searchParams }: { searchParams: Promise<{ m?: string }> }) {
   const s = await requirePartner();
   const [plat] = await db()<{ ok: boolean }[]>`select app_is_platform(${s.uid}) as ok`;
   if (!plat?.ok) redirect('/partner');
@@ -49,15 +80,16 @@ export default async function SaasConsole({ searchParams }: { searchParams: Prom
   >`select app_platform_get('taifapay') as data`;
   const taifa = taifaRow?.data;
   const billing = await platformBilling(db());
+  const [billingRow] = await db()<{ data: unknown }[]>`select app_platform_get('billing') as data`;
   const [statusRow] = await db()<{ data: { balance?: number; at?: string } | null }[]>`
     select app_platform_get('sms_status') as data`;
   const lastCredit = statusRow?.data;
-  let account: { ok: boolean; balance: string | null } | null = null;
+  let keyOk = false;
   if (cfg?.apiKey) {
     try {
-      account = await new SourceCodeSms(decrypt(cfg.apiKey), cfg.sender).profile();
+      keyOk = (await new SourceCodeSms(decrypt(cfg.apiKey), cfg.sender).profile()).ok;
     } catch {
-      account = { ok: false, balance: null };
+      keyOk = false;
     }
   }
   const clubs = await db()<
@@ -72,316 +104,316 @@ export default async function SaasConsole({ searchParams }: { searchParams: Prom
       sold_kes_30d: string;
     }[]
   >`select * from app_platform_sms_clubs(${s.uid})`;
-  const partners = await db()<{ id: string; name: string; email: string; partner: string; active: boolean }[]>`
-    select * from app_platform_partners(${s.uid})`;
   const cost = cfg?.costKes ?? 0.5;
   const price = cfg?.priceKes ?? 1;
   const sold = clubs.reduce((a, c) => a + Number(c.sold_kes_30d), 0);
   const sent = clubs.reduce((a, c) => a + Number(c.sent_30d), 0);
   const msg = m ? MSG[m] : undefined;
+  const msgAt = m ? SECTION_OF[m.split('-')[0] ?? ''] : undefined;
+  const Notice = ({ id }: { id: string }) =>
+    msg && msgAt === id ? (
+      <div
+        className={`mt-4 rounded-lg p-3 text-[13px] ring-1 ${msg[0] === 'green' ? 'bg-emerald-50 text-emerald-800 ring-emerald-200' : msg[0] === 'red' ? 'bg-rose-50 text-rose-800 ring-rose-200' : 'bg-amber-50 text-amber-900 ring-amber-200'}`}
+      >
+        {msg[1]}
+      </div>
+    ) : null;
+  const sections: Section[] = [
+    { id: 'sms', label: 'SMS account', state: keyOk ? 'done' : 'todo' },
+    { id: 'payments', label: 'SMS payments', state: taifa?.clientId ? 'done' : 'todo' },
+    { id: 'billing', label: 'Billing details', state: billingRow?.data ? 'done' : 'todo' },
+    { id: 'alerts', label: 'Alerts', state: cfg?.alertPhone ? 'done' : 'todo' },
+    { id: 'pricing', label: 'Club pricing', state: 'none' },
+  ];
+  const sec = 'scroll-mt-8 border-t border-[#EEF1F5] p-6 first:border-t-0';
   return (
     <>
-      <Link href="/partner" className="mb-6 inline-flex items-center gap-1.5 text-sm text-ink-500 hover:text-ink-900">
-        <ArrowLeft size={15} /> Clubs
-      </Link>
-      <PageHeader
-        title="SaaS console"
-        subtitle="NAVAC platform settings: SMS resale, NAVAC’s TaifaPay account and partner logins."
-      />
-      {msg && (
-        <div
-          className={`mb-6 rounded-xl p-3 text-sm ring-1 ${msg[0] === 'green' ? 'bg-emerald-50 text-emerald-800 ring-emerald-200' : msg[0] === 'red' ? 'bg-rose-50 text-rose-800 ring-rose-200' : 'bg-amber-50 text-amber-900 ring-amber-200'}`}
-        >
-          {msg[1]}
+      <h1 className="text-[22px] font-semibold tracking-tight">Platform settings</h1>
+      <p className="mt-1 text-[13px] text-ink-500">
+        How Lango sends SMS, takes payment for SMS credit, and bills clubs. Last 30 days: {sent.toLocaleString('en-KE')}{' '}
+        SMS sent · {kes(sold)} sold · {kes(Math.round(sold - sent * cost))} margin.
+      </p>
+      <div className="mt-6 grid gap-7 lg:grid-cols-[200px_1fr]">
+        <div className="hidden lg:block">
+          <SectionNav sections={sections} focus={msgAt} />
         </div>
-      )}
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <Stat
-          label="Source Code balance"
-          value={account?.ok ? Number(account.balance ?? 0).toLocaleString('en-KE') : '—'}
-          hint="SMS units NAVAC holds"
-        />
-        <Stat label="SMS sent · 30 days" value={sent.toLocaleString('en-KE')} hint="all clubs" />
-        <Stat label="SMS sold · 30 days" value={kes(sold)} hint="top-ups paid to NAVAC" />
-        <Stat
-          label="Gross margin · 30 days"
-          value={kes(Math.round(sold - sent * cost))}
-          hint={`at ${kes(cost)} cost per SMS`}
-        />
-      </div>
-
-      <div className="mt-6 grid gap-4 lg:grid-cols-2">
-        <section className="card p-6">
-          <div className="flex items-center gap-3">
-            <div className="grid h-10 w-10 place-items-center rounded-xl bg-ink-50">
-              <MessageSquare size={18} />
-            </div>
-            <div className="flex-1">
-              <div className="font-medium">SMS · Source Code</div>
-              <div className="text-xs text-ink-500">NAVAC’s reseller account; default sender and price</div>
-            </div>
-            {account?.ok ? (
-              <Badge tone="green">connected</Badge>
-            ) : cfg?.apiKey ? (
-              <Badge tone="red">key not accepted</Badge>
-            ) : (
-              <Badge>not connected</Badge>
-            )}
-          </div>
-          <form action={savePlatformSms} className="mt-6 space-y-4">
-            <div className="grid gap-4 sm:grid-cols-3">
-              <label className="block">
-                <span className="label">Default sender</span>
-                <input name="sender" defaultValue={cfg?.sender ?? 'NAVAC'} maxLength={11} className="input mt-1.5" />
-              </label>
-              <label className="block">
-                <span className="label">Our cost / SMS</span>
-                <input name="costKes" defaultValue={cost} inputMode="decimal" className="input mt-1.5" />
-              </label>
-              <label className="block">
-                <span className="label">Default price / SMS</span>
-                <input name="priceKes" defaultValue={price} inputMode="decimal" className="input mt-1.5" />
-              </label>
-            </div>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <label className="block">
-                <span className="label">NAVAC alert phone</span>
-                <input
-                  name="alertPhone"
-                  inputMode="tel"
-                  defaultValue={cfg?.alertPhone ?? ''}
-                  placeholder="07…"
-                  className="input mt-1.5"
-                />
-              </label>
-              <label className="block">
-                <span className="label">Alert when Source Code credit is below</span>
-                <input
-                  name="lowCredit"
-                  inputMode="numeric"
-                  defaultValue={cfg?.lowCredit ?? ''}
-                  placeholder="e.g. 2000"
-                  className="input mt-1.5"
-                />
-              </label>
-            </div>
-            <p className="text-xs text-ink-500">
-              {lastCredit?.balance != null
-                ? `Source Code credit after the last send: ${lastCredit.balance.toLocaleString('en-KE')}${lastCredit.at ? ` (${dateTime(new Date(lastCredit.at))})` : ''}.`
-                : 'Source Code credit shows here after the first message is sent.'}{' '}
-              The alert phone also gets a morning list of club door PCs offline for over an hour. Nothing is sent
-              between 20:00 and 08:00.
-            </p>
-            <label className="block">
-              <span className="label">API key</span>
-              <input
-                name="apiKey"
-                type="password"
-                autoComplete="off"
-                placeholder={
-                  cfg?.apiKey ? '•••••••• · stored, enter to replace' : 'Source Code › Developers/API › Show API Key'
-                }
-                className="input mt-1.5"
-              />
-            </label>
-            <SubmitButton pendingText="Checking with Source Code…" className="btn-primary w-full">
-              Verify &amp; save
-            </SubmitButton>
-          </form>
-        </section>
-
-        <section className="card p-6">
-          <div className="flex items-center gap-3">
-            <div className="grid h-10 w-10 place-items-center rounded-xl bg-ink-50">
-              <CreditCard size={18} />
-            </div>
-            <div className="flex-1">
-              <div className="font-medium">NAVAC TaifaPay account</div>
-              <div className="text-xs text-ink-500">Clubs pay for SMS credit here by M-Pesa</div>
-            </div>
-            {taifa?.clientId ? <Badge tone="green">{taifa.env}</Badge> : <Badge>not connected</Badge>}
-          </div>
-          <form action={savePlatformTaifa} className="mt-6 space-y-4">
-            <label className="block">
-              <span className="label">Environment</span>
-              <select name="env" defaultValue={taifa?.env ?? 'live'} className="input mt-1.5">
-                <option value="live">Live</option>
-                <option value="sandbox">Sandbox (testing)</option>
-              </select>
-            </label>
-            <label className="block">
-              <span className="label">Client ID</span>
-              <input
-                name="clientId"
-                type="password"
-                autoComplete="off"
-                placeholder={
-                  taifa?.clientId
-                    ? `••••${taifa.clientId.slice(-4)} · stored, enter to replace`
-                    : 'TaifaPay › API Integration'
-                }
-                className="input mt-1.5"
-              />
-            </label>
-            <label className="block">
-              <span className="label">Client secret</span>
-              <input name="clientSecret" type="password" autoComplete="new-password" className="input mt-1.5" />
-            </label>
-            <p className="text-xs text-ink-500">
-              Use NAVAC&apos;s existing merchant and leave its webhook as it is: Lango checks its SMS payments with
-              TaifaPay every minute. Each payment shows as “Lango SMS ‹club›” with the invoice number (LSMS-…) as the
-              account reference.
-            </p>
-            <SubmitButton pendingText="Checking the keys with TaifaPay…" className="btn-primary w-full">
-              Verify &amp; save
-            </SubmitButton>
-          </form>
-        </section>
-
-        <section className="card p-6 lg:col-span-2">
-          <div className="font-medium">Billing details on SMS invoices and receipts</div>
-          <div className="text-xs text-ink-500">Clubs see these on every SMS purchase in their console.</div>
-          <form action={savePlatformBilling} className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
-            <label className="block">
-              <span className="label">Business name</span>
-              <input name="name" required defaultValue={billing.name} className="input mt-1.5" />
-            </label>
-            <label className="block">
-              <span className="label">Address</span>
-              <input name="address" defaultValue={billing.address ?? ''} className="input mt-1.5" />
-            </label>
-            <label className="block">
-              <span className="label">KRA PIN</span>
-              <input name="pin" defaultValue={billing.pin ?? ''} className="input mt-1.5" />
-            </label>
-            <label className="block">
-              <span className="label">Email</span>
-              <input name="email" type="email" defaultValue={billing.email ?? ''} className="input mt-1.5" />
-            </label>
-            <label className="block">
-              <span className="label">Phone</span>
-              <input name="phone" inputMode="tel" defaultValue={billing.phone ?? ''} className="input mt-1.5" />
-            </label>
-            <SubmitButton pendingText="Saving…" className="btn-ghost sm:col-span-2 lg:col-span-5">
-              Save billing details
-            </SubmitButton>
-          </form>
-        </section>
-      </div>
-
-      <section className="card mt-6 overflow-hidden">
-        <div className="p-6 pb-2">
-          <div className="font-medium">Clubs · SMS</div>
-          <div className="text-xs text-ink-500">
-            Sender ID and price per club (blank = {cfg?.sender ?? 'NAVAC'} at {kes(price)}). The sender must already be
-            registered under NAVAC on Source Code.
-          </div>
-        </div>
-        <table className="w-full text-sm">
-          <thead className="bg-ink-50/60 text-left">
-            <tr>
-              {['Club', 'Sender & price', 'Balance', 'Sent · 30 d', 'Sold · 30 d', 'Add units'].map((h) => (
-                <th key={h} className="label px-5 py-3 font-medium">
-                  {h}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-ink-100">
-            {clubs.map((c) => (
-              <tr key={c.tenant_id}>
-                <td className="px-5 py-3">
-                  <div className="font-medium">{c.name}</div>
-                  <div className="font-mono text-[11px] text-ink-500">{c.slug}</div>
-                </td>
-                <td className="px-5 py-3">
-                  <form action={saveClubSms} className="flex items-center gap-2">
-                    <input type="hidden" name="tenantId" value={c.tenant_id} />
-                    <input
-                      name="sender"
-                      defaultValue={c.sender ?? ''}
-                      placeholder={cfg?.sender ?? 'NAVAC'}
-                      maxLength={11}
-                      className="input w-28 py-1.5 font-mono text-xs"
-                    />
-                    <input
-                      name="priceKes"
-                      defaultValue={c.price_kes ?? ''}
-                      placeholder={String(price)}
-                      inputMode="decimal"
-                      className="input w-20 py-1.5 text-xs"
-                    />
-                    <SubmitButton pendingText="…" className="btn-ghost px-3 py-1.5 text-xs">
-                      Save
-                    </SubmitButton>
-                  </form>
-                </td>
-                <td className="px-5 py-3 tabular-nums">{Number(c.balance).toLocaleString('en-KE')}</td>
-                <td className="px-5 py-3 tabular-nums text-ink-500">{Number(c.sent_30d).toLocaleString('en-KE')}</td>
-                <td className="px-5 py-3 tabular-nums">{kes(Number(c.sold_kes_30d))}</td>
-                <td className="px-5 py-3">
-                  <form action={grantSms} className="flex items-center gap-2">
-                    <input type="hidden" name="tenantId" value={c.tenant_id} />
-                    <input
-                      name="units"
-                      type="number"
-                      required
-                      placeholder="units"
-                      className="input w-20 py-1.5 text-xs"
-                    />
-                    <input
-                      name="note"
-                      required
-                      placeholder="note, e.g. starter credit"
-                      className="input w-40 py-1.5 text-xs"
-                    />
-                    <SubmitButton pendingText="…" className="btn-ghost px-3 py-1.5 text-xs">
-                      Add
-                    </SubmitButton>
-                  </form>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </section>
-
-      <section className="card mt-6 p-6">
-        <div className="flex items-center gap-3">
-          <div className="grid h-10 w-10 place-items-center rounded-xl bg-ink-50">
-            <UsersRound size={18} />
-          </div>
-          <div className="flex-1">
-            <div className="font-medium">Partner logins</div>
-            <div className="text-xs text-ink-500">
-              NAVAC admins see every club; installer partners see only their own clubs
-            </div>
-          </div>
-        </div>
-        <ul className="mt-4 divide-y divide-ink-100 text-sm">
-          {partners.map((p) => (
-            <li key={p.id} className="flex items-center gap-3 py-2.5">
-              <div className="flex-1">
-                <div className={p.active ? '' : 'text-ink-300'}>{p.name}</div>
-                <div className="text-xs text-ink-500">
-                  {p.email} · {p.partner}
-                </div>
+        <div className="min-w-0 rounded-[10px] border border-[#E4E8EF] bg-white">
+          <section id="sms" className={sec}>
+            <Head
+              title="SMS account"
+              desc="NAVAC’s Source Code reseller account. Clubs send under their own sender ID, registered under NAVAC."
+              badge={<Status ok={keyOk} on="Connected" off={cfg?.apiKey ? 'Key not accepted' : 'Not connected'} />}
+            />
+            <Notice id="sms" />
+            <form action={savePlatformSms} className="mt-5 space-y-4">
+              <div className="grid gap-4 sm:grid-cols-3">
+                <label>
+                  <span className={label}>Default sender</span>
+                  <input name="sender" defaultValue={cfg?.sender ?? 'NAVAC'} maxLength={11} className={input} />
+                </label>
+                <label>
+                  <span className={label}>Our cost per SMS (KES)</span>
+                  <input name="costKes" defaultValue={cost} inputMode="decimal" className={input} />
+                </label>
+                <label>
+                  <span className={label}>Default price per SMS (KES)</span>
+                  <input name="priceKes" defaultValue={price} inputMode="decimal" className={input} />
+                </label>
               </div>
-              <Badge tone={p.active ? 'green' : 'gray'}>{p.active ? 'active' : 'off'}</Badge>
-              {p.id !== s.uid && (
-                <form action={setPartnerActive}>
-                  <input type="hidden" name="staffId" value={p.id} />
-                  <input type="hidden" name="active" value={p.active ? 'false' : 'true'} />
-                  <button type="submit" className="text-xs text-ink-500 hover:text-ink-900">
-                    {p.active ? 'Switch off' : 'Switch on'}
-                  </button>
-                </form>
-              )}
-            </li>
-          ))}
-        </ul>
-        <AddPartnerForm />
-      </section>
+              <label className="block">
+                <span className={label}>API key</span>
+                <input
+                  name="apiKey"
+                  type="password"
+                  autoComplete="off"
+                  placeholder={
+                    cfg?.apiKey
+                      ? '•••••••• stored · paste a new key to replace'
+                      : 'Source Code › Developers/API › Show API Key'
+                  }
+                  className={input}
+                />
+              </label>
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="text-[13px] text-ink-500">
+                  {lastCredit?.balance != null
+                    ? `Source Code credit after the last send: ${lastCredit.balance.toLocaleString('en-KE')}${lastCredit.at ? ` · ${dateTime(new Date(lastCredit.at))}` : ''}`
+                    : 'Source Code credit shows here after the first message is sent.'}
+                </span>
+                <SubmitButton pendingText="Checking with Source Code…" className="btn-primary ml-auto">
+                  Verify &amp; save
+                </SubmitButton>
+              </div>
+            </form>
+          </section>
+
+          <section id="payments" className={sec}>
+            <Head
+              title="SMS payments"
+              desc={
+                <>
+                  Clubs pay for SMS credit into NAVAC’s TaifaPay merchant. Each payment shows as “Lango SMS ‹club›” with
+                  the invoice number (LSMS-…) as the account reference.
+                </>
+              }
+              badge={
+                <Status ok={!!taifa?.clientId} on={taifa?.env === 'sandbox' ? 'Sandbox' : 'Live'} off="Not connected" />
+              }
+            />
+            <Notice id="payments" />
+            <form action={savePlatformTaifa} className="mt-5 space-y-4">
+              <div className="grid gap-4 sm:grid-cols-[140px_1fr_1fr]">
+                <label>
+                  <span className={label}>Environment</span>
+                  <select name="env" defaultValue={taifa?.env ?? 'live'} className={input}>
+                    <option value="live">Live</option>
+                    <option value="sandbox">Sandbox</option>
+                  </select>
+                </label>
+                <label>
+                  <span className={label}>Client ID</span>
+                  <input
+                    name="clientId"
+                    type="password"
+                    autoComplete="off"
+                    placeholder={
+                      taifa?.clientId ? `••••${taifa.clientId.slice(-4)} stored` : 'TaifaPay › Merchant › Integrations'
+                    }
+                    className={input}
+                  />
+                </label>
+                <label>
+                  <span className={label}>Client secret</span>
+                  <input
+                    name="clientSecret"
+                    type="password"
+                    autoComplete="new-password"
+                    placeholder={taifa?.clientId ? 'stored' : ''}
+                    className={input}
+                  />
+                </label>
+              </div>
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="text-[13px] text-ink-500">
+                  Use a credential made for Lango. Leave the merchant’s webhook as it is: Lango checks its payments
+                  every minute.
+                </span>
+                <SubmitButton pendingText="Checking the keys with TaifaPay…" className="btn-primary ml-auto">
+                  Verify &amp; save
+                </SubmitButton>
+              </div>
+            </form>
+          </section>
+
+          <section id="billing" className={sec}>
+            <Head
+              title="Billing details"
+              desc="Printed on every SMS invoice and receipt clubs see in their console."
+              badge={<Status ok={!!billingRow?.data} on="Set" off="Not set" />}
+            />
+            <Notice id="billing" />
+            <form action={savePlatformBilling} className="mt-5 space-y-4">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <label>
+                  <span className={label}>Business name</span>
+                  <input name="name" required defaultValue={billing.name} className={input} />
+                </label>
+                <label>
+                  <span className={label}>KRA PIN</span>
+                  <input name="pin" defaultValue={billing.pin ?? ''} className={input} />
+                </label>
+                <label className="sm:col-span-2">
+                  <span className={label}>Address</span>
+                  <input name="address" defaultValue={billing.address ?? ''} className={input} />
+                </label>
+                <label>
+                  <span className={label}>Email</span>
+                  <input name="email" type="email" defaultValue={billing.email ?? ''} className={input} />
+                </label>
+                <label>
+                  <span className={label}>Phone</span>
+                  <input name="phone" inputMode="tel" defaultValue={billing.phone ?? ''} className={input} />
+                </label>
+              </div>
+              <div className="flex justify-end">
+                <SubmitButton pendingText="Saving…" className="btn-primary">
+                  Save billing details
+                </SubmitButton>
+              </div>
+            </form>
+          </section>
+
+          <section id="alerts" className={sec}>
+            <Head
+              title="Alerts"
+              desc="NAVAC is told when Source Code credit runs low, and each morning which club door PCs have been offline for over an hour. Nothing is sent between 20:00 and 08:00."
+              badge={<Status ok={!!cfg?.alertPhone} on="On" off="No phone" />}
+            />
+            <Notice id="alerts" />
+            <form action={savePlatformAlerts} className="mt-5 space-y-4">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <label>
+                  <span className={label}>NAVAC alert phone</span>
+                  <input
+                    name="alertPhone"
+                    inputMode="tel"
+                    defaultValue={cfg?.alertPhone ? cfg.alertPhone.replace(/^254/, '0') : ''}
+                    placeholder="07…"
+                    className={input}
+                  />
+                </label>
+                <label>
+                  <span className={label}>Warn when Source Code credit is below</span>
+                  <input
+                    name="lowCredit"
+                    inputMode="numeric"
+                    defaultValue={cfg?.lowCredit ?? ''}
+                    placeholder="e.g. 2000"
+                    className={input}
+                  />
+                </label>
+              </div>
+              <div className="flex justify-end">
+                <SubmitButton pendingText="Saving…" className="btn-primary">
+                  Save alerts
+                </SubmitButton>
+              </div>
+            </form>
+          </section>
+
+          <section id="pricing" className={`${sec} px-0 pb-0`}>
+            <div className="px-6">
+              <Head
+                title="Club pricing"
+                desc={
+                  <>
+                    Sender ID and price per club. Blank uses {cfg?.sender ?? 'NAVAC'} at {kes(price)} per SMS. A sender
+                    must already be registered under NAVAC on Source Code.
+                  </>
+                }
+              />
+              <Notice id="pricing" />
+            </div>
+            <div className="mt-5 overflow-x-auto">
+              <table className="w-full text-[13px]">
+                <thead className="border-y border-[#E4E8EF] bg-[#FBFCFD] text-left text-[11px] text-ink-500">
+                  <tr>
+                    <th className="px-6 py-2.5 font-medium">Club</th>
+                    <th className="px-3 py-2.5 font-medium">Sender &amp; price</th>
+                    <th className="px-3 py-2.5 text-right font-medium">Balance</th>
+                    <th className="px-3 py-2.5 text-right font-medium">Sent · 30 d</th>
+                    <th className="px-3 py-2.5 text-right font-medium">Sold · 30 d</th>
+                    <th className="px-6 py-2.5 font-medium">Add free SMS</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#F0F2F6]">
+                  {clubs.map((c) => (
+                    <tr key={c.tenant_id}>
+                      <td className="px-6 py-3">
+                        <div className="font-medium">{c.name}</div>
+                        <div className="font-mono text-[11px] text-ink-500">{c.slug}</div>
+                      </td>
+                      <td className="px-3 py-3">
+                        <form action={saveClubSms} className="flex items-center gap-2">
+                          <input type="hidden" name="tenantId" value={c.tenant_id} />
+                          <input
+                            name="sender"
+                            defaultValue={c.sender ?? ''}
+                            placeholder={cfg?.sender ?? 'NAVAC'}
+                            maxLength={11}
+                            aria-label="Sender ID"
+                            className="input w-28 py-1.5 font-mono text-xs"
+                          />
+                          <input
+                            name="priceKes"
+                            defaultValue={c.price_kes ?? ''}
+                            placeholder={String(price)}
+                            inputMode="decimal"
+                            aria-label="Price per SMS"
+                            className="input w-16 py-1.5 text-xs"
+                          />
+                          <SubmitButton pendingText="…" className="btn-ghost px-3 py-1.5 text-xs">
+                            Save
+                          </SubmitButton>
+                        </form>
+                      </td>
+                      <td className="px-3 py-3 text-right tabular-nums">{Number(c.balance).toLocaleString('en-KE')}</td>
+                      <td className="px-3 py-3 text-right tabular-nums text-ink-500">
+                        {Number(c.sent_30d).toLocaleString('en-KE')}
+                      </td>
+                      <td className="px-3 py-3 text-right tabular-nums">{kes(Number(c.sold_kes_30d))}</td>
+                      <td className="px-6 py-3">
+                        <form action={grantSms} className="flex items-center gap-2">
+                          <input type="hidden" name="tenantId" value={c.tenant_id} />
+                          <input
+                            name="units"
+                            type="number"
+                            required
+                            placeholder="SMS"
+                            aria-label="SMS units"
+                            className="input w-20 py-1.5 text-xs"
+                          />
+                          <input
+                            name="note"
+                            required
+                            placeholder="Reason, e.g. starter credit"
+                            aria-label="Reason"
+                            className="input w-44 py-1.5 text-xs"
+                          />
+                          <SubmitButton pendingText="…" className="btn-ghost px-3 py-1.5 text-xs">
+                            Add
+                          </SubmitButton>
+                        </form>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {clubs.length === 0 && <div className="p-8 text-center text-[13px] text-ink-500">No clubs yet.</div>}
+            </div>
+          </section>
+        </div>
+      </div>
     </>
   );
 }

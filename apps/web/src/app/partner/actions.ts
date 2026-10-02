@@ -5,6 +5,7 @@ import {
   hashPassword,
   msisdn,
   newPairCode,
+  type PlatformSms,
   SourceCodeSms,
   signSession,
   TaifaAuthError,
@@ -88,7 +89,17 @@ const platformOnly = async () => {
   if (!p?.ok) redirect('/partner');
   return s;
 };
-const back = (k: string): never => redirect(`/partner/settings?m=${k}`);
+/** Back to the Platform settings section that was saved, with its notice. */
+const SECTION: Record<string, string> = {
+  sms: 'sms',
+  taifa: 'payments',
+  billing: 'billing',
+  alerts: 'alerts',
+  club: 'pricing',
+  grant: 'pricing',
+};
+const back = (k: string): never => redirect(`/partner/settings?m=${k}#${SECTION[k.split('-')[0] ?? ''] ?? 'sms'}`);
+const backPartners = (k: string): never => redirect(`/partner/partners?m=${k}`);
 
 /** Platform SMS account (Source Code): key checked against Source Code before it is stored, encrypted. */
 export async function savePlatformSms(form: FormData) {
@@ -101,7 +112,7 @@ export async function savePlatformSms(form: FormData) {
   const costKes = Number(form.get('costKes') ?? 0.5);
   const priceKes = Number(form.get('priceKes') ?? 1);
   if (!(costKes > 0) || !(priceKes > 0)) back('sms-price');
-  const [cur] = await db()<{ data: { apiKey?: string } | null }[]>`select app_platform_get('sms') as data`;
+  const [cur] = await db()<{ data: PlatformSms | null }[]>`select app_platform_get('sms') as data`;
   let stored = cur?.data?.apiKey ?? null;
   if (apiKey) {
     let ok = false;
@@ -114,10 +125,23 @@ export async function savePlatformSms(form: FormData) {
     stored = encrypt(apiKey);
   }
   if (!stored) back('sms-missing');
-  const alertPhone = msisdn(String(form.get('alertPhone') ?? '')) ?? undefined;
-  const lowCredit = Math.max(0, Number(form.get('lowCredit') ?? 0) || 0) || undefined;
+  // Alert settings live in the same record and are kept as they are.
+  const { alertPhone, lowCredit } = cur?.data ?? {};
   await db()`select app_platform_set(${s.uid}, 'sms', ${db().json({ apiKey: stored, sender, costKes, priceKes, alertPhone, lowCredit } as never)})`;
   back('sms-ok');
+}
+
+/** NAVAC's own alerts: phone, and the Source Code credit level that triggers a warning. */
+export async function savePlatformAlerts(form: FormData) {
+  const s = await platformOnly();
+  const [cur] = await db()<{ data: PlatformSms | null }[]>`select app_platform_get('sms') as data`;
+  if (!cur?.data?.apiKey) back('alerts-sms');
+  const raw = String(form.get('alertPhone') ?? '').trim();
+  const alertPhone = msisdn(raw) ?? undefined;
+  if (raw && !alertPhone) back('alerts-phone');
+  const lowCredit = Math.max(0, Number(String(form.get('lowCredit') ?? '').replace(/[,\s]/g, '')) || 0) || undefined;
+  await db()`select app_platform_set(${s.uid}, 'sms', ${db().json({ ...cur?.data, alertPhone, lowCredit } as never)})`;
+  back('alerts-ok');
 }
 
 /** NAVAC's billing details on SMS invoices and receipts. */
@@ -186,9 +210,9 @@ export async function setPartnerActive(form: FormData) {
   const s = await platformOnly();
   const id = String(form.get('staffId') ?? '');
   const active = form.get('active') === 'true';
-  if (id === s.uid) back('self');
+  if (id === s.uid) backPartners('self');
   await db()`select app_platform_set_partner_active(${s.uid}, ${id}, ${active})`;
-  back(active ? 'partner-on' : 'partner-off');
+  backPartners(active ? 'partner-on' : 'partner-off');
 }
 
 export interface AddPartnerState {
