@@ -975,6 +975,10 @@ describe('walking skeleton: pay → door', () => {
 
     // The owner invites a manager and an admin; a manager cannot invite anyone; an admin cannot add admins.
     const mgr = await join(ownerId, 'mgr@um.test', 'manager', tenantId);
+    // Door setup is the installer's alone: a club owner can't hand it to their staff.
+    await expect(
+      app`select app_set_member_perms(${ownerId}, ${tenantId}, ${mgr}, ${['doors.setup']}, ${[]})`,
+    ).rejects.toThrow(/unknown permission/);
     const adm = await join(ownerId, 'adm@um.test', 'admin', tenantId);
     expect((await perms(mgr, tenantId))?.perms).not.toContain('team.manage');
     expect((await perms(adm, tenantId))?.perms).toEqual(expect.arrayContaining(['team.manage', 'billing.manage']));
@@ -1059,6 +1063,12 @@ describe('walking skeleton: pay → door', () => {
     expect((await app`select id from app_partner_clubs(${tech})`).map((r) => r.id)).toEqual([tenantId]);
     expect(await perms(tech, tenantId)).toMatchObject({ role: 'technician' });
     expect((await perms(tech, tenantId))?.perms).not.toContain('payments.record');
+    // Door setup (pairing, re-reading AxTraxNG, linking doors) is the installer's: the technician and partner/NAVAC
+    // admins have it; the club owner sees the doors but cannot set them up, nor give setup to their staff.
+    expect((await perms(tech, tenantId))?.perms).toContain('doors.setup');
+    expect((await perms(pa?.id, tenantId))?.perms).toContain('doors.setup');
+    expect((await perms(ownerId, tenantId))?.perms).toContain('doors.manage');
+    expect((await perms(ownerId, tenantId))?.perms).not.toContain('doors.setup');
     // NAVAC support sees every club, read-only.
     const sup = await join(pa?.id, 'support@um.test', 'navac_support', null);
     expect((await perms(sup, otherTenant))?.role).toBe('viewer');

@@ -24,7 +24,7 @@ export const PERMISSIONS = [
   { key: 'payments.assign', label: 'Assign unmatched payments' },
   { key: 'access.comp', label: 'Give complimentary access' },
   { key: 'plans.manage', label: 'Services and prices' },
-  { key: 'doors.manage', label: 'Doors and Site Bridge' },
+  { key: 'doors.manage', label: 'See doors and who went in' },
   { key: 'messages.manage', label: 'Messages and club news' },
   { key: 'sms.buy', label: 'Buy SMS credit' },
   { key: 'reports.all', label: 'Reports beyond today' },
@@ -33,7 +33,12 @@ export const PERMISSIONS = [
   { key: 'team.manage', label: 'Team: invite, roles, remove' },
   { key: 'club.own', label: 'Close the club, transfer ownership' },
 ] as const;
-export type Perm = (typeof PERMISSIONS)[number]['key'];
+/**
+ * Installer-only: pair the door PC, re-read AxTraxNG, link doors to areas. Held by partner technicians and partner
+ * (or NAVAC) admins in the clubs they can open; never by a club role and never grantable to club staff.
+ */
+export const INSTALLER_PERMS = [{ key: 'doors.setup', label: 'Door setup (installer)' }] as const;
+export type Perm = (typeof PERMISSIONS)[number]['key'] | (typeof INSTALLER_PERMS)[number]['key'];
 
 /** Club roles in the order they are offered, with one line on what each is for. */
 export const CLUB_ROLES = [

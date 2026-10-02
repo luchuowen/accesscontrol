@@ -278,7 +278,7 @@ const zoneKey = (name: string) =>
 /** Create a zone or change which AxTraxNG readers it opens (readers come from the Site Bridge's inventory). */
 export async function saveZone(form: FormData) {
   const s = await requireSession();
-  if (!can(s, 'doors.manage')) redirect('/access?n=forbidden');
+  if (!can(s, 'doors.setup')) redirect('/access?n=forbidden');
   const zoneId = id(form, 'zoneId');
   const siteId = id(form, 'siteId');
   const name = String(form.get('name') ?? '')
@@ -310,7 +310,7 @@ export async function saveZone(form: FormData) {
 /** Ask the Site Bridge to read AxTraxNG again (doors, groups, users) on its next sync. */
 export async function requestInventory(form: FormData) {
   const s = await requireSession();
-  if (!can(s, 'doors.manage')) redirect('/access?n=forbidden');
+  if (!can(s, 'doors.setup')) redirect('/access?n=forbidden');
   const siteId = id(form, 'siteId');
   if (!siteId) redirect('/access');
   await withTenant(db(), s.tid, (tx) => tx`update sites set inventory_requested_at = now() where id = ${siteId}`);
@@ -321,7 +321,7 @@ export async function requestInventory(form: FormData) {
 /** Bring the club's existing AxTraxNG users in as members, keeping the access they have today. */
 export async function importFromAxtrax(form: FormData) {
   const s = await requireSession();
-  if (!can(s, 'doors.manage')) redirect('/access?n=forbidden');
+  if (!can(s, 'doors.setup')) redirect('/access?n=forbidden');
   const siteId = id(form, 'siteId');
   const groupIds = form.getAll('groups').map(Number).filter(Number.isInteger);
   const graceDays = Math.min(90, Math.max(0, Number(form.get('graceDays') ?? 14) || 0));
@@ -334,7 +334,7 @@ export async function importFromAxtrax(form: FormData) {
 /** A fresh pairing code, e.g. when the AxTraxNG PC is replaced (the old bridge must then be reinstalled). */
 export async function reissuePairCode() {
   const s = await requireSession();
-  if (!can(s, 'doors.manage')) redirect('/access?n=forbidden');
+  if (!can(s, 'doors.setup')) redirect('/access?n=forbidden');
   await withTenant(db(), s.tid, async (tx) => {
     await tx`select app_reissue_pair_code(${newPairCode()})`;
     await tx`insert into audit_log (tenant_id, actor, action) values (${s.tid}, ${s.uid}, 'bridge.pair_code_reissued')`;

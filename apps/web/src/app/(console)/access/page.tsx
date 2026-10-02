@@ -36,7 +36,11 @@ export default async function Access({
   const d = await accessOverview(s.tid);
   const base = (process.env.PUBLIC_URL ?? `https://${(await headers()).get('host')}`).replace(/\/$/, '');
   const install = `irm ${base}/bridge/install.ps1 | iex`;
-  const manage = can(s, 'doors.manage');
+  // Club staff see the doors; the installer (partner technician / partner or NAVAC admin) sets them up.
+  const setup = can(s, 'doors.setup');
+  const [installer] = await db()<{ name: string | null }[]>`
+    select p.name from tenants t left join partners p on p.id = t.partner_id where t.id = ${s.tid}`;
+  const installerName = installer?.name ?? 'your installer';
   const sites = await withTenant(db(), s.tid, async (tx) => {
     const [t] = await tx<{ timezone: string }[]>`select timezone from tenants where id = ${s.tid}`;
     return Promise.all(
@@ -60,7 +64,7 @@ export default async function Access({
       )}
       <PageHeader
         title="Doors & access"
-        subtitle="Your existing access-control system, connected. Doors decide on their own; Lango keeps them told who has paid."
+        subtitle="Your doors, connected. They decide on their own; Lango keeps them told who has paid."
       />
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <Stat label="Members on doors" value={d.stats?.total ?? 0} />
@@ -113,7 +117,7 @@ export default async function Access({
                 </div>
                 <Badge tone={online ? 'green' : 'amber'}>{online ? 'online' : 'offline'}</Badge>
               </div>
-              {b?.pair_code && (
+              {setup && b?.pair_code && (
                 <div className="mt-5 space-y-3">
                   <div>
                     <span className="label">Pairing code</span>
@@ -134,7 +138,7 @@ export default async function Access({
                 </div>
               )}
               <div className="mt-5 flex flex-wrap gap-2">
-                {b?.last_seen_at && (
+                {setup && b?.last_seen_at && (
                   <form action={requestInventory}>
                     <input type="hidden" name="siteId" value={site.id} />
                     <SubmitButton pendingText="Asking…" className="btn-ghost px-3 py-2 text-xs">
@@ -142,7 +146,7 @@ export default async function Access({
                     </SubmitButton>
                   </form>
                 )}
-                {manage && b?.last_seen_at && (
+                {setup && b?.last_seen_at && (
                   <form action={reissuePairCode}>
                     <SubmitButton pendingText="Issuing…" className="btn-ghost px-3 py-2 text-xs">
                       <Download size={14} /> New PC? New pairing code
@@ -150,7 +154,25 @@ export default async function Access({
                   </form>
                 )}
               </div>
-              {inv && (
+              {!setup && !online && (
+                <div className="mt-5 rounded-xl bg-amber-50 px-3.5 py-3 text-[13px] text-amber-900 ring-1 ring-amber-200">
+                  {b?.last_seen_at ? (
+                    <>
+                      The door PC hasn’t checked in since {ago(b.last_seen_at)}. Doors keep working with what they last
+                      received; new payments reach them once it’s back online.
+                    </>
+                  ) : (
+                    <>The door PC isn’t connected yet.</>
+                  )}{' '}
+                  If it stays offline, call {installerName}.
+                </div>
+              )}
+              {!setup && online && (
+                <p className="mt-4 text-[13px] text-ink-500">
+                  Connected. Payments reach the doors within a minute. Set up by {installerName}.
+                </p>
+              )}
+              {setup && inv && (
                 <p className="mt-4 text-xs text-ink-500">
                   AxTraxNG read {ago(inv.receivedAt)}: {inv.readers.length} readers, {inv.groups.length} access groups,{' '}
                   {inv.users} users.
@@ -158,80 +180,108 @@ export default async function Access({
               )}
             </section>
 
-            <section className="card p-6 lg:col-span-2">
-              <div className="label">Areas → doors</div>
-              <p className="mt-1 text-sm text-ink-500">
-                An area is a part of the club (gym floor, pool, sauna). Tick the door readers each area opens; services
-                then open areas.
-              </p>
-              <ul className="mt-4 space-y-3">
-                {zones.map((z) => (
-                  <li key={z.id} className="rounded-xl p-3 ring-1 ring-ink-100">
-                    <form action={saveZone} className="space-y-2">
-                      <input type="hidden" name="zoneId" value={z.id} />
-                      <input type="hidden" name="siteId" value={site.id} />
-                      <div className="flex items-center gap-2">
+            {!setup && (
+              <section className="card p-6 lg:col-span-2">
+                <div className="label">What each area opens</div>
+                <p className="mt-1 text-sm text-ink-500">
+                  Services open areas; each area opens these doors. {installerName} links doors to areas.
+                </p>
+                <ul className="mt-4 divide-y divide-ink-100">
+                  {zones.map((z) => (
+                    <li key={z.id} className="flex flex-wrap items-baseline gap-x-4 gap-y-1 py-2.5 text-sm">
+                      <span className="flex w-44 shrink-0 items-center gap-2 font-medium">
                         <DoorOpen size={15} className="text-ink-300" />
-                        <input
-                          name="name"
-                          defaultValue={z.name}
-                          disabled={!manage}
-                          className="input max-w-xs py-1.5 font-medium"
-                        />
-                        <span className="font-mono text-[11px] text-ink-500">{z.key}</span>
-                      </div>
-                      {inv ? (
-                        <div className="flex flex-wrap gap-2">
-                          {inv.readers.map((r) => (
-                            <label
-                              key={r.id}
-                              className="flex items-center gap-1.5 rounded-full px-3 py-1 text-xs ring-1 ring-ink-100"
-                            >
-                              <input
-                                type="checkbox"
-                                name="readers"
-                                value={r.id}
-                                disabled={!manage}
-                                defaultChecked={z.reader_ids.includes(r.id)}
-                                className="h-3.5 w-3.5 accent-ink-900"
-                              />
-                              {readerName.get(r.id)}
-                            </label>
-                          ))}
-                          {inv.readers.length === 0 && (
-                            <span className="text-xs text-ink-500">AxTraxNG has no readers yet (no panels added).</span>
-                          )}
+                        {z.name}
+                      </span>
+                      <span className={z.reader_ids.length ? 'text-ink-700' : 'text-amber-700'}>
+                        {z.reader_ids.length
+                          ? z.reader_ids.map((r) => readerName.get(r) ?? `Reader ${r}`).join(' · ')
+                          : 'No doors linked yet'}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+                {zones.length === 0 && <p className="mt-3 text-sm text-ink-500">No areas yet.</p>}
+              </section>
+            )}
+            {setup && (
+              <section className="card p-6 lg:col-span-2">
+                <div className="label">Areas → doors</div>
+                <p className="mt-1 text-sm text-ink-500">
+                  An area is a part of the club (gym floor, pool, sauna). Tick the door readers each area opens;
+                  services then open areas.
+                </p>
+                <ul className="mt-4 space-y-3">
+                  {zones.map((z) => (
+                    <li key={z.id} className="rounded-xl p-3 ring-1 ring-ink-100">
+                      <form action={saveZone} className="space-y-2">
+                        <input type="hidden" name="zoneId" value={z.id} />
+                        <input type="hidden" name="siteId" value={site.id} />
+                        <div className="flex items-center gap-2">
+                          <DoorOpen size={15} className="text-ink-300" />
+                          <input
+                            name="name"
+                            defaultValue={z.name}
+                            disabled={!setup}
+                            className="input max-w-xs py-1.5 font-medium"
+                          />
+                          <span className="font-mono text-[11px] text-ink-500">{z.key}</span>
                         </div>
-                      ) : (
-                        <input
-                          name="readerIds"
-                          disabled={!manage}
-                          defaultValue={z.reader_ids.join(', ')}
-                          placeholder="Reader IDs, e.g. 11, 12 (picked from a list once the bridge is installed)"
-                          className="input py-1.5 text-xs"
-                        />
-                      )}
-                      {manage && (
-                        <SubmitButton pendingText="Saving…" className="btn-ghost px-3 py-1.5 text-xs">
-                          Save
-                        </SubmitButton>
-                      )}
-                    </form>
-                  </li>
-                ))}
-              </ul>
-              {manage && (
-                <form action={saveZone} className="mt-4 flex gap-2">
-                  <input type="hidden" name="siteId" value={site.id} />
-                  <input name="name" required placeholder="New area, e.g. Sauna room" className="input py-2" />
-                  <SubmitButton pendingText="Adding…" className="btn-ghost py-2">
-                    Add area
-                  </SubmitButton>
-                </form>
-              )}
-            </section>
+                        {inv ? (
+                          <div className="flex flex-wrap gap-2">
+                            {inv.readers.map((r) => (
+                              <label
+                                key={r.id}
+                                className="flex items-center gap-1.5 rounded-full px-3 py-1 text-xs ring-1 ring-ink-100"
+                              >
+                                <input
+                                  type="checkbox"
+                                  name="readers"
+                                  value={r.id}
+                                  disabled={!setup}
+                                  defaultChecked={z.reader_ids.includes(r.id)}
+                                  className="h-3.5 w-3.5 accent-ink-900"
+                                />
+                                {readerName.get(r.id)}
+                              </label>
+                            ))}
+                            {inv.readers.length === 0 && (
+                              <span className="text-xs text-ink-500">
+                                AxTraxNG has no readers yet (no panels added).
+                              </span>
+                            )}
+                          </div>
+                        ) : (
+                          <input
+                            name="readerIds"
+                            disabled={!setup}
+                            defaultValue={z.reader_ids.join(', ')}
+                            placeholder="Reader IDs, e.g. 11, 12 (picked from a list once the bridge is installed)"
+                            className="input py-1.5 text-xs"
+                          />
+                        )}
+                        {setup && (
+                          <SubmitButton pendingText="Saving…" className="btn-ghost px-3 py-1.5 text-xs">
+                            Save
+                          </SubmitButton>
+                        )}
+                      </form>
+                    </li>
+                  ))}
+                </ul>
+                {setup && (
+                  <form action={saveZone} className="mt-4 flex gap-2">
+                    <input type="hidden" name="siteId" value={site.id} />
+                    <input name="name" required placeholder="New area, e.g. Sauna room" className="input py-2" />
+                    <SubmitButton pendingText="Adding…" className="btn-ghost py-2">
+                      Add area
+                    </SubmitButton>
+                  </form>
+                )}
+              </section>
+            )}
 
-            {inv && preview && manage && (
+            {inv && preview && setup && (
               <section className="card p-6 lg:col-span-3">
                 <div className="flex items-center gap-2">
                   <UserPlus size={18} />
