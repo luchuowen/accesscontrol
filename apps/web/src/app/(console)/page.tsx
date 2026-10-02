@@ -197,34 +197,6 @@ export default async function Dashboard({
           <div className="flex min-w-0 flex-col gap-3.5">
             <Card className="flex-1">
               <div className="flex items-baseline justify-between">
-                <Label>Top plans</Label>
-                <span className="text-xs text-ink-500">by money in</span>
-              </div>
-              <div className="mt-3.5 flex flex-col gap-3">
-                {d.plans.length === 0 && <p className="text-sm text-ink-500">No payments yet.</p>}
-                {d.plans.map((pl) => {
-                  const share = d.revenue.now ? Math.round((pl.kes / d.revenue.now) * 100) : 0;
-                  return (
-                    <div key={pl.name}>
-                      <div className="mb-1.5 flex items-baseline justify-between gap-3 text-[13px]">
-                        <b className="min-w-0 truncate font-semibold">{pl.name}</b>
-                        <span className="shrink-0 text-xs tabular-nums text-ink-500">
-                          {kes(pl.kes)} · {share}%
-                        </span>
-                      </div>
-                      <div className="h-2 overflow-hidden rounded-full bg-slate-100">
-                        <i
-                          className="block h-full rounded-full bg-[linear-gradient(90deg,#34D399,#047857)]"
-                          style={{ width: `${Math.max(share, 2)}%` }}
-                        />
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </Card>
-            <Card className="flex-1">
-              <div className="flex items-baseline justify-between">
                 <Label>Renewals</Label>
                 <span className="text-xs text-ink-500">{days} days</span>
               </div>
@@ -258,6 +230,34 @@ export default async function Dashboard({
                   Message lapsed
                 </Link>
               )}
+            </Card>
+            <Card className="flex-1">
+              <div className="flex items-baseline justify-between">
+                <Label>Top plans</Label>
+                <span className="text-xs text-ink-500">by money in</span>
+              </div>
+              <div className="mt-3.5 flex flex-col gap-3">
+                {d.plans.length === 0 && <p className="text-sm text-ink-500">No payments yet.</p>}
+                {d.plans.map((pl) => {
+                  const share = d.revenue.now ? Math.round((pl.kes / d.revenue.now) * 100) : 0;
+                  return (
+                    <div key={pl.name}>
+                      <div className="mb-1.5 flex items-baseline justify-between gap-3 text-[13px]">
+                        <b className="min-w-0 truncate font-semibold">{pl.name}</b>
+                        <span className="shrink-0 text-xs tabular-nums text-ink-500">
+                          {kes(pl.kes)} · {share}%
+                        </span>
+                      </div>
+                      <div className="h-2 overflow-hidden rounded-full bg-slate-100">
+                        <i
+                          className="block h-full rounded-full bg-[linear-gradient(90deg,#3B5A85,#0B1629)]"
+                          style={{ width: `${Math.max(share, 2)}%` }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </Card>
           </div>
         </div>
