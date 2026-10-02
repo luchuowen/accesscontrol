@@ -1,4 +1,5 @@
 'use client';
+import { Eye, EyeOff } from 'lucide-react';
 import { useState } from 'react';
 
 /** Password input with a Show/Hide toggle (NIST 800-63B: let people see what they type). */
@@ -27,16 +28,18 @@ export function PasswordField({
         maxLength={200}
         autoComplete={autoComplete}
         placeholder={placeholder}
-        className="auth-input pr-16"
+        className="auth-input pr-12"
       />
       <button
         type="button"
         onClick={() => setShow((v) => !v)}
         aria-controls={id ?? name}
         aria-pressed={show}
-        className="absolute inset-y-0 right-0 px-3.5 text-xs font-medium text-slate-500 hover:text-ink-900"
+        aria-label={show ? 'Hide password' : 'Show password'}
+        title={show ? 'Hide password' : 'Show password'}
+        className="absolute inset-y-0 right-0 grid place-items-center px-3.5 text-slate-400 hover:text-ink-900"
       >
-        {show ? 'Hide' : 'Show'}
+        {show ? <EyeOff size={18} /> : <Eye size={18} />}
       </button>
     </div>
   );

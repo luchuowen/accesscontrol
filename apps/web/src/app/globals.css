@@ -47,4 +47,4 @@
 @utility auth-label { @apply mb-1.5 flex items-center justify-between text-xs font-medium text-slate-700; }
 @utility auth-input { @apply h-11 w-full rounded-[10px] border border-slate-200 bg-white px-3.5 text-sm text-ink-900 outline-none transition placeholder:text-slate-400 focus:border-brand-500 focus:ring-[3px] focus:ring-brand-500/15; }
 @utility auth-btn { @apply inline-flex h-11 w-full items-center justify-center gap-2 rounded-[10px] bg-[#132038] text-sm font-semibold text-white transition hover:bg-[#1b2c4c] disabled:opacity-70; }
-@utility auth-link { @apply font-medium text-blue-600 hover:text-blue-700 hover:underline; }
+@utility auth-link { @apply font-medium text-[#047857] hover:text-[#065F46] hover:underline; }

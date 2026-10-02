@@ -9,8 +9,8 @@ export default function Forgot() {
   return (
     <AuthShell>
       <AuthHeading
-        title="Reset your password"
-        sub="Enter the email you sign in with. We’ll send you a link to choose a new password."
+        title="Forgot your password?"
+        sub="Enter your email address and we’ll send you a link to reset your password."
       />
       <form action={forgot} className="mt-8 grid gap-[18px]">
         <div>
