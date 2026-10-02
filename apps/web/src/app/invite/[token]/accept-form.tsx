@@ -23,19 +23,19 @@ export function AcceptForm({
       <form action={action} className="mt-7 grid gap-4">
         <input type="hidden" name="token" value={token} />
         <div>
-          <span className="auth-label">Your email</span>
+          <span className="auth-label">Email</span>
           <input
             value={email}
             readOnly
             autoComplete="username"
             className="auth-input bg-slate-50 text-slate-500"
-            aria-label="Your email"
+            aria-label="Email"
           />
         </div>
         <div className="grid gap-4 sm:grid-cols-2">
           <div>
             <label htmlFor="name" className="auth-label">
-              Your name
+              Name
             </label>
             <input
               id="name"
@@ -50,7 +50,7 @@ export function AcceptForm({
           </div>
           <div>
             <label htmlFor="phone" className="auth-label">
-              Mobile number
+              Mobile
             </label>
             <input
               id="phone"
@@ -67,12 +67,10 @@ export function AcceptForm({
         </div>
         <div>
           <label htmlFor="password" className="auth-label">
-            Choose a password
+            Password
           </label>
           <PasswordField name="password" autoComplete="new-password" minLength={10} placeholder="Create a password" />
-          <p className="mt-1.5 text-xs text-slate-500">
-            At least 10 characters. Your sign-in codes go to the mobile above.
-          </p>
+          <p className="mt-1.5 text-xs text-slate-500">At least 10 characters.</p>
         </div>
         <div>
           <label htmlFor="confirm" className="auth-label">
@@ -87,7 +85,7 @@ export function AcceptForm({
             required
             className="mt-0.5 h-4 w-4 rounded border-slate-300 accent-[#10B981]"
           />
-          <span>I agree to NAVAC Global’s terms for using Lango, and I’ll keep my sign-in details to myself.</span>
+          <span>I agree to the Lango terms.</span>
         </label>
         <SubmitButton pendingText="Setting up…" className="auth-btn mt-1">
           Accept invitation

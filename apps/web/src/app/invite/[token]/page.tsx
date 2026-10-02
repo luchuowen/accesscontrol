@@ -60,15 +60,7 @@ export default async function Invite({ params }: { params: Promise<{ token: stri
   return (
     <AuthShell>
       <div className="text-[11px] font-semibold tracking-[0.14em] text-brand-600">INVITATION</div>
-      <AuthHeading
-        title={`Join ${to}`}
-        sub={
-          <>
-            {ctx?.inviterName ?? 'Your administrator'} invited you as {/^[aeiou]/i.test(role) ? 'an' : 'a'}{' '}
-            <span className="font-medium text-ink-900">{role}</span>. Set up your account to continue.
-          </>
-        }
-      />
+      <AuthHeading title={`Join ${to}`} sub={`${ctx?.inviterName ?? 'Your administrator'} invited you as ${role}.`} />
       <AcceptForm token={token} email={link.staff.email} name={link.staff.name} phone={localPhone(link.staff.phone)} />
     </AuthShell>
   );
