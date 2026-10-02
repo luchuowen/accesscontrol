@@ -1,5 +1,6 @@
 import { withTenant } from '@lango/db';
-import { Activity, CheckCircle2, Smartphone } from 'lucide-react';
+import { CheckCircle2, Smartphone } from 'lucide-react';
+import { LangoMark } from '@/components/logo';
 import { SubmitButton } from '@/components/submit-button';
 import { date, daysLeft, kes } from '@/lib/format';
 import { db } from '@/server/db';
@@ -18,9 +19,7 @@ export default async function MemberPortal({
     <div className="min-h-screen bg-ink-950 px-4 py-8 text-white">
       <div className="mx-auto max-w-md">
         <div className="mb-8 flex items-center gap-2">
-          <div className="grid h-8 w-8 place-items-center rounded-lg bg-brand-500 text-ink-950">
-            <Activity size={17} strokeWidth={2.5} />
-          </div>
+          <LangoMark size={32} />
           <span className="font-semibold">Lango</span>
         </div>
         {children}

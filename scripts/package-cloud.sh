@@ -9,7 +9,7 @@ D=$(mktemp -d); mkdir -p "$D/app" "$D/tools"
 cp -r apps/web/.next/standalone/. "$D/app/"; cp -r apps/web/.next/static "$D/app/apps/web/.next/static"; rm -f "$D/app/apps/web/.env.local"
 cp -r packages/db/migrations "$D/migrations"
 # Site Bridge bundle, served to installers at /bridge/lango-bridge.mjs (and checked by SHA-256 in install.ps1).
-mkdir -p "$D/app/apps/web/public/bridge"
+mkdir -p "$D/app/apps/web/public/bridge"; cp -r apps/web/public/. "$D/app/apps/web/public/"
 npx esbuild apps/bridge/src/main.ts --bundle --platform=node --target=node22 --format=esm --log-level=warning --outfile="$D/app/apps/web/public/bridge/lango-bridge.mjs" --banner:js="import{createRequire as __cr}from'module';const require=__cr(import.meta.url);"
 B="--bundle --platform=node --target=node22 --format=esm --log-level=warning"
 npx esbuild packages/server/src/seed-cli.ts $B --outfile="$D/tools/seed.mjs" --banner:js="import{createRequire as __cr}from'module';const require=__cr(import.meta.url);"

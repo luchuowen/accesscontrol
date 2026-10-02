@@ -165,73 +165,86 @@ export default async function PlatformSettings({ searchParams }: { searchParams:
               badge={<Status ok={!!emailCfg} on="Connected" off="Not connected" />}
             />
             <Notice id="email" />
-            <form action={savePlatformEmail} className="mt-5 space-y-4">
-              <label className="block">
-                <span className={label}>Resend API key</span>
-                <input
-                  name="apiKey"
-                  type="password"
-                  autoComplete="off"
-                  placeholder={
-                    emailCfg
-                      ? '•••••••• stored · paste a new key to replace'
-                      : 'Resend › API keys › Create API key (sending access)'
-                  }
-                  className={input}
-                />
-              </label>
-              <div className="grid gap-4 sm:grid-cols-3">
-                <label>
-                  <span className={label}>Sender name</span>
-                  <input name="fromName" defaultValue={emailFrom?.[1] || 'Lango'} className={input} />
-                </label>
-                <label>
-                  <span className={label}>Sending address</span>
-                  <input
-                    name="fromAddress"
-                    type="email"
-                    required
-                    defaultValue={emailFrom?.[2] || 'lango@navac.co.ke'}
-                    className={input}
-                  />
-                </label>
-                <label>
-                  <span className={label}>Replies go to</span>
-                  <input
-                    name="replyTo"
-                    type="email"
-                    defaultValue={emailCfg?.replyTo ?? ''}
-                    placeholder="support@navac.co.ke"
-                    className={input}
-                  />
-                </label>
-              </div>
-              <label className="block">
-                <span className={label}>Webhook signing secret (optional, for delivery tracking)</span>
-                <input
-                  name="webhookSecret"
-                  type="password"
-                  autoComplete="off"
-                  placeholder={emailCfg?.webhookSecret ? '•••••••• stored' : 'whsec_… from Resend › Webhooks'}
-                  className={input}
-                />
-              </label>
-              <div className="flex flex-wrap items-center justify-end gap-3">
-                <SubmitButton pendingText="Checking with Resend…" className="btn-primary">
-                  Verify &amp; save
-                </SubmitButton>
-              </div>
-            </form>
             {emailCfg && (
-              <form action={sendPlatformTestEmail} className="mt-3 flex justify-end">
-                <SubmitButton pendingText="Sending…" className="btn-ghost">
-                  Send test email to me
-                </SubmitButton>
-              </form>
+              <div className="mt-4 flex flex-wrap items-center gap-3 rounded-lg bg-[#F8FAFC] px-4 py-3 text-[13px]">
+                <span className="min-w-0 flex-1">
+                  Sending as <b>{emailCfg.from}</b>
+                  {emailCfg.replyTo ? <> · replies to {emailCfg.replyTo}</> : null}
+                </span>
+                <form action={sendPlatformTestEmail}>
+                  <SubmitButton pendingText="Sending…" className="btn-primary py-2">
+                    Send test email to me
+                  </SubmitButton>
+                </form>
+              </div>
             )}
+            <details
+              className="group mt-3"
+              open={!emailCfg || (!!m && m.startsWith('email-') && !['email-ok', 'email-test-sent'].includes(m))}
+            >
+              <summary className="cursor-pointer text-[13px] font-medium text-ink-700 hover:text-ink-900">
+                {emailCfg ? 'Change key or sending address' : 'Connect Resend'}
+              </summary>
+              <form action={savePlatformEmail} className="mt-4 space-y-4">
+                <label className="block">
+                  <span className={label}>Resend API key</span>
+                  <input
+                    name="apiKey"
+                    type="password"
+                    autoComplete="off"
+                    placeholder={
+                      emailCfg
+                        ? '•••••••• stored · paste a new key to replace'
+                        : 'Resend › API keys › Create API key (sending access)'
+                    }
+                    className={input}
+                  />
+                </label>
+                <div className="grid gap-4 sm:grid-cols-3">
+                  <label>
+                    <span className={label}>Sender name</span>
+                    <input name="fromName" defaultValue={emailFrom?.[1] || 'Lango'} className={input} />
+                  </label>
+                  <label>
+                    <span className={label}>Sending address</span>
+                    <input
+                      name="fromAddress"
+                      type="email"
+                      required
+                      defaultValue={emailFrom?.[2] || 'lango@navac.co.ke'}
+                      className={input}
+                    />
+                  </label>
+                  <label>
+                    <span className={label}>Replies go to</span>
+                    <input
+                      name="replyTo"
+                      type="email"
+                      defaultValue={emailCfg?.replyTo ?? 'support@navac.co.ke'}
+                      className={input}
+                    />
+                  </label>
+                </div>
+                <label className="block">
+                  <span className={label}>Webhook signing secret (optional, for delivery tracking)</span>
+                  <input
+                    name="webhookSecret"
+                    type="password"
+                    autoComplete="off"
+                    placeholder={emailCfg?.webhookSecret ? '•••••••• stored' : 'whsec_… from Resend › Webhooks'}
+                    className={input}
+                  />
+                </label>
+                <div className="flex justify-end">
+                  <SubmitButton pendingText="Checking with Resend…" className="btn-primary">
+                    Verify &amp; save
+                  </SubmitButton>
+                </div>
+              </form>
+            </details>
             {recentEmail.length > 0 && (
               <ul className="mt-4 divide-y divide-[#F0F2F6] rounded-lg border border-[#E4E8EF] text-xs">
-                {recentEmail.map((e) => (
+                {recentEmail.slice(0, 5).map((e) => (
                   <li key={e.id} className="flex items-center gap-3 px-3 py-2">
                     <span className="w-24 shrink-0 text-ink-500">{dateTime(e.created_at)}</span>
                     <span className="min-w-0 flex-1 truncate" title={e.error ?? e.subject}>

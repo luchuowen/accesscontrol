@@ -1,6 +1,5 @@
 'use client';
 import {
-  Activity,
   ArrowLeftRight,
   CreditCard,
   DoorOpen,
@@ -13,6 +12,7 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { LangoMark } from '@/components/logo';
 
 const items = [
   { href: '/', label: 'Overview', icon: LayoutDashboard },
@@ -39,9 +39,7 @@ export function Nav({
   return (
     <aside className="fixed inset-y-0 left-0 hidden w-64 flex-col bg-ink-950 px-4 py-6 text-ink-300 lg:flex print:hidden">
       <div className="flex items-center gap-2.5 px-2">
-        <div className="grid h-8 w-8 place-items-center rounded-lg bg-brand-500 text-ink-950">
-          <Activity size={18} strokeWidth={2.5} />
-        </div>
+        <LangoMark size={32} />
         <div>
           <div className="text-[15px] font-semibold tracking-tight text-white">Lango</div>
           <div className="text-[11px] text-ink-500">{tenant}</div>

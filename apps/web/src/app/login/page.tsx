@@ -1,4 +1,4 @@
-import { Activity } from 'lucide-react';
+import { LangoMark } from '@/components/logo';
 import { SubmitButton } from '@/components/submit-button';
 import { login } from './actions';
 
@@ -8,9 +8,7 @@ export default async function Login({ searchParams }: { searchParams: Promise<{ 
     <div className="grid min-h-screen lg:grid-cols-2">
       <div className="relative hidden overflow-hidden bg-ink-950 p-12 text-white lg:flex lg:flex-col">
         <div className="flex items-center gap-2.5">
-          <div className="grid h-9 w-9 place-items-center rounded-xl bg-brand-500 text-ink-950">
-            <Activity size={19} strokeWidth={2.5} />
-          </div>
+          <LangoMark size={36} />
           <span className="text-lg font-semibold tracking-tight">Lango</span>
         </div>
         <div className="mt-auto max-w-md">

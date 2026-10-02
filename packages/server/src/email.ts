@@ -196,47 +196,71 @@ const esc = (s: string) =>
   s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string);
 
 /**
- * One branded layout for account emails: a heading, short paragraphs, one button, and a quiet footer. Table
- * layout and inline styles so it renders in Gmail and Outlook; a plain-text twin is always sent.
+ * Lango's one email layout ("Editorial", approved 2 Oct 2026): a navy header with an optional eyebrow, the
+ * heading and an optional large amount; the body; one button; a shaded, centred footer. Tables and inline
+ * styles so it renders in Gmail and Outlook; a plain-text twin is always sent.
  */
 export function accountEmail(e: {
   heading: string;
+  eyebrow?: string;
+  amount?: string;
   paragraphs: string[];
   button?: { label: string; url: string };
   after?: string[];
-  footer?: string;
+  footer?: string[];
 }): { html: string; text: string } {
+  const font = "-apple-system,'Segoe UI',Helvetica,Arial,sans-serif";
   const p = (t: string) =>
-    `<p style="margin:0 0 16px;font:15px/1.6 -apple-system,Segoe UI,Helvetica,Arial,sans-serif;color:#334155">${esc(t)}</p>`;
-  const html = `<!doctype html><html><body style="margin:0;background:#F4F7FB;padding:32px 12px">
+    `<p style="margin:0 0 16px;font:15px/1.65 ${font};color:#3C4657">${esc(t).replace(/^Please note:/, '<b>Please note:</b>')}</p>`;
+  const small = (t: string) =>
+    `<p style="margin:0 0 12px;font:13px/1.6 ${font};color:#6B7586">${esc(t).replace(/^Please note:/, '<b style="color:#3C4657">Please note:</b>')}</p>`;
+  const foot = e.footer ?? DEFAULT_FOOTER;
+  const base = (process.env.PUBLIC_URL ?? '').replace(/\/$/, '');
+  // Gmail does not show SVG, so the mark is a hosted PNG; without a public address a plain emerald tile stands in.
+  const logo = base
+    ? `<img src="${esc(base)}/brand/lango-mark.png" width="30" height="30" alt="Lango" style="display:block;border:0;border-radius:8px">`
+    : '<div style="width:30px;height:30px;background:#10B981;border-radius:8px"></div>';
+  const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta name="color-scheme" content="light"></head>
+<body style="margin:0;background:#F5F6F8;padding:28px 12px">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center">
-<table role="presentation" width="560" cellpadding="0" cellspacing="0" style="max-width:560px;width:100%;background:#ffffff;border:1px solid #E2E8F0;border-radius:14px">
-<tr><td style="background:#0B1629;border-radius:14px 14px 0 0;padding:20px 28px">
-<span style="display:inline-block;width:28px;height:28px;border-radius:7px;background:#10B981;vertical-align:middle"></span>
-<span style="font:600 17px -apple-system,Segoe UI,Helvetica,Arial,sans-serif;color:#ffffff;vertical-align:middle;margin-left:10px">Lango</span></td></tr>
-<tr><td style="padding:32px 28px 12px">
-<h1 style="margin:0 0 16px;font:600 22px/1.3 -apple-system,Segoe UI,Helvetica,Arial,sans-serif;color:#0F1729">${esc(e.heading)}</h1>
+<table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#FFFFFF;border:1px solid #E6E9EE;border-radius:16px;border-collapse:separate;overflow:hidden">
+<tr><td style="background:#0B1629;border-radius:16px 16px 0 0;padding:32px 36px 36px">
+<table role="presentation" cellpadding="0" cellspacing="0"><tr>
+<td style="width:30px;height:30px">${logo}</td>
+<td style="padding-left:10px;font:600 16px ${font};color:#FFFFFF">Lango</td></tr></table>
+<div style="height:32px;line-height:32px">&nbsp;</div>
+${e.eyebrow ? `<div style="font:600 11px ${font};letter-spacing:2px;color:#34D399;margin-bottom:10px">${esc(e.eyebrow.toUpperCase())}</div>` : ''}
+<h1 style="margin:0;font:600 27px/1.25 ${font};color:#FFFFFF">${esc(e.heading)}</h1>
+${e.amount ? `<div style="margin-top:14px;font:600 36px ${font};color:#FFFFFF">${esc(e.amount)}</div>` : ''}
+</td></tr>
+<tr><td style="padding:30px 36px 10px">
 ${e.paragraphs.map(p).join('')}
 ${
   e.button
-    ? `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:8px 0 20px"><tr><td style="background:#132038;border-radius:10px">
-<a href="${esc(e.button.url)}" style="display:inline-block;padding:13px 22px;font:600 15px -apple-system,Segoe UI,Helvetica,Arial,sans-serif;color:#ffffff;text-decoration:none">${esc(e.button.label)}</a></td></tr></table>
-<p style="margin:0 0 16px;font:13px/1.5 -apple-system,Segoe UI,Helvetica,Arial,sans-serif;color:#64748B">If the button does not work, open this link: <br><a href="${esc(e.button.url)}" style="color:#2563EB;word-break:break-all">${esc(e.button.url)}</a></p>`
+    ? `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:6px 0 24px"><tr><td style="background:#0B1629;border-radius:10px">
+<a href="${esc(e.button.url)}" style="display:inline-block;padding:13px 24px;font:600 15px ${font};color:#FFFFFF;text-decoration:none">${esc(e.button.label)} &rarr;</a></td></tr></table>`
     : ''
 }
-${(e.after ?? []).map(p).join('')}
+${(e.after ?? []).filter(Boolean).map(small).join('')}
+${e.button ? small(`If the button does not work, copy this link into your browser: ${e.button.url}`) : ''}
 </td></tr>
-<tr><td style="padding:16px 28px 24px;border-top:1px solid #EEF1F5;font:12px/1.5 -apple-system,Segoe UI,Helvetica,Arial,sans-serif;color:#94A3B8">
-${esc(e.footer ?? 'Lango by NAVAC Global · Nairobi')}</td></tr>
-</table></td></tr></table></body></html>`;
+<tr><td align="center" style="background:#F3F5F8;border-top:1px solid #E6E9EE;border-radius:0 0 16px 16px;padding:22px 36px 26px;font:12.5px/1.6 ${font};color:#6B7586;text-align:center">
+${foot.map(esc).join('<br>').replace('support@navac.co.ke', '<a href="mailto:support@navac.co.ke" style="color:#2563EB">support@navac.co.ke</a>')}
+</td></tr></table></td></tr></table></body></html>`;
   const text = [
     e.heading,
+    ...(e.amount ? [e.amount] : []),
     '',
     ...e.paragraphs,
     ...(e.button ? ['', `${e.button.label}: ${e.button.url}`] : []),
-    ...(e.after?.length ? ['', ...e.after] : []),
+    ...(e.after?.filter(Boolean).length ? ['', ...(e.after?.filter(Boolean) ?? [])] : []),
     '',
-    e.footer ?? 'Lango by NAVAC Global · Nairobi',
+    ...foot,
   ].join('\n');
   return { html, text };
 }
+
+export const DEFAULT_FOOTER = [
+  'Sent by Lango, a NAVAC Global service · Nairobi, Kenya',
+  'You’re receiving this email because you have a Lango account. For assistance, contact support@navac.co.ke.',
+];

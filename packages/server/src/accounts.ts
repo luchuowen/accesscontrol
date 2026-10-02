@@ -274,21 +274,25 @@ async function sendInvite(
 ) {
   const url = `${baseUrl}/invite/${token}`;
   const first = staff.name.split(' ')[0] || staff.name;
+  const article = /^[aeiou]/i.test(ctx.roleLabel) ? 'an' : 'a';
+  const expires = new Date(Date.now() + TTL.invite).toLocaleDateString('en-GB', {
+    day: 'numeric',
+    month: 'long',
+    timeZone: 'Africa/Nairobi',
+  });
   const mail = accountEmail({
-    heading: `You're invited to ${ctx.to} on Lango`,
+    heading: `You’re invited to join ${ctx.to}`,
     paragraphs: [
       `Hi ${first},`,
-      `${ctx.inviterName} has invited you to join ${ctx.to} on Lango as ${ctx.roleLabel}. Lango runs memberships, payments and door access in one place.`,
+      `${ctx.inviterName} has invited you to join ${ctx.to} on Lango as ${article} ${ctx.roleLabel}.`,
+      'Lango brings membership management, payments and door access together in one platform.',
     ],
-    button: { label: 'Accept invitation', url },
-    after: [
-      `The link works once and expires in 7 days.${ctx.next ? ` ${ctx.next}` : ''}`,
-      'Not expecting this? You can ignore this email; nothing happens unless you accept.',
-    ],
+    button: { label: 'Accept Invitation', url },
+    after: [ctx.next ?? '', `Please note: This invitation link can only be used once and expires on ${expires}.`],
   });
   const emailed = await sendEmail(sql, {
     to: staff.email,
-    subject: `Your invitation to ${ctx.to} on Lango`,
+    subject: `You’re invited to join ${ctx.to} on Lango`,
     ...mail,
     kind: 'invite',
     key: `invite:${sha(token).slice(0, 32)}`,

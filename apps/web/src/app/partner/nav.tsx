@@ -2,6 +2,7 @@
 import { Building2, LogOut, Settings2, UsersRound } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { LangoMark } from '@/components/logo';
 
 /** NAVAC console sidebar (deep navy, emerald accent: the NAVAC BMS look). */
 export function PartnerNav({ name, platform }: { name: string; platform: boolean }) {
@@ -23,9 +24,7 @@ export function PartnerNav({ name, platform }: { name: string; platform: boolean
   return (
     <>
       <header className="flex items-center gap-4 overflow-x-auto bg-[#0B1629] px-4 py-3 text-[13px] text-[#C9D1DE] lg:hidden print:hidden">
-        <div className="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-[#10B981] text-xs font-bold text-[#0B1629]">
-          L
-        </div>
+        <LangoMark size={28} className="shrink-0" />
         {items.map(({ href, label, on }) => (
           <Link key={href} href={href} className={`whitespace-nowrap ${on ? 'text-white' : ''}`}>
             {label}
@@ -34,9 +33,7 @@ export function PartnerNav({ name, platform }: { name: string; platform: boolean
       </header>
       <aside className="fixed inset-y-0 left-0 hidden w-60 flex-col bg-[#0B1629] px-3.5 py-5 text-[#C9D1DE] lg:flex print:hidden">
         <div className="flex items-center gap-2.5 px-2 pb-6">
-          <div className="grid h-8 w-8 place-items-center rounded-lg bg-[#10B981] text-sm font-bold text-[#0B1629]">
-            L
-          </div>
+          <LangoMark size={32} />
           <div>
             <div className="text-sm font-semibold text-white">Lango</div>
             <div className="text-[11px] text-[#7B8799]">{platform ? 'NAVAC SaaS console' : 'Partner console'}</div>
