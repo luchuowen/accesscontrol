@@ -1,4 +1,13 @@
-import { CLUB_ROLES, can, clubActivity, clubTeam, PERMISSIONS, roleDefaults, roleLabel } from '@lango/server';
+import {
+  CLUB_ROLES,
+  can,
+  clubActivity,
+  clubSeats,
+  clubTeam,
+  PERMISSIONS,
+  roleDefaults,
+  roleLabel,
+} from '@lango/server';
 import { Crown, ShieldCheck } from 'lucide-react';
 import { SubmitButton } from '@/components/submit-button';
 import { Badge, PageHeader } from '@/components/ui';
@@ -44,10 +53,11 @@ export default async function Team({ searchParams }: { searchParams: Promise<{ m
   const s = await requirePerm('team.manage');
   const { m } = await searchParams;
   const msg = m ? MSG[m] : undefined;
-  const [team, defaults, activity] = await Promise.all([
+  const [team, defaults, activity, seats] = await Promise.all([
     clubTeam(db(), s.tid),
     roleDefaults(db()),
     clubActivity(db(), s.tid),
+    clubSeats(db(), s.tid),
   ]);
   const iAmOwner = s.role === 'owner';
   const roles = CLUB_ROLES.filter((r) => r.key !== 'admin' || iAmOwner);
@@ -265,7 +275,19 @@ export default async function Team({ searchParams }: { searchParams: Promise<{ m
             <p className="mb-4 mt-0.5 text-xs text-ink-500">
               They get an email (and an SMS if you add a mobile) to set their own password.
             </p>
-            <InviteForm roles={roles.map((r) => ({ key: r.key, label: r.label, hint: r.hint }))} />
+            <div className="mb-3 flex items-center justify-between rounded-lg bg-ink-50 px-3 py-2 text-xs">
+              <span className="text-ink-500">Team members besides the owner</span>
+              <span className="font-semibold tabular-nums">
+                {seats.used} of {seats.cap}
+              </span>
+            </div>
+            {seats.used >= seats.cap ? (
+              <p className="text-sm text-ink-500">
+                Your team is full. Remove someone or cancel a pending invitation to invite another person.
+              </p>
+            ) : (
+              <InviteForm roles={roles.map((r) => ({ key: r.key, label: r.label, hint: r.hint }))} />
+            )}
           </section>
 
           {can(s, 'club.own') && (

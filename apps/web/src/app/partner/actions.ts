@@ -470,3 +470,65 @@ export async function assignTechClubs(form: FormData) {
   }
   backPartners('assigned');
 }
+
+const backClubs = (m: string): never => redirect(`/partner?m=${m}`);
+
+/** Invite the owner of a club that has none (or whose owner was removed). */
+export async function inviteOwner(form: FormData) {
+  const s = await requirePartner();
+  if (s.kind !== 'partner_admin') backClubs('denied');
+  const tenantId = String(form.get('tenantId') ?? '');
+  const [c] = await db()<
+    { id: string; name: string }[]
+  >`select id, name from app_partner_clubs(${s.uid}) where id = ${tenantId}`;
+  if (!c) return backClubs('denied');
+  const name = String(form.get('name') ?? '')
+    .trim()
+    .slice(0, 80);
+  const email = String(form.get('email') ?? '')
+    .trim()
+    .toLowerCase();
+  const phone = String(form.get('phone') ?? '').trim();
+  if (!name || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) backClubs('owner-details');
+  if (phone && !msisdn(phone)) backClubs('owner-phone');
+  let outcome = 'owner-failed';
+  try {
+    const r = await inviteStaff(db(), {
+      inviterId: s.uid,
+      email,
+      name,
+      phone: phone || undefined,
+      role: 'owner',
+      tenantId: c.id,
+      baseUrl: publicUrl(),
+      ctx: {
+        inviterName: await inviterName(s.uid, s.name),
+        to: c.name,
+        roleLabel: 'Owner',
+        next: 'Once you accept the invitation, you’ll be able to review your quote and pay the one-time setup fee.',
+      },
+    });
+    outcome = r.emailed ? 'owner-invited' : 'owner-not-sent';
+  } catch (e) {
+    const m = (e as Error).message;
+    outcome = m.includes('another club')
+      ? 'owner-taken'
+      : m.includes('partner login')
+        ? 'owner-partner'
+        : 'owner-failed';
+  }
+  backClubs(outcome);
+}
+
+/** A fresh invitation for a club owner who has not accepted yet. */
+export async function resendOwnerInvite(form: FormData) {
+  const s = await requirePartner();
+  if (s.kind !== 'partner_admin') backClubs('denied');
+  const tenantId = String(form.get('tenantId') ?? '');
+  const [o] = await db()<{ id: string }[]>`
+    select s.id from app_partner_club_owners(${s.uid}) o join app_staff_by_email(o.owner_email) s on true
+    where o.tenant_id = ${tenantId} and not o.accepted`;
+  if (!o) return backClubs('denied');
+  const r = await resendInvite(db(), o.id, s.uid, publicUrl());
+  backClubs(r.ok ? 'owner-invited' : 'owner-failed');
+}

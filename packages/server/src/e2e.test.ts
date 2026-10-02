@@ -1008,24 +1008,26 @@ describe('walking skeleton: pay → door', () => {
     expect(await myClubs(app, mgr)).toHaveLength(0);
     expect((await clubTeam(app, tenantId)).map((t) => t.id)).not.toContain(mgr);
 
-    // One login, several clubs: the other club's owner adds the admin as a manager there; no second account.
-    const again = await inviteStaff(
-      app,
-      {
-        inviterId: otherOwnerId,
-        email: 'adm@um.test',
-        name: 'Adm',
-        role: 'manager',
-        tenantId: otherTenant,
-        baseUrl: 'https://lango.test',
-        ctx: { inviterName: 'Other', to: 'Other Club', roleLabel: 'Manager' },
-      },
-      null,
-    );
-    expect(again).toMatchObject({ staffId: adm, added: true, emailed: true });
-    expect(mails.at(-1)?.subject).toBe('You now have access to Other Club on Lango');
-    expect((await myClubs(app, adm)).map((c) => c.role).sort()).toEqual(['admin', 'manager']);
-    expect((await perms(adm, otherTenant))?.role).toBe('manager');
+    // One login, one club: an email already in a club cannot be invited into another.
+    await expect(
+      inviteStaff(
+        app,
+        {
+          inviterId: otherOwnerId,
+          email: 'adm@um.test',
+          name: 'Adm',
+          role: 'manager',
+          tenantId: otherTenant,
+          baseUrl: 'https://lango.test',
+          ctx: { inviterName: 'Other', to: 'Other Club', roleLabel: 'Manager' },
+        },
+        null,
+      ),
+    ).rejects.toThrow(/another club/);
+    expect((await myClubs(app, adm)).map((c) => c.role)).toEqual(['admin']);
+    // Team allowance: 5 members besides the owner; the 6th invitation is refused.
+    for (let i = 0; i < 5; i++) await join(otherOwnerId, `seat${i}@um.test`, 'reception', otherTenant);
+    await expect(join(otherOwnerId, 'seat5@um.test', 'reception', otherTenant)).rejects.toThrow(/team limit/);
 
     // Ownership: offered by the owner to an admin, confirmed by the admin; the old owner stays as admin.
     expect(

@@ -78,6 +78,10 @@ export interface TeamRow {
   member_since: Date;
   last_seen: Date | null;
 }
+/** Team members besides the owner (invited or active), and the allowance (5 for now; per plan later). */
+export const clubSeats = async (sql: Sql, tenantId: string) =>
+  (await sql<{ used: number; cap: number }[]>`select * from app_club_seats(${tenantId})`)[0] ?? { used: 0, cap: 5 };
+
 export const clubTeam = (sql: Sql, tenantId: string) =>
   sql<TeamRow[]>`select * from app_club_team(${tenantId})`.then((r) => [...r]);
 
@@ -93,6 +97,11 @@ export function teamError(e: unknown): string {
     return 'Only the owner can add, change or remove an admin.';
   if (m.includes('not allowed: team')) return 'Only the owner can let someone manage the team.';
   if (m.includes('already in this club')) return 'That person is already in this club.';
+  if (m.includes('another club'))
+    return 'That email already belongs to another club. Each login is for one club only, so use a different email.';
+  if (m.includes('team limit'))
+    return 'Your team is full: a club can have up to 5 team members besides the owner. Remove someone to invite another.';
+  if (m.includes('already has an owner')) return 'This club already has an owner.';
   if (m.includes('partner login')) return 'That email belongs to a partner login. Use a different email.';
   if (m.includes('already has a login')) return 'That email already has a Lango login.';
   if (m.includes('not in this club')) return 'That person is no longer in this club.';
