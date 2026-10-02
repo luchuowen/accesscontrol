@@ -1,12 +1,17 @@
 'use server';
 import { randomBytes } from 'node:crypto';
 import {
+  accountEmail,
   encrypt,
   hashPassword,
   msisdn,
   newPairCode,
+  type PlatformEmail,
   type PlatformSms,
+  Resend,
+  ResendError,
   SourceCodeSms,
+  sendEmail,
   signSession,
   TaifaAuthError,
   TaifaPay,
@@ -91,6 +96,7 @@ const platformOnly = async () => {
 };
 /** Back to the Platform settings section that was saved, with its notice. */
 const SECTION: Record<string, string> = {
+  email: 'email',
   sms: 'sms',
   taifa: 'payments',
   billing: 'billing',
@@ -142,6 +148,79 @@ export async function savePlatformAlerts(form: FormData) {
   const lowCredit = Math.max(0, Number(String(form.get('lowCredit') ?? '').replace(/[,\s]/g, '')) || 0) || undefined;
   await db()`select app_platform_set(${s.uid}, 'sms', ${db().json({ ...cur?.data, alertPhone, lowCredit } as never)})`;
   back('alerts-ok');
+}
+
+/**
+ * NAVAC's Resend account for every Lango email. The key is checked with Resend before it is stored (encrypted);
+ * a blank key field keeps the stored one. The sending address must be on a domain the account has.
+ */
+export async function savePlatformEmail(form: FormData) {
+  const s = await platformOnly();
+  const apiKey = String(form.get('apiKey') ?? '').trim();
+  const fromName =
+    String(form.get('fromName') ?? 'Lango')
+      .trim()
+      .slice(0, 60) || 'Lango';
+  const fromAddress = String(form.get('fromAddress') ?? '')
+    .trim()
+    .toLowerCase();
+  const replyTo =
+    String(form.get('replyTo') ?? '')
+      .trim()
+      .toLowerCase() || undefined;
+  const webhookSecret = String(form.get('webhookSecret') ?? '').trim();
+  const emailRe = /^[^@\s]+@[^@\s]+\.[a-z]{2,}$/;
+  if (!emailRe.test(fromAddress)) back('email-from');
+  if (replyTo && !emailRe.test(replyTo)) back('email-reply');
+  const [cur] = await db()<{ data: PlatformEmail | null }[]>`select app_platform_get('email') as data`;
+  let stored = cur?.data?.apiKey ?? null;
+  if (apiKey) {
+    if (!apiKey.startsWith('re_')) back('email-key');
+    let domains: { name: string; status: string }[] | null = null;
+    try {
+      domains = await new Resend(apiKey).domains();
+    } catch (e) {
+      back(e instanceof ResendError && (e.status === 401 || e.status === 403) ? 'email-rejected' : 'email-unreachable');
+    }
+    if (domains && !domains.some((d) => d.name === fromAddress.split('@')[1])) back('email-domain');
+    stored = encrypt(apiKey);
+  }
+  if (!stored) back('email-missing');
+  if (webhookSecret && !webhookSecret.startsWith('whsec_')) back('email-secret');
+  const data: PlatformEmail = {
+    apiKey: stored as string,
+    from: `${fromName} <${fromAddress}>`,
+    ...(replyTo ? { replyTo } : {}),
+    ...(webhookSecret
+      ? { webhookSecret: encrypt(webhookSecret) }
+      : cur?.data?.webhookSecret
+        ? { webhookSecret: cur.data.webhookSecret }
+        : {}),
+  };
+  await db()`select app_platform_set(${s.uid}, 'email', ${db().json(data as never)})`;
+  back('email-ok');
+}
+
+/** Send one test email to the signed-in admin's own address and report Resend's answer. */
+export async function sendPlatformTestEmail() {
+  const s = await platformOnly();
+  const [me] = await db()<{ email: string; name: string }[]>`select email, name from app_staff_get(${s.uid})`;
+  if (!me) return back('email-missing');
+  const mail = accountEmail({
+    heading: 'Lango email is working',
+    paragraphs: [
+      `Hi ${me.name.split(' ')[0]},`,
+      "This test was sent from the Lango SaaS console through NAVAC's Resend account. Invitations, password resets, receipts and invoices will arrive the same way.",
+    ],
+  });
+  const ok = await sendEmail(db(), {
+    to: me.email,
+    subject: 'Lango test email',
+    ...mail,
+    kind: 'test',
+    key: `test:${s.uid}:${Date.now()}`,
+  });
+  back(ok ? 'email-test-sent' : 'email-test-failed');
 }
 
 /** NAVAC's billing details on SMS invoices and receipts. */

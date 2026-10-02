@@ -1,4 +1,4 @@
-import { decrypt, platformBilling, platformSmsConfig, SourceCodeSms } from '@lango/server';
+import { decrypt, platformBilling, platformEmailConfig, platformSmsConfig, SourceCodeSms } from '@lango/server';
 import { redirect } from 'next/navigation';
 import { SubmitButton } from '@/components/submit-button';
 import { Badge } from '@/components/ui';
@@ -10,12 +10,25 @@ import {
   saveClubSms,
   savePlatformAlerts,
   savePlatformBilling,
+  savePlatformEmail,
   savePlatformSms,
   savePlatformTaifa,
+  sendPlatformTestEmail,
 } from '../actions';
 import { type Section, SectionNav } from './section-nav';
 
 const MSG: Record<string, [string, string]> = {
+  'email-ok': ['green', 'Email account saved. Send a test to check delivery.'],
+  'email-key': ['red', 'A Resend API key starts with re_. Copy it again from Resend › API keys.'],
+  'email-rejected': ['red', 'Resend did not accept that key.'],
+  'email-unreachable': ['amber', 'Resend did not answer in time; nothing was saved. Try again.'],
+  'email-domain': ['red', 'That sending address is not on a domain in this Resend account.'],
+  'email-from': ['red', 'Enter a full sending address, e.g. lango@navac.co.ke.'],
+  'email-reply': ['red', 'Enter a full reply-to address, or leave it blank.'],
+  'email-secret': ['red', 'A Resend webhook signing secret starts with whsec_.'],
+  'email-missing': ['amber', 'Paste the API key from Resend › API keys.'],
+  'email-test-sent': ['green', 'Test email sent to your address. It should arrive within a minute.'],
+  'email-test-failed': ['red', 'The test email was not sent. The reason is in the list below.'],
   'sms-ok': ['green', 'SMS account saved.'],
   'sms-rejected': ['red', 'Source Code rejected that API key.'],
   'sms-unreachable': ['amber', 'Source Code did not answer in time; nothing was saved.'],
@@ -36,6 +49,7 @@ const MSG: Record<string, [string, string]> = {
   'grant-invalid': ['red', 'Enter a whole number of units and a note.'],
 };
 const SECTION_OF: Record<string, string> = {
+  email: 'email',
   sms: 'sms',
   taifa: 'payments',
   billing: 'billing',
@@ -80,6 +94,11 @@ export default async function PlatformSettings({ searchParams }: { searchParams:
   >`select app_platform_get('taifapay') as data`;
   const taifa = taifaRow?.data;
   const billing = await platformBilling(db());
+  const emailCfg = await platformEmailConfig(db());
+  const emailFrom = emailCfg?.from.match(/^(.*?)\s*<([^>]+)>$/);
+  const recentEmail = await db()<
+    { id: string; created_at: Date; to_email: string; subject: string; status: string; error: string | null }[]
+  >`select id, created_at, to_email, subject, status, error from email_messages order by created_at desc limit 8`;
   const [billingRow] = await db()<{ data: unknown }[]>`select app_platform_get('billing') as data`;
   const [statusRow] = await db()<{ data: { balance?: number; at?: string } | null }[]>`
     select app_platform_get('sms_status') as data`;
@@ -119,6 +138,7 @@ export default async function PlatformSettings({ searchParams }: { searchParams:
       </div>
     ) : null;
   const sections: Section[] = [
+    { id: 'email', label: 'Email', state: emailCfg ? 'done' : 'todo' },
     { id: 'sms', label: 'SMS account', state: keyOk ? 'done' : 'todo' },
     { id: 'payments', label: 'SMS payments', state: taifa?.clientId ? 'done' : 'todo' },
     { id: 'billing', label: 'Billing details', state: billingRow?.data ? 'done' : 'todo' },
@@ -138,6 +158,103 @@ export default async function PlatformSettings({ searchParams }: { searchParams:
           <SectionNav sections={sections} focus={msgAt} />
         </div>
         <div className="min-w-0 rounded-[10px] border border-[#E4E8EF] bg-white">
+          <section id="email" className={sec}>
+            <Head
+              title="Email"
+              desc="NAVAC's Resend account sends every Lango email: invitations, password resets, receipts, invoices and alerts."
+              badge={<Status ok={!!emailCfg} on="Connected" off="Not connected" />}
+            />
+            <Notice id="email" />
+            <form action={savePlatformEmail} className="mt-5 space-y-4">
+              <label className="block">
+                <span className={label}>Resend API key</span>
+                <input
+                  name="apiKey"
+                  type="password"
+                  autoComplete="off"
+                  placeholder={
+                    emailCfg
+                      ? '•••••••• stored · paste a new key to replace'
+                      : 'Resend › API keys › Create API key (sending access)'
+                  }
+                  className={input}
+                />
+              </label>
+              <div className="grid gap-4 sm:grid-cols-3">
+                <label>
+                  <span className={label}>Sender name</span>
+                  <input name="fromName" defaultValue={emailFrom?.[1] || 'Lango'} className={input} />
+                </label>
+                <label>
+                  <span className={label}>Sending address</span>
+                  <input
+                    name="fromAddress"
+                    type="email"
+                    required
+                    defaultValue={emailFrom?.[2] || 'lango@navac.co.ke'}
+                    className={input}
+                  />
+                </label>
+                <label>
+                  <span className={label}>Replies go to</span>
+                  <input
+                    name="replyTo"
+                    type="email"
+                    defaultValue={emailCfg?.replyTo ?? ''}
+                    placeholder="support@navac.co.ke"
+                    className={input}
+                  />
+                </label>
+              </div>
+              <label className="block">
+                <span className={label}>Webhook signing secret (optional, for delivery tracking)</span>
+                <input
+                  name="webhookSecret"
+                  type="password"
+                  autoComplete="off"
+                  placeholder={emailCfg?.webhookSecret ? '•••••••• stored' : 'whsec_… from Resend › Webhooks'}
+                  className={input}
+                />
+              </label>
+              <div className="flex flex-wrap items-center justify-end gap-3">
+                <SubmitButton pendingText="Checking with Resend…" className="btn-primary">
+                  Verify &amp; save
+                </SubmitButton>
+              </div>
+            </form>
+            {emailCfg && (
+              <form action={sendPlatformTestEmail} className="mt-3 flex justify-end">
+                <SubmitButton pendingText="Sending…" className="btn-ghost">
+                  Send test email to me
+                </SubmitButton>
+              </form>
+            )}
+            {recentEmail.length > 0 && (
+              <ul className="mt-4 divide-y divide-[#F0F2F6] rounded-lg border border-[#E4E8EF] text-xs">
+                {recentEmail.map((e) => (
+                  <li key={e.id} className="flex items-center gap-3 px-3 py-2">
+                    <span className="w-24 shrink-0 text-ink-500">{dateTime(e.created_at)}</span>
+                    <span className="min-w-0 flex-1 truncate" title={e.error ?? e.subject}>
+                      {e.subject} · {e.to_email}
+                      {e.error && <span className="block truncate text-rose-700">{e.error}</span>}
+                    </span>
+                    <Badge
+                      tone={
+                        ['sent', 'delivered'].includes(e.status)
+                          ? 'green'
+                          : ['failed', 'bounced', 'complained'].includes(e.status)
+                            ? 'red'
+                            : 'gray'
+                      }
+                    >
+                      {e.status}
+                    </Badge>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+
           <section id="sms" className={sec}>
             <Head
               title="SMS account"

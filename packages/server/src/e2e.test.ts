@@ -1,3 +1,4 @@
+import { createHmac } from 'node:crypto';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -5,9 +6,24 @@ import { AxtraxClient, demoSeed, FakeAxtrax } from '@lango/axtrax';
 import { Bridge, Journal, sign } from '@lango/bridge';
 import { connect, migrate, type Sql, withTenant } from '@lango/db';
 import { DateTime } from 'luxon';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { rebuildAccessState } from './access.js';
+import {
+  acceptInvite,
+  checkLink,
+  createSession,
+  inviteStaff,
+  readSession,
+  requestPasswordReset,
+  resetPassword,
+  revokeAllSessions,
+  staffByEmail,
+  startSignInCode,
+  verifySignInCode,
+} from './accounts.js';
 import { handleAck, handleDrift, handleEvents, handleInventory, handlePair, handleSync } from './bridge-api.js';
+import { encrypt } from './crypto.js';
+import { applyResendEvent, Resend, sendEmail, verifySvix } from './email.js';
 import {
   platformAlerts,
   previewAnnouncement,
@@ -761,5 +777,131 @@ describe('walking skeleton: pay → door', () => {
     expect(await verifyOtp(app, 'demo-club', 21088, code)).toEqual({ tenantId, memberId: w?.id });
     expect(await verifyOtp(app, 'demo-club', 21088, code)).toBeNull();
     expect(await requestOtp(app, 'demo-club', 99999, client)).toBe('unknown');
+  });
+  it('accounts: invitation, password reset, sessions and sign-in codes, with email through Resend', async () => {
+    const mails: { to: string[]; subject: string; html: string; key: string | null }[] = [];
+    const resendFetch = (async (_u: string, i: RequestInit) => {
+      const b = JSON.parse(String(i.body));
+      mails.push({ to: b.to, subject: b.subject, html: b.html, key: new Headers(i.headers).get('Idempotency-Key') });
+      return new Response(JSON.stringify({ id: `em_${mails.length}` }));
+    }) as typeof fetch;
+    const noPwned = (async () => new Response('')) as typeof fetch;
+    const resend = new Resend('re_test', resendFetch);
+    // Every Resend call in this test goes to the fake (invitations and resets build their own client).
+    vi.stubGlobal('fetch', resendFetch);
+    vi.stubEnv('APP_ENCRYPTION_KEY', 'test-only-key-0123456789abcdef0123456789');
+    await owner`insert into platform_settings (key, data) values ('email', ${owner.json({ apiKey: encrypt('re_test'), from: 'Lango <lango@navac.co.ke>' } as never)})
+      on conflict (key) do update set data = excluded.data`;
+    // A plain send is logged, and the same idempotency key never sends twice.
+    expect(
+      await sendEmail(
+        app,
+        { to: 'a@x.test', subject: 'Hi', html: '<p>Hi</p>', text: 'Hi', kind: 'test', key: 'k1' },
+        resend,
+      ),
+    ).toBe(true);
+    expect(
+      await sendEmail(
+        app,
+        { to: 'a@x.test', subject: 'Hi', html: '<p>Hi</p>', text: 'Hi', kind: 'test', key: 'k1' },
+        resend,
+      ),
+    ).toBe(true);
+    expect(mails).toHaveLength(1);
+    expect(mails[0]?.key).toBe('k1');
+
+    // Signed delivery events update the log; a forged signature is refused.
+    const secret = `whsec_${Buffer.from('lango-test-secret').toString('base64')}`;
+    const body = JSON.stringify({ type: 'email.delivered', data: { email_id: 'em_1' } });
+    const ts = String(Math.floor(Date.now() / 1000));
+    const sig = createHmac('sha256', Buffer.from('lango-test-secret')).update(`msg_1.${ts}.${body}`).digest('base64');
+    expect(verifySvix(secret, { id: 'msg_1', timestamp: ts, signature: `v1,${sig}` }, body)).toBe(true);
+    expect(verifySvix(secret, { id: 'msg_1', timestamp: ts, signature: 'v1,AAAA' }, body)).toBe(false);
+    expect(verifySvix(secret, { id: 'msg_1', timestamp: String(Number(ts) - 900), signature: `v1,${sig}` }, body)).toBe(
+      false,
+    );
+    expect(await applyResendEvent(app, JSON.parse(body))).toBe(true);
+    expect((await owner`select status from email_messages where provider_id = 'em_1'`)[0]).toEqual({
+      status: 'delivered',
+    });
+
+    // Invitation: the account starts switched off; the emailed link sets the password once.
+    const [pa] = await owner`select id from staff_users where email = 'sms-admin@navac.test'`;
+    const inv = await inviteStaff(
+      app,
+      {
+        inviterId: pa?.id,
+        email: 'desk@demo.test',
+        name: 'Akinyi Desk',
+        role: 'reception',
+        tenantId,
+        baseUrl: 'https://lango.test',
+        ctx: { inviterName: 'SMS Admin', to: 'Demo Club', roleLabel: 'Front desk' },
+      },
+      null,
+    );
+    expect(inv.emailed).toBe(true);
+    const link = mails.at(-1)?.html.match(/https:\/\/lango\.test\/invite\/([A-Za-z0-9_-]+)/)?.[1] as string;
+    expect(link).toBeTruthy();
+    expect((await staffByEmail(app, 'desk@demo.test'))?.active).toBe(false);
+    expect((await checkLink(app, 'invite', link)).ok).toBe(true);
+    expect(await acceptInvite(app, link, { password: 'password123' }, noPwned)).toMatchObject({
+      ok: false,
+      reason: 'password',
+    });
+    expect(await acceptInvite(app, link, { password: 'blue gate at dawn 7' }, noPwned)).toMatchObject({ ok: true });
+    expect(await acceptInvite(app, link, { password: 'blue gate at dawn 7' }, noPwned)).toMatchObject({
+      ok: false,
+      reason: 'used',
+    });
+    const desk = await staffByEmail(app, 'desk@demo.test');
+    expect(desk).toMatchObject({ active: true, role: 'reception', tenant_id: tenantId });
+    // Only NAVAC adds partner logins; a club cannot invite into another club.
+    await expect(
+      inviteStaff(
+        app,
+        {
+          inviterId: desk?.id as string,
+          email: 'x@y.test',
+          name: 'X',
+          role: 'manager',
+          tenantId: otherTenant,
+          baseUrl: 'https://lango.test',
+          ctx: { inviterName: 'X', to: 'Other', roleLabel: 'Manager' },
+        },
+        null,
+      ),
+    ).rejects.toThrow();
+
+    // Sessions live on the server: revoking ends them at once.
+    const s1 = await createSession(app, { staff: desk as NonNullable<typeof desk> });
+    expect(await readSession(app, s1.token)).toMatchObject({ uid: desk?.id, tid: tenantId, role: 'reception' });
+    expect(await readSession(app, 'not-a-real-session-token-xxxxxxxx')).toBeNull();
+
+    // Password reset: same outcome for unknown emails; the link works once; old sessions end.
+    const before = mails.length;
+    await requestPasswordReset(app, 'nobody@nowhere.test', 'https://lango.test');
+    expect(mails).toHaveLength(before);
+    await requestPasswordReset(app, 'desk@demo.test', 'https://lango.test');
+    const reset = mails.at(-1)?.html.match(/https:\/\/lango\.test\/reset\/([A-Za-z0-9_-]+)/)?.[1] as string;
+    expect(await resetPassword(app, reset, 'a new phrase for the gate', noPwned)).toMatchObject({ ok: true });
+    expect(await resetPassword(app, reset, 'another phrase entirely', noPwned)).toMatchObject({
+      ok: false,
+      reason: 'used',
+    });
+    expect(await readSession(app, s1.token)).toBeNull();
+    expect(mails.at(-1)?.subject).toBe('Your Lango password was changed');
+
+    // Sign-in code by email (no phone): wrong code refused, right code accepted once.
+    const ch = await startSignInCode(app, desk as NonNullable<typeof desk>, 'sms', null);
+    expect(ch).toMatchObject({ channel: 'email' });
+    const code = mails.at(-1)?.subject.match(/(\d{6})/)?.[1] as string;
+    const id = (ch as { id: string }).id;
+    expect(await verifySignInCode(app, id, desk?.id as string, code === '000000' ? '111111' : '000000')).toBe(false);
+    expect(await verifySignInCode(app, id, desk?.id as string, code)).toBe(true);
+    expect(await verifySignInCode(app, id, desk?.id as string, code)).toBe(false);
+    expect(await revokeAllSessions(app, desk?.id as string, 'test')).toBe(0);
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
   });
 });
