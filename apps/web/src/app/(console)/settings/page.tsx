@@ -64,8 +64,18 @@ export default async function Settings({
   const topups = await withTenant(
     db(),
     s.tid,
-    (tx) => tx<{ id: string; created_at: Date; amount_kes: number; units: number; status: string; trigger: string }[]>`
-      select id, created_at, amount_kes, units, status, trigger from sms_topups order by created_at desc limit 5`,
+    (tx) => tx<
+      {
+        id: string;
+        created_at: Date;
+        amount_kes: number;
+        units: number;
+        status: string;
+        trigger: string;
+        invoice_no: string;
+      }[]
+    >`
+      select id, created_at, amount_kes, units, status, trigger, invoice_no from sms_topups order by created_at desc limit 5`,
   );
   const checklist = await onboardingChecklist(db(), s.tid);
   const staff = await withTenant(
@@ -381,17 +391,25 @@ export default async function Settings({
           {topups.length > 0 && (
             <ul className="mt-2 text-xs text-ink-500">
               {topups.map((t) => (
-                <li key={t.id} className="flex gap-3 py-1">
+                <li key={t.id} className="flex items-center gap-3 py-1">
                   <span className="w-24 shrink-0">{dateTime(t.created_at)}</span>
                   <span className="flex-1">
                     {kes(t.amount_kes)} → {t.units.toLocaleString('en-KE')} SMS
                     {t.trigger === 'auto' ? ' · automatic' : ''}
                   </span>
                   <Badge tone={t.status === 'completed' ? 'green' : t.status === 'pending' ? 'blue' : 'gray'}>
-                    {t.status}
+                    {t.status === 'completed' ? 'paid' : t.status}
                   </Badge>
+                  <Link href={`/settings/sms/${t.id}`} className="w-14 text-right font-medium text-ink-700 underline">
+                    {t.status === 'completed' ? 'Receipt' : 'Invoice'}
+                  </Link>
                 </li>
               ))}
+              <li className="pt-1">
+                <Link href="/settings/sms" className="underline">
+                  All SMS purchases
+                </Link>
+              </li>
             </ul>
           )}
           <Link

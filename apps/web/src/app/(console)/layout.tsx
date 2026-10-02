@@ -10,7 +10,7 @@ export default async function ConsoleLayout({ children }: { children: React.Reac
   return (
     <div className="min-h-screen">
       <Nav tenant={t?.name ?? ''} user={s.name} role={s.role} partner={s.partner} />
-      <main className="px-5 py-8 lg:ml-64 lg:px-10">
+      <main className="px-5 py-8 lg:ml-64 lg:px-10 print:ml-0 print:p-0">
         <div className="mx-auto max-w-[1240px]">{children}</div>
       </main>
     </div>

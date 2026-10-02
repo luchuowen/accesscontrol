@@ -59,3 +59,7 @@
   over 1 h) go to the platform alert phone, 08:00–20:00 Nairobi, at most daily.
 - Member portal signs in with a 6-digit SMS code (10 min, 5 tries, 1/min, 5/h); clubs without SMS fall back to
   confirming the phone number. Members can turn off club news (`members.sms_news`).
+- SMS credit is sold by NAVAC through NAVAC's one existing TaifaPay merchant (shared with other NAVAC services; its
+  webhook is left alone, the 60 s poller settles Lango top-ups). Each purchase has an invoice number LSMS-NNNNN used
+  as the M-Pesa account reference, description "Lango SMS ‹club›"; clubs see the invoice, then receipt (M-Pesa code),
+  under Settings › SMS purchases. NAVAC's billing details are set in the SaaS console.

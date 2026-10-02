@@ -2,7 +2,7 @@ import type { Sql } from '@lango/db';
 import { withTenant } from '@lango/db';
 import { decrypt } from './crypto.js';
 import { clubSms, msisdn, platformSmsConfig } from './sms.js';
-import { initiatedTransactionId, normalStatus, TaifaPay, transactionRecord } from './taifapay.js';
+import { initiatedTransactionId, normalStatus, pick, TaifaPay, transactionRecord } from './taifapay.js';
 
 /** NAVAC's own TaifaPay account (Platform settings): SMS credit is bought from NAVAC, not from the club. */
 export async function platformTaifa(sql: Sql): Promise<TaifaPay | null> {
@@ -11,6 +11,22 @@ export async function platformTaifa(sql: Sql): Promise<TaifaPay | null> {
   const t = row?.data;
   if (!t?.clientId || !t.clientSecret) return null;
   return new TaifaPay({ env: t.env, clientId: t.clientId, clientSecret: decrypt(t.clientSecret) });
+}
+
+/** "Lango SMS Demo Club" (TaifaPay/M-Pesa show about 20 characters of the description). */
+export const smsDescription = (club: string) => `Lango SMS ${club}`.slice(0, 20).trim();
+
+/** NAVAC's billing details printed on SMS invoices and receipts (SaaS console). */
+export interface Billing {
+  name: string;
+  address?: string;
+  pin?: string;
+  email?: string;
+  phone?: string;
+}
+export async function platformBilling(sql: Sql): Promise<Billing> {
+  const [row] = await sql<{ data: Partial<Billing> | null }[]>`select app_platform_get('billing') as data`;
+  return { ...row?.data, name: row?.data?.name || 'NAVAC Global' };
 }
 
 export type TopupResult =
@@ -43,13 +59,16 @@ export async function startTopup(
     const club = await clubSms(tx, tenantId, platform);
     const units = Math.floor(a.amountKes / club.priceKes);
     if (units < 1) return null;
-    const [t] = await tx<{ slug: string }[]>`select slug from tenants where id = ${tenantId}`;
-    const [row] = await tx<{ id: string }[]>`
+    const [t] = await tx<{ name: string }[]>`select name from tenants where id = ${tenantId}`;
+    const [row] = await tx<{ id: string; invoice_no: string }[]>`
       insert into sms_topups (tenant_id, amount_kes, price_kes, units, phone, trigger, created_by)
-      values (${tenantId}, ${a.amountKes}, ${club.priceKes}, ${units}, ${phone}, ${a.trigger}, ${a.actor}) returning id`;
+      values (${tenantId}, ${a.amountKes}, ${club.priceKes}, ${units}, ${phone}, ${a.trigger}, ${a.actor})
+      returning id, invoice_no`;
     await tx`insert into audit_log (tenant_id, actor, action, entity, data)
              values (${tenantId}, ${a.actor}, 'sms.topup_requested', ${row?.id ?? null}, ${tx.json({ amountKes: a.amountKes, units, trigger: a.trigger } as never)})`;
-    return { id: row?.id as string, units, ref: `SMS-${t?.slug ?? 'club'}`.slice(0, 20) };
+    // NAVAC's one TaifaPay account takes payments for many services: the invoice number is the account reference
+    // and the description names the service and the club, so each line on the statement explains itself.
+    return { id: row?.id as string, units, ref: row?.invoice_no as string, desc: smsDescription(t?.name ?? '') };
   });
   if (!created) return { ok: false, reason: a.trigger === 'auto' ? 'pending' : 'amount' };
   try {
@@ -57,7 +76,7 @@ export async function startTopup(
       phone,
       amount: a.amountKes,
       accountReference: created.ref,
-      description: 'SMS credit',
+      description: created.desc,
       externalId: created.id,
     });
     const ref = initiatedTransactionId(res);
@@ -85,7 +104,8 @@ export async function reconcileTopups(
   let credited = 0;
   for (const p of pending) {
     try {
-      const rec = transactionRecord(await taifa.transaction(p.provider_ref));
+      const raw = await taifa.transaction(p.provider_ref);
+      const rec = transactionRecord(raw);
       if (!rec) continue;
       const state = normalStatus(rec.status);
       if (state === 'failed') {
@@ -98,9 +118,11 @@ export async function reconcileTopups(
       }
       if (state !== 'completed' || Number(rec.amount) !== p.amount_kes) continue;
       credited += await withTenant(sql, p.tenant_id, async (tx) => {
-        const [t] = await tx<{ units: number; phone: string; amount_kes: number }[]>`
-          update sms_topups set status = 'completed', completed_at = now()
-          where id = ${p.id} and status = 'pending' returning units, phone, amount_kes`;
+        const code = pick(raw, 'mpesaReceiptNumber', 'MpesaReceiptNumber', 'receiptNumber', 'mpesaReceipt', 'mpesaRef');
+        const receipt = typeof code === 'string' && /^[A-Z0-9]{8,12}$/.test(code) ? code : null;
+        const [t] = await tx<{ units: number; phone: string; amount_kes: number; invoice_no: string }[]>`
+          update sms_topups set status = 'completed', completed_at = now(), receipt_ref = ${receipt}
+          where id = ${p.id} and status = 'pending' returning units, phone, amount_kes, invoice_no`;
         if (!t) return 0;
         await tx`insert into sms_ledger (tenant_id, units, kind, ref, amount_kes, note)
                  values (${p.tenant_id}, ${t.units}, 'topup', ${p.id}, ${t.amount_kes}, ${`M-Pesa ${p.provider_ref}`})
@@ -108,7 +130,7 @@ export async function reconcileTopups(
         const [club] = await tx<{ name: string }[]>`select name from tenants where id = ${p.tenant_id}`;
         const [bal] = await tx<{ units: string }[]>`select sum(units) as units from sms_ledger`;
         await tx`insert into sms_messages (tenant_id, phone, body, kind)
-                 values (${p.tenant_id}, ${t.phone}, ${`${club?.name}: KES ${t.amount_kes.toLocaleString('en-KE')} received. ${t.units.toLocaleString('en-KE')} SMS added; balance ${Number(bal?.units ?? 0).toLocaleString('en-KE')} SMS.`}, 'topup')`;
+                 values (${p.tenant_id}, ${t.phone}, ${`${club?.name}: KES ${t.amount_kes.toLocaleString('en-KE')} received (${t.invoice_no}). ${t.units.toLocaleString('en-KE')} SMS added; balance ${Number(bal?.units ?? 0).toLocaleString('en-KE')} SMS.`}, 'topup')`;
         await tx`insert into audit_log (tenant_id, actor, action, entity, data)
                  values (${p.tenant_id}, 'taifapay', 'sms.topup_completed', ${p.id}, ${tx.json({ units: t.units, amountKes: t.amount_kes } as never)})`;
         return 1;

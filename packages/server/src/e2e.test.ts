@@ -21,7 +21,7 @@ import { importMembers, onboardingChecklist, planImport } from './onboarding.js'
 import { requestOtp, verifyOtp } from './otp.js';
 import { assignPayment, recordPayment } from './payments.js';
 import { dispatchSms, msisdn, queueReminders, SourceCodeSms, smsUnits } from './sms.js';
-import { reconcileTopups, startTopup } from './sms-topup.js';
+import { reconcileTopups, smsDescription, startTopup } from './sms-topup.js';
 import { handleTaifaWebhook, reconcileTaifaPay, TaifaAuthError, TaifaPay } from './taifapay.js';
 
 /**
@@ -608,7 +608,7 @@ describe('walking skeleton: pay → door', () => {
         JSON.stringify(
           String(u).endsWith('/auth/token')
             ? { access_token: 't', expires_in: '3599' }
-            : { transaction: { id: 'TP-TOPUP-1', status, amount: 1500 } },
+            : { transaction: { id: 'TP-TOPUP-1', status, amount: 1500, mpesaReceiptNumber: 'TJ12ABC3XY' } },
         ),
       )) as typeof fetch;
     const client = new TaifaPay({ env: 'live', clientId: 'navac', clientSecret: 's' }, fakeFetch);
@@ -625,8 +625,12 @@ describe('walking skeleton: pay → door', () => {
     expect(await reconcileTopups(app, () => {}, client)).toBe(1);
     expect(await reconcileTopups(app, () => {}, client)).toBe(0); // credited once
     expect((await total()) - before).toBe(1000);
-    const [row] = await owner`select status from sms_topups where id = ${t?.id}`;
-    expect(row).toEqual({ status: 'completed' });
+    const [row] = await owner`select status, invoice_no, receipt_ref from sms_topups where id = ${t?.id}`;
+    expect(row).toMatchObject({ status: 'completed', receipt_ref: 'TJ12ABC3XY' });
+    expect(row?.invoice_no).toMatch(/^LSMS-\d{5}$/); // also the M-Pesa account reference on NAVAC's statement
+    const [note] = await owner`select body from sms_messages where kind = 'topup' order by created_at desc limit 1`;
+    expect(note?.body).toContain(`(${row?.invoice_no})`);
+    expect(smsDescription('Demo Club')).toBe('Lango SMS Demo Club');
     expect(
       await startTopup(app, tenantId, { amountKes: 1000, phone: '0726049097', trigger: 'manual', actor: 'test' }),
     ).toEqual({

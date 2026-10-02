@@ -1,14 +1,20 @@
-import { decrypt, platformSmsConfig, SourceCodeSms } from '@lango/server';
+import { decrypt, platformBilling, platformSmsConfig, SourceCodeSms } from '@lango/server';
 import { ArrowLeft, CreditCard, MessageSquare, UsersRound } from 'lucide-react';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
-import { CopyField } from '@/components/copy-field';
 import { SubmitButton } from '@/components/submit-button';
 import { Badge, PageHeader, Stat } from '@/components/ui';
 import { dateTime, kes } from '@/lib/format';
 import { requirePartner } from '@/lib/session';
 import { db } from '@/server/db';
-import { grantSms, saveClubSms, savePlatformSms, savePlatformTaifa, setPartnerActive } from '../actions';
+import {
+  grantSms,
+  saveClubSms,
+  savePlatformBilling,
+  savePlatformSms,
+  savePlatformTaifa,
+  setPartnerActive,
+} from '../actions';
 import { AddPartnerForm } from './partner-form';
 
 const MSG: Record<string, [string, string]> = {
@@ -17,6 +23,8 @@ const MSG: Record<string, [string, string]> = {
   'sms-unreachable': ['amber', 'Source Code did not answer in time; nothing was saved.'],
   'sms-missing': ['amber', 'Paste the API key from Source Code › Developers/API › Show API Key.'],
   'sms-price': ['red', 'Cost and price must be positive amounts.'],
+  'billing-ok': ['green', 'Billing details saved. New and existing SMS invoices show them.'],
+  'billing-name': ['red', 'Enter the business name.'],
   'taifa-ok': ['green', 'NAVAC TaifaPay account connected. Clubs can now buy SMS credit by M-Pesa.'],
   'taifa-rejected': ['red', 'TaifaPay rejected those keys.'],
   'taifa-unreachable': ['amber', 'TaifaPay did not answer in time; nothing was saved.'],
@@ -40,6 +48,7 @@ export default async function SaasConsole({ searchParams }: { searchParams: Prom
     { data: { env?: string; clientId?: string } | null }[]
   >`select app_platform_get('taifapay') as data`;
   const taifa = taifaRow?.data;
+  const billing = await platformBilling(db());
   const [statusRow] = await db()<{ data: { balance?: number; at?: string } | null }[]>`
     select app_platform_get('sms_status') as data`;
   const lastCredit = statusRow?.data;
@@ -69,7 +78,6 @@ export default async function SaasConsole({ searchParams }: { searchParams: Prom
   const price = cfg?.priceKes ?? 1;
   const sold = clubs.reduce((a, c) => a + Number(c.sold_kes_30d), 0);
   const sent = clubs.reduce((a, c) => a + Number(c.sent_30d), 0);
-  const base = (process.env.PUBLIC_URL ?? '').replace(/\/$/, '');
   const msg = m ? MSG[m] : undefined;
   return (
     <>
@@ -219,14 +227,43 @@ export default async function SaasConsole({ searchParams }: { searchParams: Prom
               <span className="label">Client secret</span>
               <input name="clientSecret" type="password" autoComplete="new-password" className="input mt-1.5" />
             </label>
-            <div>
-              <span className="label">Deposit webhook URL</span>
-              <div className="mt-1.5">
-                <CopyField value={`${base}/api/webhooks/taifapay-platform`} label="Deposit webhook URL" />
-              </div>
-            </div>
+            <p className="text-xs text-ink-500">
+              Use NAVAC&apos;s existing merchant and leave its webhook as it is: Lango checks its SMS payments with
+              TaifaPay every minute. Each payment shows as “Lango SMS ‹club›” with the invoice number (LSMS-…) as the
+              account reference.
+            </p>
             <SubmitButton pendingText="Checking the keys with TaifaPay…" className="btn-primary w-full">
               Verify &amp; save
+            </SubmitButton>
+          </form>
+        </section>
+
+        <section className="card p-6 lg:col-span-2">
+          <div className="font-medium">Billing details on SMS invoices and receipts</div>
+          <div className="text-xs text-ink-500">Clubs see these on every SMS purchase in their console.</div>
+          <form action={savePlatformBilling} className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+            <label className="block">
+              <span className="label">Business name</span>
+              <input name="name" required defaultValue={billing.name} className="input mt-1.5" />
+            </label>
+            <label className="block">
+              <span className="label">Address</span>
+              <input name="address" defaultValue={billing.address ?? ''} className="input mt-1.5" />
+            </label>
+            <label className="block">
+              <span className="label">KRA PIN</span>
+              <input name="pin" defaultValue={billing.pin ?? ''} className="input mt-1.5" />
+            </label>
+            <label className="block">
+              <span className="label">Email</span>
+              <input name="email" type="email" defaultValue={billing.email ?? ''} className="input mt-1.5" />
+            </label>
+            <label className="block">
+              <span className="label">Phone</span>
+              <input name="phone" inputMode="tel" defaultValue={billing.phone ?? ''} className="input mt-1.5" />
+            </label>
+            <SubmitButton pendingText="Saving…" className="btn-ghost sm:col-span-2 lg:col-span-5">
+              Save billing details
             </SubmitButton>
           </form>
         </section>

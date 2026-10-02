@@ -120,6 +120,25 @@ export async function savePlatformSms(form: FormData) {
   back('sms-ok');
 }
 
+/** NAVAC's billing details on SMS invoices and receipts. */
+export async function savePlatformBilling(form: FormData) {
+  const s = await platformOnly();
+  const f = (k: string, n = 120) =>
+    String(form.get(k) ?? '')
+      .trim()
+      .slice(0, n) || undefined;
+  const billing = {
+    name: f('name', 80),
+    address: f('address'),
+    pin: f('pin', 20),
+    email: f('email'),
+    phone: f('phone', 20),
+  };
+  if (!billing.name) back('billing-name');
+  await db()`select app_platform_set(${s.uid}, 'billing', ${db().json(billing as never)})`;
+  back('billing-ok');
+}
+
 /** NAVAC's own TaifaPay merchant keys: SMS credit purchases are paid here. */
 export async function savePlatformTaifa(form: FormData) {
   const s = await platformOnly();

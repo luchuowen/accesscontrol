@@ -37,7 +37,7 @@ export function Nav({
 }) {
   const path = usePathname();
   return (
-    <aside className="fixed inset-y-0 left-0 hidden w-64 flex-col bg-ink-950 px-4 py-6 text-ink-300 lg:flex">
+    <aside className="fixed inset-y-0 left-0 hidden w-64 flex-col bg-ink-950 px-4 py-6 text-ink-300 lg:flex print:hidden">
       <div className="flex items-center gap-2.5 px-2">
         <div className="grid h-8 w-8 place-items-center rounded-lg bg-brand-500 text-ink-950">
           <Activity size={18} strokeWidth={2.5} />
