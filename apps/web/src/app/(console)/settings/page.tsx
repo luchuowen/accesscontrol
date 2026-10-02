@@ -102,7 +102,6 @@ export default async function Settings({ searchParams }: { searchParams: Promise
                 <div className="mt-1.5">
                   <CopyField value={webhook} label="Deposit webhook URL" />
                 </div>
-                <p className="mt-1.5 text-xs text-ink-500">Set this as the Deposit URL under TaifaPay › Webhooks.</p>
               </div>
               <SubmitButton pendingText="Checking the keys with TaifaPay…" className="btn-primary w-full">
                 Verify &amp; save
