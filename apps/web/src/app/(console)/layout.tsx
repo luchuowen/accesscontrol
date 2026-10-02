@@ -26,7 +26,7 @@ export default async function ConsoleLayout({ children }: { children: React.Reac
         platform={!!plat?.ok}
       />
       <TopBar user={s.name} roleLabel={role} alerts={alerts} canSearch={can(s, 'members.view')} />
-      <main className="px-5 py-8 lg:ml-64 lg:px-10 print:ml-0 print:p-0">
+      <main data-console className="px-5 py-8 lg:ml-64 lg:px-10 print:ml-0 print:p-0">
         <div className="mx-auto max-w-[1240px]">{children}</div>
       </main>
     </div>
