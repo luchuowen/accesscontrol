@@ -1,20 +1,16 @@
-import { can, onboardingChecklist } from '@lango/server';
+import { can } from '@lango/server';
 import { ArrowUpRight, CircleAlert, Wifi, WifiOff } from 'lucide-react';
 import Link from 'next/link';
-import { Checklist } from '@/components/checklist';
 import { Badge, Bars, PageHeader, Stat } from '@/components/ui';
 import { dashboard } from '@/lib/data';
 import { ago, dateTime, daysLeft, kes, kesShort, time } from '@/lib/format';
 import { requireSession } from '@/lib/session';
-import { db } from '@/server/db';
 
 export default async function Overview({ searchParams }: { searchParams: Promise<{ denied?: string }> }) {
   const s = await requireSession();
   const { denied } = await searchParams;
   const full = can(s, 'reports.all');
-  const admin = can(s, 'settings.payments') || can(s, 'team.manage');
-  const [d, checklist] = await Promise.all([dashboard(s.tid), onboardingChecklist(db(), s.tid)]);
-  const setupDone = checklist.every((i) => i.done);
+  const d = await dashboard(s.tid);
   const growth = d.revenue.prevMonth
     ? Math.round(((d.revenue.month - d.revenue.prevMonth) / d.revenue.prevMonth) * 100)
     : null;
@@ -36,11 +32,6 @@ export default async function Overview({ searchParams }: { searchParams: Promise
       {denied && (
         <div className="mb-4 rounded-xl bg-amber-50 p-3 text-sm text-amber-900 ring-1 ring-amber-200">
           Your role doesn’t include that page. Ask the club’s owner or an admin if you need it.
-        </div>
-      )}
-      {admin && !setupDone && (
-        <div className="mb-4">
-          <Checklist items={checklist} />
         </div>
       )}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
