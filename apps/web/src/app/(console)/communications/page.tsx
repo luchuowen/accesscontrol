@@ -155,7 +155,9 @@ export default async function Communications({ searchParams }: { searchParams: P
     : !replier
       ? 'You can read this conversation but not answer it.'
       : c.channel === 'sms' && !chans.sms.on
-        ? `SMS can’t be sent: ${chans.sms.why ?? 'it is off.'} Turn it on in Settings › Messages.`
+        ? chans.sms.why === 'SMS is off for the club.'
+          ? 'SMS is off for the club. Turn it on in Settings › Messages & SMS.'
+          : 'SMS isn’t connected yet. NAVAC sets it up.'
         : c.channel === 'whatsapp' && !chans.whatsapp.on
           ? 'WhatsApp is not connected for the club. Your partner sets it up.'
           : c.channel === 'whatsapp' && (!c.last_in_at || Date.now() - c.last_in_at.getTime() > 24 * 3600_000)

@@ -195,7 +195,7 @@ export async function MessagesTab({ s, m, sms }: { s: Session; m?: string; sms?:
                 <input type="checkbox" name="enabled" defaultChecked={!!n.enabled} className="h-4 w-4 accent-ink-900" />
                 Send SMS from this club
               </label>
-              <div className="grid gap-4 xl:grid-cols-3">
+              <div className="grid gap-4 xl:grid-cols-2">
                 <fieldset className="space-y-2.5 rounded-xl bg-ink-50/60 p-4">
                   <legend className="label mb-2">To members</legend>
                   <Toggle name="receipts" on={n.receipts !== false}>
@@ -281,12 +281,12 @@ export async function MessagesTab({ s, m, sms }: { s: Session; m?: string; sms?:
                     </span>
                   </label>
                 </fieldset>
-                <fieldset className="space-y-2.5 rounded-xl bg-ink-50/60 p-4">
+                <fieldset className="space-y-2.5 rounded-xl bg-ink-50/60 p-4 xl:col-span-2">
                   <legend className="label mb-2 flex items-center gap-1.5">
                     <Moon size={12} /> Quiet hours
                   </legend>
                   <div className="flex items-center gap-2">
-                    <select name="quietFrom" defaultValue={quiet.from} className="input py-1">
+                    <select name="quietFrom" defaultValue={quiet.from} className="input w-28 py-1">
                       {hours.map((h) => (
                         <option key={h} value={h}>
                           {hh(h)}
@@ -294,7 +294,7 @@ export async function MessagesTab({ s, m, sms }: { s: Session; m?: string; sms?:
                       ))}
                     </select>
                     to
-                    <select name="quietTo" defaultValue={quiet.to} className="input py-1">
+                    <select name="quietTo" defaultValue={quiet.to} className="input w-28 py-1">
                       {hours.map((h) => (
                         <option key={h} value={h}>
                           {hh(h)}
