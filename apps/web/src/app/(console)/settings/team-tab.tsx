@@ -1,13 +1,4 @@
-import {
-  CLUB_ROLES,
-  can,
-  clubActivity,
-  clubSeats,
-  clubTeam,
-  PERMISSIONS,
-  roleDefaults,
-  roleLabel,
-} from '@lango/server';
+import { CLUB_ROLES, clubSeats, clubTeam, PERMISSIONS, roleDefaults, roleLabel } from '@lango/server';
 import { Crown, ShieldCheck, UsersRound } from 'lucide-react';
 import { SubmitButton } from '@/components/submit-button';
 import { Badge } from '@/components/ui';
@@ -16,7 +7,7 @@ import { requirePerm } from '@/lib/session';
 import { db } from '@/server/db';
 import { Banner, SectionHead } from './bits';
 import { InviteForm } from './invite-form';
-import { offerClub, remove, resend, setPerms, setRole } from './team-actions';
+import { remove, resend, setPerms, setRole, suspend } from './team-actions';
 
 const MSG: Record<string, [tone: 'green' | 'amber' | 'red', text: string]> = {
   'invite-sent': ['green', 'A new invitation is on its way. The earlier link no longer works.'],
@@ -32,34 +23,20 @@ const MSG: Record<string, [tone: 'green' | 'amber' | 'red', text: string]> = {
   'owner-password': ['red', 'Your password was not right, so nothing was sent.'],
   'owner-now': ['green', 'You are now the owner of this club.'],
   missing: ['amber', 'That person is no longer in this club.'],
-};
-
-const EVENT: Record<string, string> = {
-  'signin.ok': 'signed in',
-  'club.opened': 'opened the club',
-  'invite.sent': 'was invited',
-  'invite.accepted': 'accepted the invitation',
-  'role.changed': 'had their role changed',
-  'perms.changed': 'had their permissions changed',
-  'member.removed': 'was removed',
-  'ownership.offered': 'was offered ownership',
-  'ownership.transferred': 'became the owner',
-  'signout.everywhere': 'signed out everywhere',
-  'password.changed': 'changed their password',
+  suspended: ['green', 'Login paused. They were signed out and can’t sign in until you restore it.'],
+  restored: ['green', 'Login restored. They can sign in again.'],
 };
 
 export async function TeamTab({ m }: { m?: string }) {
   const s = await requirePerm('team.manage');
   const msg = m ? MSG[m] : undefined;
-  const [team, defaults, activity, seats] = await Promise.all([
+  const [team, defaults, seats] = await Promise.all([
     clubTeam(db(), s.tid),
     roleDefaults(db()),
-    clubActivity(db(), s.tid),
     clubSeats(db(), s.tid),
   ]);
   const iAmOwner = s.role === 'owner';
   const roles = CLUB_ROLES.filter((r) => r.key !== 'admin' || iAmOwner);
-  const admins = team.filter((t) => t.role === 'admin' && t.accepted_at);
   const editable = (t: (typeof team)[number]) =>
     t.id !== s.uid && t.role !== 'owner' && (t.role !== 'admin' || iAmOwner);
   return (
@@ -97,6 +74,7 @@ export async function TeamTab({ m }: { m?: string }) {
                         <span className="font-medium">{t.name}</span>
                         {t.id === s.uid && <span className="text-xs text-ink-500">(you)</span>}
                         {!t.accepted_at && <Badge tone="amber">invited</Badge>}
+                        {t.suspended_at && <Badge tone="red">login paused</Badge>}
                         {tuned > 0 && <Badge tone="blue">custom permissions</Badge>}
                       </div>
                       <div className="truncate text-xs text-ink-500">
@@ -181,6 +159,18 @@ export async function TeamTab({ m }: { m?: string }) {
                           </button>
                         </form>
                       )}
+                      {t.accepted_at && (
+                        <form action={suspend}>
+                          <input type="hidden" name="staffId" value={t.id} />
+                          <input type="hidden" name="on" value={t.suspended_at ? '0' : '1'} />
+                          <button
+                            type="submit"
+                            className={`font-medium ${t.suspended_at ? 'text-emerald-700 hover:text-emerald-800' : 'text-amber-700 hover:text-amber-800'}`}
+                          >
+                            {t.suspended_at ? 'Restore login' : 'Pause login'}
+                          </button>
+                        </form>
+                      )}
                       <details>
                         <summary className="cursor-pointer list-none font-medium text-rose-700 hover:text-rose-800">
                           {t.accepted_at ? 'Remove' : 'Cancel invitation'}
@@ -210,25 +200,12 @@ export async function TeamTab({ m }: { m?: string }) {
             })}
           </section>
 
-          <section className="rounded-2xl border border-[#E7EBF3] p-5">
-            <div className="mb-3 font-medium">Recent activity</div>
-            {activity.length === 0 ? (
-              <p className="text-sm text-ink-500">Sign-ins, invitations and changes will show here.</p>
-            ) : (
-              <ul className="divide-y divide-ink-100 text-sm">
-                {activity.map((a) => (
-                  <li key={`${a.at.toISOString()}${a.kind}${a.name}`} className="flex flex-wrap gap-x-3 py-2">
-                    <span className="w-36 shrink-0 text-xs text-ink-500 tabular-nums">{dateTime(a.at)}</span>
-                    <span className="flex-1">
-                      <b className="font-medium">{a.name ?? 'Someone'}</b> {EVENT[a.kind] ?? a.kind}
-                      {a.actor && a.kind !== 'signin.ok' && a.kind !== 'club.opened' ? ` by ${a.actor}` : ''}
-                    </span>
-                    {a.ip && <span className="text-xs text-ink-500">{a.ip}</span>}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
+          <a
+            href="/settings?tab=audit"
+            className="flex items-center justify-between rounded-2xl border border-[#E7EBF3] px-5 py-4 text-[13.5px] font-semibold hover:bg-slate-50"
+          >
+            Sign-ins and changes are in System audit <span className="text-emerald-700">Open →</span>
+          </a>
           <section className="rounded-2xl border border-[#E7EBF3] p-5">
             <div className="flex items-center gap-2 font-medium">
               <ShieldCheck size={16} className="text-brand-600" /> What each role can do
@@ -287,42 +264,6 @@ export async function TeamTab({ m }: { m?: string }) {
               <InviteForm roles={roles.map((r) => ({ key: r.key, label: r.label, hint: r.hint }))} />
             )}
           </section>
-
-          {can(s, 'club.own') && (
-            <section className="rounded-2xl border border-[#E7EBF3] p-5">
-              <div className="flex items-center gap-2 font-medium">
-                <Crown size={16} className="text-gold-500" /> Hand over ownership
-              </div>
-              <p className="mt-1 text-xs text-ink-500">
-                The owner holds the club’s subscription and contract. The new owner must be an admin and confirms from
-                an email; you then stay on as an admin.
-              </p>
-              {admins.length === 0 ? (
-                <p className="mt-3 text-sm text-ink-500">Make someone an admin first.</p>
-              ) : (
-                <form action={offerClub} className="mt-3 space-y-2.5">
-                  <select name="staffId" className="input" aria-label="New owner">
-                    {admins.map((a) => (
-                      <option key={a.id} value={a.id}>
-                        {a.name}
-                      </option>
-                    ))}
-                  </select>
-                  <input
-                    name="current"
-                    type="password"
-                    required
-                    autoComplete="current-password"
-                    placeholder="Enter your password to confirm"
-                    className="input"
-                  />
-                  <SubmitButton pendingText="Sending…" className="btn-ghost w-full">
-                    Offer ownership
-                  </SubmitButton>
-                </form>
-              )}
-            </section>
-          )}
         </div>
       </div>
     </>

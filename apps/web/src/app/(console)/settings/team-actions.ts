@@ -14,6 +14,7 @@ import {
   roleLabel,
   setPermissions,
   staffById,
+  suspendMember,
   teamError,
   verifyPassword,
 } from '@lango/server';
@@ -117,6 +118,19 @@ export async function setPerms(form: FormData) {
     back('perms-denied');
   }
   back('perms-ok');
+}
+
+/** Pause or restore someone's login (they are signed out at once; their record stays). */
+export async function suspend(form: FormData) {
+  const { who } = await manager();
+  const id = staffId(form);
+  const on = form.get('on') === '1';
+  try {
+    await suspendMember(db(), who, id, on);
+  } catch {
+    back('remove-denied');
+  }
+  back(on ? 'suspended' : 'restored');
 }
 
 export async function remove(form: FormData) {

@@ -83,6 +83,7 @@ export interface TeamRow {
   invited_at: Date | null;
   member_since: Date;
   last_seen: Date | null;
+  suspended_at: Date | null;
 }
 /** Team members besides the owner (invited or active), and the allowance (5 for now; per plan later). */
 export const clubSeats = async (sql: Sql, tenantId: string) =>
@@ -170,6 +171,18 @@ export async function setPermissions(sql: Sql, w: Who, staffId: string, grants: 
 }
 
 /** Remove someone from the club: signed out of it at once; their history stays. A pending invite is cancelled. */
+/** Pause (or restore) someone's login to this club. Pausing signs them out at once; nothing else changes. */
+export async function suspendMember(sql: Sql, w: Who, staffId: string, on: boolean) {
+  await sql`select app_suspend_member(${w.actorId}, ${w.tenantId}, ${staffId}, ${on})`;
+  await logAuth(sql, {
+    kind: on ? 'member.suspended' : 'member.restored',
+    staffId,
+    tenantId: w.tenantId,
+    actor: w.actorId,
+    ip: w.ip,
+  });
+}
+
 export async function removeMember(sql: Sql, w: Who, staffId: string) {
   const staff = await staffById(sql, staffId);
   await sql`select app_remove_member(${w.actorId}, ${w.tenantId}, ${staffId})`;

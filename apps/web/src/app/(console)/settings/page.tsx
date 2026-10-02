@@ -1,8 +1,9 @@
 import { can, type Perm } from '@lango/server';
-import { Bell, Building2, CreditCard, UsersRound, Wallet } from 'lucide-react';
+import { Bell, Building2, CreditCard, History, UsersRound, Wallet } from 'lucide-react';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { requireSession } from '@/lib/session';
+import { type AuditParams, AuditTab } from './audit-tab';
 import { ClubTab } from './club-tab';
 import { NotifyTab } from './notify-tab';
 import { PaymentsTab } from './payments-tab';
@@ -19,9 +20,10 @@ const TABS = [
   { key: 'sms', label: 'SMS credit', icon: Wallet, any: ['sms.buy', 'messages.manage'] as Perm[] },
   { key: 'notifications', label: 'Notifications', icon: Bell, any: ['messages.manage'] as Perm[] },
   { key: 'team', label: 'Team & roles', icon: UsersRound, any: ['team.manage'] as Perm[] },
+  { key: 'audit', label: 'System audit', icon: History, any: ['team.manage'] as Perm[] },
 ] as const;
 
-type Params = { tab?: string; m?: string; sms?: string };
+type Params = AuditParams & { tab?: string; m?: string; sms?: string };
 const OLD: Record<string, string> = { messages: 'notifications' };
 
 export default async function Settings({ searchParams }: { searchParams: Promise<Params> }) {
@@ -61,6 +63,8 @@ export default async function Settings({ searchParams }: { searchParams: Promise
           <SmsTab s={s} sms={sp.sms} />
         ) : tab?.key === 'notifications' ? (
           <NotifyTab s={s} m={sp.m} />
+        ) : tab?.key === 'audit' ? (
+          <AuditTab s={s} sp={sp} />
         ) : tab?.key === 'team' ? (
           <TeamTab m={sp.m} />
         ) : (

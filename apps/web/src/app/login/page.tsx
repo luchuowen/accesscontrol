@@ -19,6 +19,7 @@ const NOTES: Record<string, [tone: 'ok' | 'info', text: string]> = {
   reset: ['ok', 'Your password has been changed. Sign in with the new one.'],
   idle: ['info', 'You were signed out after a while without activity, to keep the club’s data safe.'],
   removed: ['info', 'Your access to that club has ended. If this is a mistake, speak to the club’s owner.'],
+  suspended: ['info', 'Your sign-in to that club has been paused. Speak to the club’s owner.'],
   password: ['info', 'Your password was changed, so every device was signed out. Sign in with the new password.'],
   everywhere: ['info', 'You were signed out on every device.'],
 };

@@ -93,11 +93,13 @@ async function signedOut(): Promise<never> {
       ? 'idle'
       : reason === 'removed'
         ? 'removed'
-        : reason === 'password-changed' || reason === 'password-reset'
-          ? 'password'
-          : reason === 'signed-out-everywhere'
-            ? 'everywhere'
-            : 'signed-out';
+        : reason === 'suspended'
+          ? 'suspended'
+          : reason === 'password-changed' || reason === 'password-reset'
+            ? 'password'
+            : reason === 'signed-out-everywhere'
+              ? 'everywhere'
+              : 'signed-out';
   redirect(`/login?m=${m}`);
 }
 

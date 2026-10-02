@@ -51,6 +51,7 @@ import {
   offerOwnership,
   removeMember,
   setPermissions,
+  suspendMember,
 } from './team.js';
 
 /**
@@ -1008,6 +1009,15 @@ describe('walking skeleton: pay → door', () => {
     expect(tuned).toContain('access.comp');
     expect(tuned).not.toContain('members.edit');
     await expect(setPermissions(app, who, mgr, ['club.own'], [])).rejects.toThrow(/unknown permission/);
+
+    // Pausing a login signs them out at once and blocks the club until restored; their role is kept.
+    await suspendMember(app, who, mgr, true);
+    expect(await readSession(app, sm.token)).toBeNull();
+    expect(await perms(mgr, tenantId)).toBeNull();
+    await expect(suspendMember(app, { ...who, actorId: mgr }, viewer, true)).rejects.toThrow(/not allowed/);
+    await expect(suspendMember(app, who, ownerId, true)).rejects.toThrow(/owner/);
+    await suspendMember(app, who, mgr, false);
+    expect((await perms(mgr, tenantId))?.role).toBe('reception');
 
     // Removal: signed out of the club at once; history stays; they can no longer work anywhere.
     await removeMember(app, who, mgr);
