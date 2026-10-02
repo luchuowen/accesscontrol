@@ -12,7 +12,6 @@ import { LiveRefresh } from './_dash/live-refresh';
 const PERIODS = [7, 30, 90] as const;
 const pct = (a: number, b: number) => (b ? Math.round(((a - b) / b) * 100) : null);
 const hourLabel = (h: number) => `${String(h).padStart(2, '0')}:00`;
-const DOW = ['Sundays', 'Mondays', 'Tuesdays', 'Wednesdays', 'Thursdays', 'Fridays', 'Saturdays'];
 
 function Spark({ values, dark }: { values: number[]; dark?: boolean }) {
   const max = Math.max(1, ...values);
@@ -44,7 +43,6 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
   const full = can(s, 'reports.all');
   const change = pct(d.revenue.now, d.revenue.prev);
   const rate = d.renewals.ended ? Math.round((d.renewals.renewed / d.renewals.ended) * 100) : null;
-  const net = d.members.joined - d.members.lapsed;
   const max = Math.max(1, ...d.daily.map((x) => x.mpesa + x.cash));
   const bridgeOff = !d.attention.bridgeLastSeen || Date.now() - d.attention.bridgeLastSeen.getTime() > 10 * 60_000;
   const attention = [
@@ -57,9 +55,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
       },
     bridgeOff && {
       tone: 'bg-amber-500',
-      text: d.attention.bridgeLastSeen
-        ? `Door PC offline ${ago(d.attention.bridgeLastSeen)}`
-        : 'Door PC not connected yet',
+      text: d.attention.bridgeLastSeen ? `Door PC offline ${ago(d.attention.bridgeLastSeen)}` : 'Door PC not connected',
       meta: '',
       href: can(s, 'doors.manage') ? '/access' : undefined,
     },
@@ -76,7 +72,6 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
       href: can(s, 'sms.buy') ? '/settings' : undefined,
     },
   ].filter(Boolean) as { tone: string; text: string; meta: string; href?: string }[];
-  const dow = DOW[new Date().getDay()];
 
   return (
     <>
@@ -84,7 +79,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
       <div className="mb-5 flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="text-[26px] font-semibold tracking-tight text-ink-900">Dashboard</h1>
-          <p className="mt-1 text-sm text-ink-500">{d.tenantName} · how the business is doing</p>
+          <p className="mt-1 text-sm text-ink-500">{d.tenantName}</p>
         </div>
         {full && (
           <nav
@@ -106,7 +101,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
       </div>
       {denied && (
         <div className="mb-4 rounded-xl bg-amber-50 p-3 text-sm text-amber-900 ring-1 ring-amber-200">
-          Your role doesn’t include that page. Ask the club’s owner or an admin if you need it.
+          You don’t have access to that page.
         </div>
       )}
 
@@ -124,9 +119,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
             </span>
           </div>
           <div className="mt-1 text-xs text-[#A3B3C9]">
-            {d.live.busiestHour !== null
-              ? `Busiest at ${hourLabel(d.live.busiestHour)} on ${dow}`
-              : 'Entered in the last 90 minutes'}
+            {d.live.busiestHour !== null ? `Peak ${hourLabel(d.live.busiestHour)}` : 'Last 90 min'}
           </div>
           <Spark values={d.live.todayByHour.slice(5, 23)} dark />
         </section>
@@ -136,13 +129,13 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
             <div className="mt-1.5 text-[28px] font-semibold tabular-nums tracking-tight">{kes(d.revenue.now)}</div>
             <div className="mt-1 text-xs text-ink-500">
               {change === null ? (
-                `last ${days} days`
+                `${days} days`
               ) : (
                 <>
                   <span className={change >= 0 ? 'font-semibold text-emerald-700' : 'font-semibold text-rose-700'}>
                     {change >= 0 ? '▲' : '▼'} {Math.abs(change)}%
                   </span>{' '}
-                  vs previous {days} days
+                  vs prior {days} days
                 </>
               )}
             </div>
@@ -153,11 +146,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
           <Label>Active members</Label>
           <div className="mt-1.5 text-[28px] font-semibold tabular-nums tracking-tight">{d.members.active}</div>
           <div className="mt-1 text-xs text-ink-500">
-            <span className={net >= 0 ? 'font-semibold text-emerald-700' : 'font-semibold text-rose-700'}>
-              {net >= 0 ? '+' : '−'}
-              {Math.abs(net)}
-            </span>{' '}
-            net · {d.members.joined} joined, {d.members.lapsed} lapsed
+            {d.members.joined} joined · {d.members.lapsed} lapsed
           </div>
           <Spark values={d.members.spark} />
         </Card>
@@ -167,7 +156,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
             <div className="mt-1.5 text-[28px] font-semibold tabular-nums tracking-tight">
               {rate === null ? '—' : `${rate}%`}
             </div>
-            <div className="mt-1 text-xs text-ink-500">of memberships that ended in the last {days} days</div>
+            <div className="mt-1 text-xs text-ink-500">Plans renewed</div>
             <div className="mt-4 h-2 overflow-hidden rounded-full bg-slate-100">
               <i className="block h-full rounded-full bg-brand-500" style={{ width: `${rate ?? 0}%` }} />
             </div>
@@ -179,7 +168,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
         <div className="mt-3.5 grid gap-3.5 xl:grid-cols-[2fr_1fr]">
           <Card className="min-w-0">
             <div className="flex flex-wrap items-baseline justify-between gap-2">
-              <Label>Money in · last {days} days</Label>
+              <Label>Money in</Label>
               <span className="font-mono text-[11.5px] text-slate-500">
                 MPESA {d.revenue.mpesa.toLocaleString('en-KE')} · CASH {d.revenue.cash.toLocaleString('en-KE')}
               </span>
@@ -206,7 +195,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
             </div>
           </Card>
           <Card>
-            <Label>Renewals · last {days} days</Label>
+            <Label>Renewals</Label>
             <div className="mt-3 grid grid-cols-3 overflow-hidden rounded-xl border border-slate-100">
               {[
                 ['ended', d.renewals.ended, 'text-ink-900'],
@@ -215,19 +204,16 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
               ].map(([l, n, c]) => (
                 <div key={l as string} className="border-l border-slate-100 px-3.5 py-3 first:border-l-0">
                   <b className={`block text-[22px] font-semibold tabular-nums ${c}`}>{n}</b>
-                  <span className="text-xs text-ink-500">{l === 'ended' ? 'plans ended' : l}</span>
+                  <span className="text-xs capitalize text-ink-500">{l}</span>
                 </div>
               ))}
             </div>
-            <p className="mt-3 text-xs text-ink-500">
-              Members who lapsed often come back with a friendly reminder and an M-Pesa prompt.
-            </p>
             {can(s, 'messages.manage') && d.renewals.lapsed > 0 && (
               <Link
                 href="/messages"
                 className="mt-3 inline-flex rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-ink-900 hover:bg-slate-50"
               >
-                Message lapsed members
+                Message lapsed
               </Link>
             )}
           </Card>
@@ -238,7 +224,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
         <Card>
           <Label>Ending in 7 days</Label>
           <ul className="mt-2">
-            {d.endingSoon.length === 0 && <li className="py-2 text-sm text-ink-500">Nobody this week.</li>}
+            {d.endingSoon.length === 0 && <li className="py-2 text-sm text-ink-500">None</li>}
             {d.endingSoon.map((m) => {
               const left = Math.max(0, Math.ceil((m.endsAt.getTime() - Date.now()) / 86400_000));
               return (
@@ -261,13 +247,11 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
         </Card>
         <Card>
           <div className="flex items-baseline justify-between">
-            <Label>At risk · 14+ days away</Label>
-            {d.atRiskTotal > 5 && <span className="text-xs text-ink-500">{d.atRiskTotal} in all</span>}
+            <Label>Not seen 14+ days</Label>
+            {d.atRiskTotal > 5 && <span className="text-xs text-ink-500">{d.atRiskTotal} total</span>}
           </div>
           <ul className="mt-2">
-            {d.atRisk.length === 0 && (
-              <li className="py-2 text-sm text-ink-500">Everyone paid up has been in lately.</li>
-            )}
+            {d.atRisk.length === 0 && <li className="py-2 text-sm text-ink-500">None</li>}
             {d.atRisk.map((m) => (
               <li
                 key={m.id}
@@ -284,7 +268,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
         <Card>
           <Label>Needs attention</Label>
           <ul className="mt-2">
-            {attention.length === 0 && <li className="py-2 text-sm text-ink-500">All clear.</li>}
+            {attention.length === 0 && <li className="py-2 text-sm text-ink-500">All clear</li>}
             {attention.map((a) => (
               <li
                 key={a.text}
