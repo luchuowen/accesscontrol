@@ -1,6 +1,7 @@
 import { Plus, Search } from 'lucide-react';
 import Link from 'next/link';
 import { Notice } from '@/components/notice';
+import { SubmitButton } from '@/components/submit-button';
 import { Badge, PageHeader } from '@/components/ui';
 import { members } from '@/lib/data';
 import { date, daysLeft } from '@/lib/format';
@@ -33,9 +34,9 @@ export default async function Members({
           <input name="lastName" required placeholder="Last name" className="input" />
           <input name="phone" placeholder="Phone (07…)" className="input" />
           <input name="memberNo" type="number" min={1} max={65535} placeholder="Member no. (auto)" className="input" />
-          <button type="submit" className="btn-primary">
+          <SubmitButton pendingText="Creating…" className="btn-primary">
             Create &amp; enrol
-          </button>
+          </SubmitButton>
           <p className="text-xs text-ink-500 md:col-span-5">
             The member is created in the access system straight away, with no access until a plan is paid. Present their
             card or wristband at any reader to link it.

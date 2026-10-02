@@ -14,6 +14,9 @@ export interface TaifaCreds {
 const base = (env: TaifaCreds['env']) =>
   env === 'live' ? 'https://merchants.taifapay.africa/v1' : 'https://sandbox.merchants.taifapay.africa/v1';
 const tokens = new Map<string, { token: string; exp: number }>();
+const TIMEOUT_MS = 15_000; // never leave a webhook or a staff click hanging on a slow provider
+/** The provider answered and refused the credentials (as opposed to being unreachable). */
+export class TaifaAuthError extends Error {}
 
 export class TaifaPay {
   constructor(
@@ -32,11 +35,18 @@ export class TaifaPay {
         Authorization: `Basic ${Buffer.from(`${this.c.clientId}:${this.c.clientSecret}`).toString('base64')}`,
       },
       body: JSON.stringify({ grant_type: 'client_credentials' }),
+      signal: AbortSignal.timeout(TIMEOUT_MS),
     });
-    if (!r.ok) throw new Error(`TaifaPay auth failed: HTTP ${r.status}`);
-    const j = (await r.json()) as { access_token: string; expires_in: string | number };
-    tokens.set(k, { token: j.access_token, exp: Date.now() + Number(j.expires_in) * 1000 });
+    if (!r.ok) throw new TaifaAuthError(`TaifaPay auth failed: HTTP ${r.status}`);
+    const j = (await r.json()) as { access_token?: string; expires_in?: string | number };
+    if (!j.access_token) throw new TaifaAuthError('TaifaPay auth returned no access token');
+    tokens.set(k, { token: j.access_token, exp: Date.now() + (Number(j.expires_in) || 300) * 1000 });
     return j.access_token;
+  }
+
+  /** One round trip: proves the client ID + secret are accepted (used when the owner saves keys). */
+  async verify(): Promise<void> {
+    await this.token();
   }
 
   private async call<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -44,6 +54,7 @@ export class TaifaPay {
       method,
       headers: { Authorization: `Bearer ${await this.token()}`, 'Content-Type': 'application/json' },
       ...(body ? { body: JSON.stringify(body) } : {}),
+      signal: AbortSignal.timeout(TIMEOUT_MS),
     });
     const text = await r.text();
     if (!r.ok) throw new Error(`TaifaPay ${method} ${path}: HTTP ${r.status} ${text.slice(0, 200)}`);

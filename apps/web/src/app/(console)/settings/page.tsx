@@ -1,6 +1,7 @@
 import { withTenant } from '@lango/db';
 import { CheckCircle2, CreditCard, MessageSquare } from 'lucide-react';
 import { headers } from 'next/headers';
+import { SubmitButton } from '@/components/submit-button';
 import { Badge, PageHeader } from '@/components/ui';
 import { requireSession } from '@/lib/session';
 import { db } from '@/server/db';
@@ -25,6 +26,7 @@ export default async function Settings({ searchParams }: { searchParams: Promise
     ok: ['green', 'TaifaPay connected — the keys were verified and stored encrypted.'],
     rejected: ['red', 'TaifaPay rejected those keys. Check the environment (sandbox / live) and try again.'],
     missing: ['amber', 'Enter both the client ID and the client secret.'],
+    unreachable: ['amber', 'TaifaPay did not answer in time, so nothing was saved. Try again in a minute.'],
   };
   const m = taifa ? msg[taifa] : undefined;
   return (
@@ -66,10 +68,11 @@ export default async function Settings({ searchParams }: { searchParams: Promise
               </select>
               <input
                 name="clientId"
-                defaultValue={tp?.clientId ?? ''}
-                placeholder="Client ID"
+                type="password"
+                placeholder={tp ? `Client ID ••••${tp.clientId.slice(-4)} (stored — enter to replace)` : 'Client ID'}
                 className="input"
                 autoComplete="off"
+                spellCheck={false}
               />
               <input
                 name="clientSecret"
@@ -78,9 +81,9 @@ export default async function Settings({ searchParams }: { searchParams: Promise
                 className="input"
                 autoComplete="new-password"
               />
-              <button type="submit" className="btn-primary w-full">
+              <SubmitButton pendingText="Checking the keys with TaifaPay…" className="btn-primary w-full">
                 Verify &amp; save
-              </button>
+              </SubmitButton>
             </form>
           ) : (
             <p className="mt-6 text-sm text-ink-500">Only the club owner can change payment settings.</p>

@@ -3,6 +3,7 @@ import { ArrowLeft, CheckCircle2, Clock, CreditCard, ShieldAlert } from 'lucide-
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { Notice } from '@/components/notice';
+import { SubmitButton } from '@/components/submit-button';
 import { Badge, Empty } from '@/components/ui';
 import { member, products } from '@/lib/data';
 import { date, dateTime, daysLeft, kes } from '@/lib/format';
@@ -141,9 +142,9 @@ export default async function MemberPage({
               ))}
             </select>
             <input name="phone" defaultValue={d.m.phone ?? ''} placeholder="07…" className="input mt-3" required />
-            <button type="submit" className="btn-primary mt-4 w-full">
+            <SubmitButton pendingText="Sending to phone…" className="btn-primary mt-4 w-full">
               Send prompt to phone
-            </button>
+            </SubmitButton>
             <p className="mt-3 text-xs text-ink-500">
               The member approves on their phone; doors open automatically once M-Pesa confirms.
             </p>
@@ -164,9 +165,9 @@ export default async function MemberPage({
               <option value="cash">Cash</option>
               <option value="card">Card (desk terminal)</option>
             </select>
-            <button type="submit" className="btn-ghost mt-4 w-full">
+            <SubmitButton pendingText="Recording…" className="btn-ghost mt-4 w-full">
               <CreditCard size={16} /> Record &amp; open doors
-            </button>
+            </SubmitButton>
             <p className="mt-3 text-xs text-ink-500">
               Members can also pay by M-Pesa to the club paybill using account <b>{d.m.member_no}</b>; access updates
               automatically.
@@ -196,9 +197,9 @@ export default async function MemberPage({
                 placeholder="Card number"
                 className="input"
               />
-              <button type="submit" className="btn-ghost">
+              <SubmitButton pendingText="Linking…" className="btn-ghost">
                 Link
-              </button>
+              </SubmitButton>
             </div>
           </form>
 
@@ -221,9 +222,9 @@ export default async function MemberPage({
                 placeholder="Reason (shown on owner reports)"
                 className="input mt-2"
               />
-              <button type="submit" className="btn-ghost mt-3 w-full">
+              <SubmitButton pendingText="Granting…" className="btn-ghost mt-3 w-full">
                 Grant
-              </button>
+              </SubmitButton>
             </form>
           )}
         </div>

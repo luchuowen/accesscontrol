@@ -1,4 +1,5 @@
 import { Activity } from 'lucide-react';
+import { SubmitButton } from '@/components/submit-button';
 import { login } from './actions';
 
 export default async function Login({ searchParams }: { searchParams: Promise<{ e?: string }> }) {
@@ -38,9 +39,9 @@ export default async function Login({ searchParams }: { searchParams: Promise<{ 
             <span className="label">Password</span>
             <input name="password" type="password" required autoComplete="current-password" className="input mt-1.5" />
           </label>
-          <button type="submit" className="btn-primary mt-6 w-full">
+          <SubmitButton pendingText="Signing in…" className="btn-primary mt-6 w-full">
             Sign in
-          </button>
+          </SubmitButton>
         </form>
       </div>
     </div>

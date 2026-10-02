@@ -1,5 +1,6 @@
 import { withTenant } from '@lango/db';
 import { Activity, CheckCircle2, Smartphone } from 'lucide-react';
+import { SubmitButton } from '@/components/submit-button';
 import { date, daysLeft, kes } from '@/lib/format';
 import { db } from '@/server/db';
 import { memberLogin, memberPay, readMember } from './actions';
@@ -55,9 +56,9 @@ export default async function MemberPortal({ searchParams }: { searchParams: Pro
             required
             className="input bg-white/5 text-white ring-white/10"
           />
-          <button type="submit" className="btn w-full bg-brand-500 text-ink-950 hover:bg-brand-600">
+          <SubmitButton pendingText="Checking…" className="btn w-full bg-brand-500 text-ink-950 hover:bg-brand-600">
             Continue
-          </button>
+          </SubmitButton>
         </form>
       </Shell>
     );
@@ -141,9 +142,12 @@ export default async function MemberPortal({ searchParams }: { searchParams: Pro
               <div className="text-sm font-medium">{p.name}</div>
               <div className="text-xs text-ink-300">{kes(p.price_kes)}</div>
             </div>
-            <button type="submit" className="btn bg-white px-3 py-2 text-xs text-ink-950 hover:bg-ink-100">
+            <SubmitButton
+              pendingText="Sending…"
+              className="btn bg-white px-3 py-2 text-xs text-ink-950 hover:bg-ink-100"
+            >
               Pay with M-Pesa
-            </button>
+            </SubmitButton>
           </form>
         ))}
       </div>
