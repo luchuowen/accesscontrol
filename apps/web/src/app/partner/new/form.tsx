@@ -1,9 +1,10 @@
 'use client';
 import { CheckCircle2 } from 'lucide-react';
+import Link from 'next/link';
 import { useActionState } from 'react';
 import { CopyField } from '@/components/copy-field';
 import { SubmitButton } from '@/components/submit-button';
-import { type CreateClubState, createClub, openClub } from '../actions';
+import { type CreateClubState, createClub } from '../actions';
 
 export function NewClubForm({ consoleUrl }: { consoleUrl: string }) {
   const [state, action] = useActionState<CreateClubState, FormData>(createClub, {});
@@ -53,12 +54,9 @@ export function NewClubForm({ consoleUrl }: { consoleUrl: string }) {
             </div>
           </div>
         </div>
-        <form action={openClub} className="mt-6">
-          <input type="hidden" name="tenantId" value={d.tenantId} />
-          <SubmitButton pendingText="Opening…" className="btn-primary w-full">
-            Open {d.name}’s console to finish setup
-          </SubmitButton>
-        </form>
+        <Link href="/partner" className="btn-primary mt-6 w-full">
+          Back to clubs
+        </Link>
       </div>
     );
   }

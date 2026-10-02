@@ -9,7 +9,6 @@ import {
   inviteClubOwner,
   inviteStaff,
   isPartnerLevel,
-  logAuth,
   msisdn,
   newPairCode,
   type PlatformEmail,
@@ -20,7 +19,6 @@ import {
   SourceCodeSms,
   sendEmail,
   setPartnerLoginActive,
-  setSessionClub,
   staffByEmail,
   staffById,
   TaifaAuthError,
@@ -30,21 +28,8 @@ import {
 import { revalidatePath } from 'next/cache';
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
-import { publicUrl, requirePartner, sessionToken } from '@/lib/session';
+import { publicUrl, requirePartner } from '@/lib/session';
 import { db } from '@/server/db';
-
-/** Open a club's console as its owner (the partner keeps a way back to the clubs list). */
-export async function openClub(form: FormData) {
-  const s = await requirePartner();
-  const tid = String(form.get('tenantId') ?? '');
-  const [c] = await db()<{ id: string }[]>`select id from app_partner_clubs(${s.uid}) where id = ${tid}`;
-  if (!c) redirect('/partner');
-  const token = await sessionToken();
-  if (!token) redirect('/login?m=signed-out');
-  await setSessionClub(db(), token, c.id, null);
-  await logAuth(db(), { kind: 'club.opened', staffId: s.uid, tenantId: c.id });
-  redirect('/');
-}
 
 export interface CreateClubState {
   error?: string;

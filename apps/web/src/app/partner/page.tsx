@@ -1,11 +1,11 @@
 import { onboardingChecklist } from '@lango/server';
-import { ArrowRight, Plus } from 'lucide-react';
+import { Plus } from 'lucide-react';
 import Link from 'next/link';
 import { Badge, PageHeader, Stat } from '@/components/ui';
 import { ago, kes } from '@/lib/format';
 import { requirePartner } from '@/lib/session';
 import { db } from '@/server/db';
-import { inviteOwner, openClub, resendOwnerInvite } from './actions';
+import { inviteOwner, resendOwnerInvite } from './actions';
 
 interface Row {
   id: string;
@@ -90,13 +90,11 @@ export default async function PartnerHome({ searchParams }: { searchParams: Prom
         <table className="w-full text-sm">
           <thead className="bg-ink-50/60 text-left">
             <tr>
-              {['Club', 'Owner', 'Setup', 'Payments', 'Doors', 'Members', 'TaifaPay · 30 d', 'Cash · 30 d', ''].map(
-                (h) => (
-                  <th key={h} className="label px-5 py-3 font-medium">
-                    {h}
-                  </th>
-                ),
-              )}
+              {['Club', 'Owner', 'Setup', 'Payments', 'Doors', 'Members', 'TaifaPay · 30 d', 'Cash · 30 d'].map((h) => (
+                <th key={h} className="label px-5 py-3 font-medium">
+                  {h}
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody className="divide-y divide-ink-100">
@@ -208,14 +206,6 @@ export default async function PartnerHome({ searchParams }: { searchParams: Prom
                   </td>
                   <td className="px-5 py-3 tabular-nums">{kes(Number(r.via_taifapay))}</td>
                   <td className="px-5 py-3 tabular-nums text-ink-500">{kes(Number(r.cash))}</td>
-                  <td className="px-5 py-3 text-right">
-                    <form action={openClub}>
-                      <input type="hidden" name="tenantId" value={r.id} />
-                      <button type="submit" className="btn-ghost px-3 py-1.5 text-xs">
-                        Open <ArrowRight size={14} />
-                      </button>
-                    </form>
-                  </td>
                 </tr>
               );
             })}

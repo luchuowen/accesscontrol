@@ -105,7 +105,9 @@ async function signedOut(): Promise<never> {
 export async function requireSession(): Promise<Session> {
   const s = await getSession();
   if (!s) return signedOut();
-  if (!s.tid) redirect(s.partner ? '/partner' : '/choose');
+  // NAVAC and partner logins never work inside a club's console: a club's data is the club's own.
+  if (s.partner) redirect('/partner');
+  if (!s.tid) redirect('/choose');
   return s;
 }
 
