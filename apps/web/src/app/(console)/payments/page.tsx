@@ -1,74 +1,159 @@
 import { can } from '@lango/server';
-import Link from 'next/link';
+import { AlertCircle } from 'lucide-react';
 import { redirect } from 'next/navigation';
 import { Notice } from '@/components/notice';
 import { SubmitButton } from '@/components/submit-button';
-import { Badge, PageHeader, Stat } from '@/components/ui';
-import { payments, products, unmatchedPayments } from '@/lib/data';
+import { PageHeader } from '@/components/ui';
+import { paymentsBoard, products, unmatchedPayments } from '@/lib/data';
 import { dateTime, kes } from '@/lib/format';
 import { canAny, requireSession } from '@/lib/session';
 import { assignUnmatched } from '../actions';
+import { ExportMenu, LedgerFilters, LedgerTable, PayFor } from './ledger';
 
-export default async function Payments({ searchParams }: { searchParams: Promise<{ n?: string }> }) {
+/**
+ * Payments, design A "Ledger" (approved 2 Oct 2026): money in for the period and how it came (M-Pesa through the
+ * Payment Gateway, or cash at the desk) against the period before; an amber bar when money needs sorting (paid but
+ * not matched to a member, so nobody got access yet); one searchable, filterable list with a details panel; Record
+ * cash / Send M-Pesa prompt; export to Excel, CSV or PDF. Front desk sees today only.
+ */
+type Params = { n?: string; p?: string; q?: string; m?: string; s?: string };
+
+export default async function Payments({ searchParams }: { searchParams: Promise<Params> }) {
   const s = await requireSession();
   if (!canAny(s, 'payments.record', 'payments.assign', 'reports.all')) redirect('/?denied=1');
-  const { n } = await searchParams;
-  const [all, queue, plans] = await Promise.all([payments(s.tid), unmatchedPayments(s.tid), products(s.tid)]);
-  // Front desk sees today only (Nairobi day).
+  const sp = await searchParams;
   const full = can(s, 'reports.all');
-  const today = new Date(Date.now() + 3 * 3600_000).toISOString().slice(0, 10);
-  const rows = full
-    ? all
-    : all.filter((r) => new Date(r.paid_at.getTime() + 3 * 3600_000).toISOString().slice(0, 10) === today);
+  const days = full ? Math.min(366, Math.max(1, Number(sp.p) || 30)) : 0;
+  const [b, queue, plans] = await Promise.all([
+    paymentsBoard(s.tid, { days, q: sp.q, method: sp.m, status: sp.s }),
+    unmatchedPayments(s.tid),
+    products(s.tid),
+  ]);
   const onSale = plans.filter((p) => p.on_sale);
   const canAssign = can(s, 'payments.assign');
-  const applied = rows.filter((r) => r.status === 'applied');
-  const unmatched = rows.filter((r) => r.status === 'unmatched');
-  const sum = (xs: readonly { amount_kes: number }[]) => xs.reduce((a, b) => a + b.amount_kes, 0);
-  // Everything except cash goes through the Payment Gateway (M-Pesa prompt, paybill/till, card, bank) and carries the convenience fee.
-  const viaTaifa = applied.filter((r) => r.channel !== 'cash');
-  const cash = applied.filter((r) => r.channel === 'cash');
+  const pay = can(s, 'payments.record');
+  const t = b.totals;
+  const change = b.previous ? Math.round(((t.total - b.previous) / b.previous) * 100) : null;
+  const period = days === 0 ? 'today' : days === 1 ? 'today' : `${days} days`;
+  const pct = (n: number) => (t.total ? Math.round((n / t.total) * 100) : 0);
+  const tile = (label: string, value: string, sub: React.ReactNode, tone = '') => (
+    <div className="rounded-2xl border border-[#E7EBF3] bg-white px-4 py-3.5">
+      <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-500">{label}</div>
+      <div className={`mt-1 truncate text-[22px] font-semibold tabular-nums tracking-tight ${tone}`}>{value}</div>
+      <div className="mt-0.5 text-[12px] text-ink-500">{sub}</div>
+    </div>
+  );
   return (
     <>
-      <Notice code={n} />
       <PageHeader
         title="Payments"
-        subtitle={
-          full
-            ? 'Every shilling, where it came from, and what it unlocked. Compare these totals with your M-Pesa and bank statements.'
-            : 'Today’s payments at this club.'
+        subtitle={full ? 'Money in, how it came, and anything that needs you.' : 'Today’s payments at the club.'}
+        actions={
+          <div className="flex flex-wrap gap-2 print:hidden">
+            {pay && <PayFor kind="cash" />}
+            {pay && <PayFor kind="pay" />}
+            <ExportMenu />
+          </div>
         }
       />
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <Stat label={full ? 'Applied (last 200)' : 'Applied today'} value={kes(sum(applied))} />
-        <Stat label="Through Payment Gateway" value={kes(sum(viaTaifa))} hint="M-Pesa, paybill, card, bank" />
-        <Stat label="Cash at the desk" value={kes(sum(cash))} hint="recorded by staff, audited" />
-        <Stat
-          label="Unmatched"
-          value={unmatched.length}
-          hint="held — no access granted"
-          tone={unmatched.length ? 'warn' : 'default'}
-        />
+      <Notice code={sp.n} />
+
+      <div className="mb-4 grid grid-cols-2 gap-3 xl:grid-cols-4">
+        {tile(
+          `Money in · ${period}`,
+          kes(t.total),
+          change === null ? (
+            `${t.n} payments`
+          ) : (
+            <>
+              <span className={`font-semibold ${change >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
+                {change >= 0 ? '▲' : '▼'} {Math.abs(change)}%
+              </span>{' '}
+              on the {days <= 1 ? 'day' : `${days} days`} before
+            </>
+          ),
+        )}
+        {tile('M-Pesa', kes(t.mpesa), `${pct(t.mpesa)}% · through the Payment Gateway`)}
+        {tile('Cash at the desk', kes(t.cash), `${pct(t.cash)}% · recorded by staff`)}
+        {tile(
+          'Needs sorting',
+          b.held.n ? `${b.held.n} · ${kes(b.held.kes)}` : 'Nothing',
+          b.held.n ? 'Paid, but not matched to a member' : 'Every payment is matched',
+          b.held.n ? 'text-amber-700' : '',
+        )}
       </div>
+
       {queue.length > 0 && (
-        <section className="card mt-6 p-6 ring-1 ring-amber-200">
-          <div className="font-medium">Payments to assign</div>
-          <p className="mt-1 text-sm text-ink-500">
-            Money that arrived but could not be matched, usually a mistyped account number. Nothing is lost: point each
-            one at the right member and service, and their access updates straight away.
-          </p>
-          <ul className="mt-4 divide-y divide-ink-100">
+        <a
+          href="#sort"
+          className="mb-4 flex items-center gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] text-amber-900 print:hidden"
+        >
+          <AlertCircle size={18} className="shrink-0" />
+          <span>
+            <b>
+              {queue.length} payment{queue.length === 1 ? '' : 's'} need{queue.length === 1 ? 's' : ''} you (
+              {kes(queue.reduce((a, q) => a + q.amount_kes, 0))}).
+            </b>{' '}
+            The account number didn’t match a member, so nobody got access for {queue.length === 1 ? 'it' : 'them'} yet.
+          </span>
+          <span className="ml-auto shrink-0 rounded-[9px] bg-white px-3 py-1.5 text-[12.5px] font-semibold ring-1 ring-amber-200">
+            Sort them
+          </span>
+        </a>
+      )}
+
+      <section className="overflow-hidden rounded-2xl border border-[#E7EBF3] bg-white">
+        <div className="print:hidden">
+          <LedgerFilters full={full} />
+        </div>
+        {b.rows.length ? (
+          <LedgerTable
+            rows={b.rows.map((r) => ({
+              id: r.id,
+              at: r.paid_at.toISOString(),
+              amount: r.amount_kes,
+              status: r.status,
+              cash: r.channel === 'cash',
+              provider: r.provider,
+              ref: r.provider_txn_id,
+              account: r.account_ref,
+              phone: r.phone,
+              memberId: r.member_id,
+              memberNo: r.member_no,
+              member: r.member,
+              product: r.product,
+              recordedBy: r.recorded_by,
+            }))}
+          />
+        ) : (
+          <p className="px-5 py-12 text-center text-sm text-ink-500">No payments match.</p>
+        )}
+        <div className="border-t border-[#EEF1F6] px-4 py-3 text-[12.5px] text-ink-500">
+          {b.rows.length} payment{b.rows.length === 1 ? '' : 's'} shown
+        </div>
+      </section>
+
+      {queue.length > 0 && (
+        <section id="sort" className="mt-6 scroll-mt-20 rounded-2xl border border-amber-200 bg-white print:hidden">
+          <header className="flex items-center gap-2.5 border-b border-[#EEF1F6] px-4 py-3">
+            <AlertCircle size={16} className="text-amber-600" />
+            <h2 className="text-[14px] font-semibold">Payments to sort</h2>
+            <span className="text-[12px] text-ink-500">
+              Point each one at the right member and service; their access updates straight away.
+            </span>
+          </header>
+          <ul className="divide-y divide-[#F0F2F6]">
             {queue.map((q) => {
               const fits = onSale.filter((p) => p.price_kes === q.amount_kes);
               return (
-                <li key={q.id} className="grid gap-3 py-3 lg:grid-cols-[1fr_auto] lg:items-center">
-                  <div className="text-sm">
-                    <span className="font-medium tabular-nums">{kes(q.amount_kes)}</span>
+                <li key={q.id} className="grid gap-3 px-4 py-3.5 lg:grid-cols-[1fr_auto] lg:items-center">
+                  <div className="text-[13px]">
+                    <b className="tabular-nums">{kes(q.amount_kes)}</b>
                     <span className="text-ink-500">
                       {' '}
-                      · {dateTime(q.paid_at)} · account typed “{q.account_ref ?? ''}”{q.phone ? ` · ${q.phone}` : ''}
+                      · {dateTime(q.paid_at)} · typed “{q.account_ref ?? ''}”{q.phone ? ` · ${q.phone}` : ''}
                     </span>
-                    {q.reason && <div className="text-xs text-amber-700">{q.reason}</div>}
+                    {q.reason && <div className="text-[12px] text-amber-700">{q.reason}</div>}
                   </div>
                   {canAssign &&
                     (fits.length ? (
@@ -79,22 +164,29 @@ export default async function Payments({ searchParams }: { searchParams: Promise
                           inputMode="numeric"
                           required
                           placeholder="Member no."
+                          aria-label="Member number"
                           className="input w-32 py-2"
                         />
-                        <select name="productId" className="input w-56 py-2" defaultValue={fits[0]?.id}>
+                        <select
+                          name="productId"
+                          aria-label="Service"
+                          className="input w-60 py-2"
+                          defaultValue={fits[0]?.id}
+                        >
                           {fits.map((p) => (
                             <option key={p.id} value={p.id}>
                               {p.name}
                             </option>
                           ))}
                         </select>
-                        <SubmitButton pendingText="Assigning…" className="btn-primary py-2">
-                          Assign
+                        <SubmitButton pendingText="Applying…" className="btn-primary py-2">
+                          Apply
                         </SubmitButton>
                       </form>
                     ) : (
-                      <span className="text-xs text-ink-500">
-                        No price is {kes(q.amount_kes)}: refund it or add that price under Services.
+                      <span className="text-[12px] text-ink-500">
+                        No price is {kes(q.amount_kes)}: refund it from the Payment Gateway, or add that price under
+                        Services.
                       </span>
                     ))}
                 </li>
@@ -103,55 +195,6 @@ export default async function Payments({ searchParams }: { searchParams: Promise
           </ul>
         </section>
       )}
-      <div className="card mt-6 overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead className="bg-ink-50/60 text-left">
-            <tr>
-              {['When', 'Member', 'Account', 'For', 'Amount', 'Source', 'Reference', 'Status'].map((h) => (
-                <th key={h} className="label px-5 py-3 font-medium">
-                  {h}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-ink-100">
-            {rows.map((p) => (
-              <tr key={p.id} className="hover:bg-ink-50/50">
-                <td className="whitespace-nowrap px-5 py-2.5 text-ink-500">{dateTime(p.paid_at)}</td>
-                <td className="px-5 py-2.5">
-                  {p.member_id ? (
-                    <Link href={`/members/${p.member_id}`} className="hover:underline">
-                      {p.member}
-                    </Link>
-                  ) : (
-                    <span className="text-ink-300">—</span>
-                  )}
-                </td>
-                <td className="px-5 py-2.5 font-mono text-xs">{p.account_ref ?? '—'}</td>
-                <td className="px-5 py-2.5">{p.product ?? '—'}</td>
-                <td className="px-5 py-2.5 tabular-nums">{kes(p.amount_kes)}</td>
-                <td className="px-5 py-2.5 text-ink-500">
-                  {p.channel === 'cash'
-                    ? `Cash · ${p.recorded_by ?? 'staff'}`
-                    : p.provider === 'taifapay' || p.provider === 'seed'
-                      ? `Payment Gateway · ${p.channel === 'mpesa' ? 'M-Pesa' : p.channel}`
-                      : p.provider.replace('desk-', 'desk · ')}
-                </td>
-                <td className="max-w-[140px] truncate px-5 py-2.5 font-mono text-[11px] text-ink-500">
-                  {p.provider_txn_id}
-                </td>
-                <td className="px-5 py-2.5">
-                  {p.status === 'applied' ? (
-                    <Badge tone="green">applied</Badge>
-                  ) : (
-                    <Badge tone="amber">{p.status}</Badge>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
     </>
   );
 }

@@ -261,6 +261,79 @@ export async function payments(tenantId: string) {
   );
 }
 
+export interface PaymentRow {
+  id: string;
+  paid_at: Date;
+  amount_kes: number;
+  status: string;
+  channel: string;
+  provider: string;
+  provider_txn_id: string;
+  account_ref: string | null;
+  phone: string | null;
+  member_id: string | null;
+  member_no: number | null;
+  member: string | null;
+  product: string | null;
+  recorded_by: string | null;
+}
+
+/**
+ * Payments (design A "Ledger", approved 2 Oct 2026): totals for the period with the change against the period
+ * before, money that needs the owner (unmatched), and the filtered list. `days` 0 = today only (front desk).
+ */
+export async function paymentsBoard(
+  tenantId: string,
+  o: { days: number; q?: string; method?: string; status?: string; limit?: number },
+) {
+  return T(tenantId, async (tx) => {
+    const [t] = await tx<{ timezone: string }[]>`select timezone from tenants where id = ${tenantId}`;
+    const tz = t?.timezone ?? 'Africa/Nairobi';
+    const now = DateTime.now().setZone(tz);
+    const from = (o.days === 0 ? now.startOf('day') : now.startOf('day').minus({ days: o.days - 1 })).toJSDate();
+    const prevFrom = (
+      o.days === 0 ? now.startOf('day').minus({ days: 1 }) : now.startOf('day').minus({ days: o.days * 2 - 1 })
+    ).toJSDate();
+    const q = (o.q ?? '').trim().toLowerCase();
+    const like = `%${q}%`;
+    const digits = q.replace(/\D/g, '').replace(/^254/, '').replace(/^0/, '');
+    const method = o.method === 'mpesa' || o.method === 'cash' ? o.method : '';
+    const status = o.status === 'applied' || o.status === 'unmatched' ? o.status : '';
+    const [rows, [cur], [prev], [held]] = await Promise.all([
+      tx<PaymentRow[]>`
+        select p.id, p.paid_at, p.amount_kes, p.status, p.channel, p.provider, p.provider_txn_id, p.account_ref, p.phone,
+               p.member_id, m.member_no, m.first_name || ' ' || m.last_name as member,
+               coalesce((select string_agg(l.label, ' + ' order by l.created_at) from payment_lines l where l.payment_id = p.id), pr.name) as product,
+               st.name as recorded_by
+        from payments p left join members m on m.id = p.member_id left join products pr on pr.id = p.product_id
+        left join app_staff_names() st on st.id::text = p.recorded_by
+        where p.paid_at >= ${from}
+          and (${method} = '' or (${method} = 'cash' and p.channel = 'cash') or (${method} = 'mpesa' and p.channel <> 'cash'))
+          and (${status} = '' or p.status = ${status})
+          and (${q} = '' or lower(coalesce(m.first_name || ' ' || m.last_name, '')) like ${like}
+               or m.member_no::text like ${like} or lower(p.provider_txn_id) like ${like} or coalesce(p.account_ref, '') like ${like}
+               or (${digits} <> '' and regexp_replace(coalesce(p.phone, ''), '\\D', '', 'g') like ${`%${digits}%`}))
+        order by p.paid_at desc limit ${o.limit ?? 300}`,
+      tx<{ total: number; mpesa: number; cash: number; n: number }[]>`
+        select coalesce(sum(amount_kes), 0)::int as total, coalesce(sum(amount_kes) filter (where channel <> 'cash'), 0)::int as mpesa,
+               coalesce(sum(amount_kes) filter (where channel = 'cash'), 0)::int as cash, count(*)::int as n
+        from payments where status = 'applied' and paid_at >= ${from}`,
+      tx<{ total: number }[]>`
+        select coalesce(sum(amount_kes), 0)::int as total from payments
+        where status = 'applied' and paid_at >= ${prevFrom} and paid_at < ${from}`,
+      tx<{ n: number; kes: number }[]>`
+        select count(*)::int as n, coalesce(sum(amount_kes), 0)::int as kes from payments where status = 'unmatched'`,
+    ]);
+    return {
+      rows,
+      totals: cur ?? { total: 0, mpesa: 0, cash: 0, n: 0 },
+      previous: prev?.total ?? 0,
+      held: held ?? { n: 0, kes: 0 },
+      from,
+    };
+  });
+}
+
 export interface DoorEvent {
   at: Date;
   memberId: string | null;
