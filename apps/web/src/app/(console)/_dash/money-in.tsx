@@ -104,7 +104,7 @@ export function MoneyIn({ daily, days, weekly }: { daily: Day[]; days: number; w
         role="img"
         aria-label={`${weekly ? 'Weekly' : 'Daily'} money in, last ${days} days, ${kes(total)} in total`}
       >
-        <div className="relative h-44">
+        <div className="relative h-60">
           {ticks.map((t) => (
             <span
               key={t}
@@ -115,7 +115,7 @@ export function MoneyIn({ daily, days, weekly }: { daily: Day[]; days: number; w
             </span>
           ))}
         </div>
-        <div className="relative h-44">
+        <div className="relative h-60">
           {ticks.map((t) => (
             <i
               key={t}

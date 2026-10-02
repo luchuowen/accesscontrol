@@ -321,6 +321,10 @@ export interface OwnerDashboard {
   members: { active: number; joined: number; lapsed: number; spark: number[] };
   renewals: { ended: number; renewed: number; lapsed: number };
   endingSoon: { id: string; memberNo: number; name: string; endsAt: Date }[];
+  /** Members whose plan ends in the next 7 days, and what they would pay at their last plan's current price. */
+  ending7: { count: number; expectedKes: number };
+  /** Money in by plan for the period, biggest first (top 4). */
+  plans: { name: string; kes: number }[];
   atRisk: { id: string; memberNo: number; name: string; daysAway: number }[];
   atRiskTotal: number;
   attention: {
@@ -393,6 +397,18 @@ export async function ownerDashboard(tenantId: string, days: number): Promise<Ow
       where m.first_name <> 'Wristband'
       group by m.id having max(e.ends_at) between now() and now() + interval '7 days'
       order by ends limit 6`;
+    const [e7] = await tx<{ n: number; kes: number }[]>`
+      select count(*)::int as n, coalesce(sum(lp.price_kes), 0)::int as kes
+      from (select m.id from members m join entitlements e on e.member_id = m.id
+            where m.first_name <> 'Wristband'
+            group by m.id having max(e.ends_at) between now() and now() + interval '7 days') x
+      left join lateral (select pr.price_kes from payments p join products pr on pr.id = p.product_id
+                         where p.member_id = x.id and p.status = 'applied' order by p.paid_at desc limit 1) lp on true`;
+    const plans = await tx<{ name: string; kes: number }[]>`
+      select coalesce(pr.name, 'Other') as name, sum(p.amount_kes)::int as kes
+      from payments p left join products pr on pr.id = p.product_id
+      where p.status = 'applied' and p.paid_at >= now() - ${span}::interval
+      group by 1 order by 2 desc limit 4`;
     // At risk: paid up, but no entry for 14+ days (the clearest early sign that someone is about to leave).
     const risk = await tx<{ id: string; member_no: number; first_name: string; last_name: string; away: number }[]>`
       select m.id, m.member_no, m.first_name, m.last_name,
@@ -442,6 +458,8 @@ export async function ownerDashboard(tenantId: string, days: number): Promise<Ow
         name: `${x.first_name} ${x.last_name}`,
         endsAt: x.ends,
       })),
+      ending7: { count: e7?.n ?? 0, expectedKes: e7?.kes ?? 0 },
+      plans,
       atRisk: risk.slice(0, 5).map((x) => ({
         id: x.id,
         memberNo: x.member_no,

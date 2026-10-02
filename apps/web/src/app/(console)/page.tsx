@@ -2,7 +2,7 @@ import { can } from '@lango/server';
 import Link from 'next/link';
 import { AddMember } from '@/components/add-member';
 import { nextMemberNo, ownerDashboard } from '@/lib/data';
-import { ago, kes } from '@/lib/format';
+import { ago, kes, kesShort } from '@/lib/format';
 import { requireSession } from '@/lib/session';
 import { LiveRefresh, RefreshButton } from './_dash/live-refresh';
 import { MoneyIn } from './_dash/money-in';
@@ -194,29 +194,72 @@ export default async function Dashboard({
           <Card className="min-w-0">
             <MoneyIn daily={d.daily} days={days} weekly={weekly} />
           </Card>
-          <Card>
-            <Label>Renewals</Label>
-            <div className="mt-3 grid grid-cols-3 overflow-hidden rounded-xl border border-slate-100">
-              {[
-                ['ended', d.renewals.ended, 'text-ink-900'],
-                ['renewed', d.renewals.renewed, 'text-emerald-700'],
-                ['lapsed', d.renewals.lapsed, 'text-rose-700'],
-              ].map(([l, n, c]) => (
-                <div key={l as string} className="border-l border-slate-100 px-3.5 py-3 first:border-l-0">
-                  <b className={`block text-[22px] font-semibold tabular-nums ${c}`}>{n}</b>
-                  <span className="text-xs capitalize text-ink-500">{l}</span>
+          <div className="flex min-w-0 flex-col gap-3.5">
+            <Card className="flex-1">
+              <div className="flex items-baseline justify-between">
+                <Label>Top plans</Label>
+                <span className="text-xs text-ink-500">by money in</span>
+              </div>
+              <div className="mt-3.5 flex flex-col gap-3">
+                {d.plans.length === 0 && <p className="text-sm text-ink-500">No payments yet.</p>}
+                {d.plans.map((pl) => {
+                  const share = d.revenue.now ? Math.round((pl.kes / d.revenue.now) * 100) : 0;
+                  return (
+                    <div key={pl.name}>
+                      <div className="mb-1.5 flex items-baseline justify-between gap-3 text-[13px]">
+                        <b className="min-w-0 truncate font-semibold">{pl.name}</b>
+                        <span className="shrink-0 text-xs tabular-nums text-ink-500">
+                          {kes(pl.kes)} · {share}%
+                        </span>
+                      </div>
+                      <div className="h-2 overflow-hidden rounded-full bg-slate-100">
+                        <i
+                          className="block h-full rounded-full bg-[linear-gradient(90deg,#34D399,#047857)]"
+                          style={{ width: `${Math.max(share, 2)}%` }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </Card>
+            <Card className="flex-1">
+              <div className="flex items-baseline justify-between">
+                <Label>Renewals</Label>
+                <span className="text-xs text-ink-500">{days} days</span>
+              </div>
+              <div className="mt-3 grid grid-cols-3 overflow-hidden rounded-xl border border-slate-100">
+                {[
+                  ['Ended', d.renewals.ended, 'text-ink-900'],
+                  ['Renewed', d.renewals.renewed, 'text-emerald-700'],
+                  ['Lapsed', d.renewals.lapsed, 'text-rose-700'],
+                ].map(([l, n, c]) => (
+                  <div key={l as string} className="border-l border-slate-100 px-3 py-2.5 first:border-l-0">
+                    <b className={`block text-[20px] font-semibold tabular-nums ${c}`}>{n}</b>
+                    <span className="text-xs text-ink-500">{l}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-2.5 grid grid-cols-2 gap-2.5">
+                <div className="rounded-xl border border-slate-100 px-3 py-2.5">
+                  <span className="text-xs text-ink-500">Ending in 7 days</span>
+                  <b className="block text-[20px] font-semibold tabular-nums">{d.ending7.count}</b>
                 </div>
-              ))}
-            </div>
-            {can(s, 'messages.manage') && d.renewals.lapsed > 0 && (
-              <Link
-                href="/messages"
-                className="mt-3 inline-flex rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-ink-900 hover:bg-slate-50"
-              >
-                Message lapsed
-              </Link>
-            )}
-          </Card>
+                <div className="rounded-xl border border-slate-100 px-3 py-2.5">
+                  <span className="text-xs text-ink-500">Expected if renewed</span>
+                  <b className="block text-[20px] font-semibold tabular-nums">KES {kesShort(d.ending7.expectedKes)}</b>
+                </div>
+              </div>
+              {can(s, 'messages.manage') && d.renewals.lapsed > 0 && (
+                <Link
+                  href="/messages"
+                  className="mt-3 inline-flex rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-ink-900 hover:bg-slate-50"
+                >
+                  Message lapsed
+                </Link>
+              )}
+            </Card>
+          </div>
         </div>
       )}
 
