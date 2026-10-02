@@ -4,10 +4,21 @@ import { join } from 'node:path';
 import { AxtraxClient, demoSeed, FakeAxtrax } from '@lango/axtrax';
 import { Bridge, Journal, sign } from '@lango/bridge';
 import { connect, migrate, type Sql, withTenant } from '@lango/db';
+import { DateTime } from 'luxon';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { rebuildAccessState } from './access.js';
 import { handleAck, handleDrift, handleEvents, handleInventory, handlePair, handleSync } from './bridge-api.js';
+import {
+  platformAlerts,
+  previewAnnouncement,
+  queueAnnouncement,
+  queueDailySummaries,
+  queueTamperAlert,
+  queueWinbacks,
+  watchBridges,
+} from './notify.js';
 import { importMembers, onboardingChecklist, planImport } from './onboarding.js';
+import { requestOtp, verifyOtp } from './otp.js';
 import { assignPayment, recordPayment } from './payments.js';
 import { dispatchSms, msisdn, queueReminders, SourceCodeSms, smsUnits } from './sms.js';
 import { reconcileTopups, startTopup } from './sms-topup.js';
@@ -622,5 +633,129 @@ describe('walking skeleton: pay → door', () => {
       ok: false,
       reason: 'no-platform-taifapay',
     });
+  });
+  it('SMS etiquette: quiet hours, one message a day, nothing twice; staff and NAVAC alerts; portal sign-in codes', async () => {
+    const sent: { mobile: string; message: string }[] = [];
+    const fakeFetch = (async (_u: string, i: RequestInit) => {
+      const b = JSON.parse(String(i.body));
+      sent.push({ mobile: b.mobile, message: b.message });
+      return new Response(
+        JSON.stringify({ status_code: '1000', status_desc: 'Success', message_id: sent.length, credit_balance: '250' }),
+      );
+    }) as typeof fetch;
+    const client = new SourceCodeSms('key', 'NAVAC', fakeFetch);
+    const night = DateTime.now().setZone('Africa/Nairobi').set({ hour: 22 });
+    const day = night.set({ hour: 10 });
+    const to = (m: string) => sent.filter((x) => x.mobile === m);
+    await owner`update sms_messages set status = 'skipped' where status = 'queued'`;
+    await owner`update tenant_settings set data = jsonb_set(data, '{notifications}',
+      data->'notifications' || '{"alertPhone":"0726049097","lowBalance":0}') where tenant_id = ${tenantId}`;
+    const [w] = await owner`insert into members (tenant_id, member_no, first_name, last_name, phone) values
+      (${tenantId}, 21088, 'Wanjiku', 'Kamau', '0711000088') returning id`;
+    await owner`insert into entitlements (tenant_id, member_id, zone_key, starts_at, ends_at, source)
+      values (${tenantId}, ${w?.id}, 'gym', now() - interval '40 days', now() - interval '7 days 1 minute', 'override')`;
+
+    // A TaifaPay payment that matches no plan: the payer is reassured at once, even at night.
+    await recordPayment(app, tenantId, {
+      provider: 'taifapay',
+      providerTxnId: 'TP-ODD-1',
+      amountKes: 777,
+      accountRef: '21001',
+      phone: '0711000099',
+      paidAt: new Date(),
+    });
+    expect(await queueWinbacks(app)).toBe(1);
+    expect(await queueWinbacks(app)).toBe(0); // once
+    const pv = await previewAnnouncement(app, tenantId, {
+      audience: 'all',
+      text: ' Pool closed  Saturday for cleaning. ',
+    });
+    expect(pv.body).toBe('Demo Club: Pool closed Saturday for cleaning.');
+    expect(pv.recipients).toBeGreaterThanOrEqual(2);
+    expect(pv.costKes).toBe(pv.recipients * 1.5);
+    expect(
+      await queueAnnouncement(app, tenantId, {
+        audience: 'all',
+        text: 'Pool closed Saturday for cleaning.',
+        actor: 'test',
+      }),
+    ).toMatchObject({ ok: true });
+
+    await dispatchSms(app, client, () => {}, undefined, night);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({ mobile: '254711000099' });
+    expect(sent[0]?.message).toMatch(/No need to pay again/);
+    const [waiting] = await owner`select error from sms_messages where kind = 'winback' and member_id = ${w?.id}`;
+    expect(waiting).toEqual({ error: 'waiting for quiet hours to end' });
+
+    // Morning: Wanjiku gets one message today (the "we miss you"); the news waits for tomorrow.
+    await dispatchSms(app, client, () => {}, undefined, day);
+    expect(to('254711000088')).toHaveLength(1);
+    expect(to('254711000088')[0]?.message).toMatch(/^We miss you at Demo Club, Wanjiku\./);
+    expect(to('254700000001').filter((x) => /Pool closed/.test(x.message))).toHaveLength(1);
+    const n = sent.length;
+    expect(await dispatchSms(app, client, () => {}, undefined, day)).toBe(0);
+    expect(sent).toHaveLength(n);
+    const [held] =
+      await owner`select status, error from sms_messages where kind = 'announcement' and member_id = ${w?.id}`;
+    expect(held).toEqual({ status: 'queued', error: 'waiting: one message per member per day' });
+    await owner`update members set sms_news = false where id = ${w?.id}`;
+    expect((await previewAnnouncement(app, tenantId, { audience: 'all', text: 'x' })).recipients).toBe(
+      pv.recipients - 1,
+    );
+
+    // Staff alerts: tamper once per member per day; door PC offline once, cancelled if it returns before sending.
+    await withTenant(app, tenantId, async (tx) => {
+      await queueTamperAlert(tx, tenantId, 21088);
+      await queueTamperAlert(tx, tenantId, 21088);
+    });
+    expect(
+      (await owner`select count(*)::int as n from sms_messages where dedupe_key like 'tamper:21088:%'`)[0]?.n,
+    ).toBe(1);
+    await owner`update bridges set last_seen_at = now() where last_seen_at is not null`;
+    expect(await watchBridges(app)).toBe(0);
+    const [br] = await owner`select id from bridges where tenant_id = ${tenantId} order by created_at limit 1`;
+    await owner`update bridges set last_seen_at = now() - interval '20 minutes' where id = ${br?.id}`;
+    expect(await watchBridges(app)).toBe(1);
+    expect(await watchBridges(app)).toBe(0);
+    await owner`update bridges set last_seen_at = now() where id = ${br?.id}`;
+    expect(await watchBridges(app)).toBe(0); // back before the alert went out: both are dropped
+    await owner`update bridges set last_seen_at = now() - interval '2 hours' where id = ${br?.id}`;
+    expect(await watchBridges(app)).toBe(1);
+    await dispatchSms(app, client, () => {}, undefined, day);
+    expect(to('254726049097').some((x) => /lost contact with the Main door PC/.test(x.message))).toBe(true);
+    expect(to('254726049097').some((x) => /changed Wanjiku Kamau \(21088\) directly in AxTraxNG/.test(x.message))).toBe(
+      true,
+    );
+
+    // NAVAC: Source Code credit (250, reported by the last send) is below 1,000, and a door PC is down for 2 h.
+    await owner`insert into platform_settings (key, data) values ('sms', '{"sender":"NAVAC","alertPhone":"0722000001","lowCredit":1000}')
+      on conflict (key) do update set data = platform_settings.data || excluded.data`;
+    expect(await platformAlerts(app, client, day)).toBe(2);
+    expect(await platformAlerts(app, client, day)).toBe(0); // once a day
+    expect(to('254722000001').map((x) => x.message.slice(0, 40))).toEqual([
+      'Lango: Source Code SMS credit is 250, be',
+      'Lango: 1 club door PC offline over 1 h: ',
+    ]);
+    await owner`update bridges set last_seen_at = now() where id = ${br?.id}`;
+    expect(await watchBridges(app)).toBe(1); // back online
+    await owner`update tenant_settings set data = jsonb_set(data, '{notifications,dailySummary}', 'true') where tenant_id = ${tenantId}`;
+    expect(await queueDailySummaries(app, day)).toBe(0); // only at 19:00
+    expect(await queueDailySummaries(app, day.set({ hour: 19 }))).toBe(1);
+    expect(await queueDailySummaries(app, day.set({ hour: 19, minute: 30 }))).toBe(0);
+    await dispatchSms(app, client, () => {}, undefined, day);
+    expect(to('254726049097').some((x) => /back online/.test(x.message))).toBe(true);
+    expect(to('254726049097').some((x) => /^Demo Club today: KES/.test(x.message))).toBe(true);
+    for (const m of sent) expect([m.message, smsUnits(m.message)]).toEqual([m.message, 1]); // every message fits one SMS
+
+    // Portal sign-in code: sent at once, one per minute, single use, wrong codes refused.
+    expect(await requestOtp(app, 'demo-club', 21088, client)).toBe('sent');
+    const code = sent.at(-1)?.message.match(/\b(\d{6})\b/)?.[1] as string;
+    expect(sent.at(-1)?.mobile).toBe('254711000088');
+    expect(await requestOtp(app, 'demo-club', 21088, client)).toBe('wait');
+    expect(await verifyOtp(app, 'demo-club', 21088, code === '000000' ? '111111' : '000000')).toBeNull();
+    expect(await verifyOtp(app, 'demo-club', 21088, code)).toEqual({ tenantId, memberId: w?.id });
+    expect(await verifyOtp(app, 'demo-club', 21088, code)).toBeNull();
+    expect(await requestOtp(app, 'demo-club', 99999, client)).toBe('unknown');
   });
 });

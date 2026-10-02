@@ -5,7 +5,7 @@ import { redirect } from 'next/navigation';
 import { CopyField } from '@/components/copy-field';
 import { SubmitButton } from '@/components/submit-button';
 import { Badge, PageHeader, Stat } from '@/components/ui';
-import { kes } from '@/lib/format';
+import { dateTime, kes } from '@/lib/format';
 import { requirePartner } from '@/lib/session';
 import { db } from '@/server/db';
 import { grantSms, saveClubSms, savePlatformSms, savePlatformTaifa, setPartnerActive } from '../actions';
@@ -40,6 +40,9 @@ export default async function SaasConsole({ searchParams }: { searchParams: Prom
     { data: { env?: string; clientId?: string } | null }[]
   >`select app_platform_get('taifapay') as data`;
   const taifa = taifaRow?.data;
+  const [statusRow] = await db()<{ data: { balance?: number; at?: string } | null }[]>`
+    select app_platform_get('sms_status') as data`;
+  const lastCredit = statusRow?.data;
   let account: { ok: boolean; balance: string | null } | null = null;
   if (cfg?.apiKey) {
     try {
@@ -132,6 +135,35 @@ export default async function SaasConsole({ searchParams }: { searchParams: Prom
                 <input name="priceKes" defaultValue={price} inputMode="decimal" className="input mt-1.5" />
               </label>
             </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <label className="block">
+                <span className="label">NAVAC alert phone</span>
+                <input
+                  name="alertPhone"
+                  inputMode="tel"
+                  defaultValue={cfg?.alertPhone ?? ''}
+                  placeholder="07…"
+                  className="input mt-1.5"
+                />
+              </label>
+              <label className="block">
+                <span className="label">Alert when Source Code credit is below</span>
+                <input
+                  name="lowCredit"
+                  inputMode="numeric"
+                  defaultValue={cfg?.lowCredit ?? ''}
+                  placeholder="e.g. 2000"
+                  className="input mt-1.5"
+                />
+              </label>
+            </div>
+            <p className="text-xs text-ink-500">
+              {lastCredit?.balance != null
+                ? `Source Code credit after the last send: ${lastCredit.balance.toLocaleString('en-KE')}${lastCredit.at ? ` (${dateTime(new Date(lastCredit.at))})` : ''}.`
+                : 'Source Code credit shows here after the first message is sent.'}{' '}
+              The alert phone also gets a morning list of club door PCs offline for over an hour. Nothing is sent
+              between 20:00 and 08:00.
+            </p>
             <label className="block">
               <span className="label">API key</span>
               <input

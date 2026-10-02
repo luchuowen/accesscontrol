@@ -2,6 +2,7 @@ import { withTenant } from '@lango/db';
 import { clubSms, onboardingChecklist, platformSmsConfig } from '@lango/server';
 import { CheckCircle2, CreditCard, KeyRound, MessageSquare, Smartphone, UsersRound } from 'lucide-react';
 import { headers } from 'next/headers';
+import Link from 'next/link';
 import { Checklist } from '@/components/checklist';
 import { CopyField } from '@/components/copy-field';
 import { SubmitButton } from '@/components/submit-button';
@@ -9,15 +10,7 @@ import { Badge, PageHeader } from '@/components/ui';
 import { dateTime, kes } from '@/lib/format';
 import { requireSession } from '@/lib/session';
 import { db } from '@/server/db';
-import {
-  buySms,
-  changePassword,
-  saveChannels,
-  saveNotifications,
-  saveTaifaPay,
-  sendTestSms,
-  setStaffActive,
-} from './actions';
+import { buySms, changePassword, saveChannels, saveTaifaPay, sendTestSms, setStaffActive } from './actions';
 import { AddStaffForm } from './team-form';
 
 export default async function Settings({
@@ -74,12 +67,6 @@ export default async function Settings({
     (tx) => tx<{ id: string; created_at: Date; amount_kes: number; units: number; status: string; trigger: string }[]>`
       select id, created_at, amount_kes, units, status, trigger from sms_topups order by created_at desc limit 5`,
   );
-  const recentSms = await withTenant(
-    db(),
-    s.tid,
-    (tx) => tx<{ id: string; created_at: Date; kind: string; body: string; status: string; error: string | null }[]>`
-      select id, created_at, kind, body, status, error from sms_messages order by created_at desc limit 8`,
-  );
   const checklist = await onboardingChecklist(db(), s.tid);
   const staff = await withTenant(
     db(),
@@ -104,14 +91,12 @@ export default async function Settings({
     'pw:ok': ['green', 'Password changed.'],
     'pw:short': ['red', 'Use at least 10 characters.'],
     'pw:wrong': ['red', 'Your current password is not right.'],
-    'sms:saved': ['green', 'SMS settings saved.'],
     'sms:forbidden': ['red', 'Only the club owner can change this.'],
     'sms:number': ['red', 'Enter a Kenyan mobile number, e.g. 0712 345 678.'],
     'sms:wait': ['amber', 'A few test messages were just sent. Wait a few minutes.'],
     'sms:platform': ['amber', 'SMS is not connected on the platform yet. Ask NAVAC to connect it.'],
     'sms:test-sent': ['green', 'Test SMS sent. It should arrive within a minute.'],
-    'sms:test-failed': ['red', 'The test SMS was not accepted. See the list below for the reason.'],
-    'sms:alert-phone': ['red', 'Automatic top-up needs an alert phone for the M-Pesa prompt.'],
+    'sms:test-failed': ['red', 'The test SMS was not accepted. See Messages for the reason.'],
     'sms:topup-sent': ['green', 'M-Pesa prompt sent. The SMS credit is added as soon as the payment is confirmed.'],
     'sms:topup-phone': ['red', 'Enter a Kenyan mobile number for the M-Pesa prompt.'],
     'sms:topup-amount': ['red', 'Enter an amount of at least KES 10 that buys at least one SMS.'],
@@ -338,7 +323,7 @@ export default async function Settings({
             <div className="flex-1">
               <div className="font-medium">SMS notifications</div>
               <div className="text-xs text-ink-500">
-                Sent as {smsSender ?? 'NAVAC'} through Source Code · receipts, expiry reminders, welcome
+                Sent as {smsSender ?? 'NAVAC'} through Source Code · prepaid credit
               </div>
             </div>
             {!smsSender ? (
@@ -409,103 +394,16 @@ export default async function Settings({
               ))}
             </ul>
           )}
-          {owner ? (
-            <form action={saveNotifications} className="mt-6 space-y-3 text-sm">
-              <label className="flex items-center gap-2.5 font-medium">
-                <input
-                  type="checkbox"
-                  name="enabled"
-                  defaultChecked={!!notify.enabled}
-                  className="h-4 w-4 accent-ink-900"
-                />
-                Send SMS to members
-              </label>
-              <div className="space-y-2.5 rounded-xl bg-ink-50/60 p-3">
-                <label className="flex items-center gap-2.5">
-                  <input
-                    type="checkbox"
-                    name="receipts"
-                    defaultChecked={notify.receipts !== false}
-                    className="h-4 w-4 accent-ink-900"
-                  />
-                  Payment receipt with the new end date
-                </label>
-                <label className="flex flex-wrap items-center gap-2.5">
-                  <input
-                    type="checkbox"
-                    name="reminders"
-                    defaultChecked={notify.reminders !== false}
-                    className="h-4 w-4 accent-ink-900"
-                  />
-                  Renewal reminder
-                  <input
-                    name="reminderDays"
-                    type="number"
-                    min={1}
-                    max={14}
-                    defaultValue={notify.reminderDays ?? 3}
-                    className="input w-16 py-1"
-                  />
-                  days before, and on the last day
-                </label>
-                <label className="flex items-center gap-2.5">
-                  <input
-                    type="checkbox"
-                    name="welcome"
-                    defaultChecked={!!notify.welcome}
-                    className="h-4 w-4 accent-ink-900"
-                  />
-                  Welcome message with the member number (new members only)
-                </label>
-              </div>
-              <div className="space-y-2.5 rounded-xl bg-ink-50/60 p-3">
-                <label className="flex flex-wrap items-center gap-2.5">
-                  Alert me when the balance falls below
-                  <input
-                    name="lowBalance"
-                    type="number"
-                    min={0}
-                    defaultValue={notify.lowBalance ?? 100}
-                    className="input w-24 py-1"
-                  />
-                  SMS
-                </label>
-                <label className="flex flex-wrap items-center gap-2.5">
-                  Alert phone
-                  <input
-                    name="alertPhone"
-                    inputMode="tel"
-                    defaultValue={notify.alertPhone ?? ''}
-                    placeholder="07…"
-                    className="input w-40 py-1"
-                  />
-                </label>
-                <label className="flex flex-wrap items-center gap-2.5">
-                  <input
-                    type="checkbox"
-                    name="autoTopup"
-                    defaultChecked={!!notify.autoTopup}
-                    className="h-4 w-4 accent-ink-900"
-                  />
-                  Top up automatically: M-Pesa prompt for KES
-                  <input
-                    name="autoTopupKes"
-                    type="number"
-                    min={100}
-                    step={100}
-                    defaultValue={notify.autoTopupKes ?? 1000}
-                    className="input w-24 py-1"
-                  />
-                  to the alert phone
-                </label>
-              </div>
-              <SubmitButton pendingText="Saving…" className="btn-ghost w-full">
-                Save SMS settings
-              </SubmitButton>
-            </form>
-          ) : (
-            <p className="mt-6 text-sm text-ink-500">SMS is {notify.enabled ? 'on' : 'off'} for this club.</p>
-          )}
+          <Link
+            href="/messages"
+            className="mt-6 flex items-center justify-between rounded-xl bg-ink-50/60 p-3 text-sm hover:bg-ink-50"
+          >
+            <span>
+              {notify.enabled ? 'SMS is on.' : 'SMS is off.'} Choose what members and staff receive, quiet hours, and
+              send news
+            </span>
+            <span className="font-medium">Messages →</span>
+          </Link>
           {smsSender && ['owner', 'manager'].includes(s.role) && (
             <form action={sendTestSms} className="mt-4 flex gap-2 border-t border-ink-100 pt-4">
               <input
@@ -519,32 +417,6 @@ export default async function Settings({
                 Send test
               </SubmitButton>
             </form>
-          )}
-          {recentSms.length > 0 && (
-            <ul className="mt-4 divide-y divide-ink-100 border-t border-ink-100 text-xs">
-              {recentSms.map((m) => (
-                <li key={m.id} className="flex items-center gap-3 py-2">
-                  <span className="w-24 shrink-0 text-ink-500">{dateTime(m.created_at)}</span>
-                  <span className="w-16 shrink-0 capitalize text-ink-500">{m.kind}</span>
-                  <span className="flex-1 truncate" title={m.error ?? m.body}>
-                    {m.body}
-                  </span>
-                  <Badge
-                    tone={
-                      m.status === 'sent'
-                        ? 'green'
-                        : m.status === 'failed'
-                          ? 'red'
-                          : m.status === 'queued'
-                            ? 'blue'
-                            : 'gray'
-                    }
-                  >
-                    {m.status}
-                  </Badge>
-                </li>
-              ))}
-            </ul>
           )}
         </section>
         <section className="card p-6">

@@ -16,6 +16,8 @@ export interface SmsResult {
   cost?: number;
   /** false for errors a retry cannot fix (bad number, bad sender, bad key, no credit) */
   retry: boolean;
+  /** NAVAC's remaining Source Code credit, as Source Code reports it after the send */
+  balance?: number;
 }
 
 /** Kenyan mobile → 2547XXXXXXXX / 2541XXXXXXXX, or null when it is not a mobile number. */
@@ -72,6 +74,9 @@ export class SourceCodeSms {
       ...(r.message_id != null ? { messageId: String(r.message_id) } : {}),
       ...(Number(r.message_cost) > 0 ? { cost: Number(r.message_cost) } : {}),
       retry: !ok && !FINAL.has(code),
+      ...(r.credit_balance != null && String(r.credit_balance) !== '' && Number.isFinite(Number(r.credit_balance))
+        ? { balance: Number(r.credit_balance) }
+        : {}),
     };
   }
 
@@ -108,6 +113,10 @@ export interface PlatformSms {
   costKes?: number;
   /** default resale price per SMS unit (KES); a club can have its own */
   priceKes?: number;
+  /** NAVAC's phone for platform alerts (Source Code credit low, club door PCs offline) */
+  alertPhone?: string;
+  /** alert NAVAC when Source Code credit falls below this */
+  lowCredit?: number;
 }
 
 export async function platformSmsConfig(sql: Sql): Promise<PlatformSms | null> {
@@ -142,6 +151,38 @@ export interface NotifySettings {
   alertPhone?: string;
   autoTopup?: boolean;
   autoTopupKes?: number;
+  /** "we'll sort it, no need to pay again" when an M-Pesa payment cannot be matched (default on) */
+  unmatched?: boolean;
+  /** one "we miss you" a week after a plan ends without renewal (default on) */
+  winback?: boolean;
+  /** staff alerts to the alert phone (default on) */
+  bridgeAlerts?: boolean;
+  tamperAlerts?: boolean;
+  /** end-of-day summary to the alert phone at 19:00 (default off) */
+  dailySummary?: boolean;
+  /** local hours; nothing but receipts and sign-in codes is sent from quietFrom until quietTo (default 20 → 7) */
+  quietFrom?: number;
+  quietTo?: number;
+}
+
+/** Sent at any hour and never counted against the member's one-message-a-day limit. */
+export const URGENT_KINDS = new Set(['receipt', 'unmatched', 'otp', 'test', 'topup']);
+/** Messages a member gets at most one of per day (the rest wait for the next day, or lapse). */
+export const CAPPED_KINDS = new Set(['reminder', 'welcome', 'announcement', 'winback']);
+/** Lango's own operational messages to club staff: free, sent under the platform sender. */
+export const FREE_KINDS = new Set(['system', 'topup']);
+
+export const quietHours = (n: NotifySettings) => ({
+  from: Number.isInteger(n.quietFrom) ? (n.quietFrom as number) : 20,
+  to: Number.isInteger(n.quietTo) ? (n.quietTo as number) : 7,
+});
+
+/** True while it is quiet time in the club's timezone (from 20:00 to 07:00 by default). */
+export function isQuiet(at: DateTime, tz: string, n: NotifySettings): boolean {
+  const { from, to } = quietHours(n);
+  if (from === to) return false;
+  const h = at.setZone(tz).hour;
+  return from > to ? h >= from || h < to : h >= from && h < to;
 }
 
 /** The club's SMS sender ID, price per unit and current balance (units). */
@@ -173,32 +214,63 @@ export async function dispatchSms(
   client: SourceCodeSms,
   log: (m: string) => void = console.log,
   onLowBalance?: (tenantId: string, balance: number, n: NotifySettings) => Promise<void>,
+  now: DateTime = DateTime.now(),
 ) {
   let sent = 0;
   const platform = await platformSmsConfig(sql);
-  const tenants = await sql<{ id: string }[]>`select id from tenants`;
+  const tenants = await sql<{ id: string; timezone: string }[]>`select id, timezone from tenants`;
+  let navacBalance: number | undefined;
   for (const t of tenants) {
     const low = await withTenant(sql, t.id, async (tx) => {
       const n = await clubNotify(tx, t.id);
+      const quiet = isQuiet(now, t.timezone, n);
+      const dayStart = now.setZone(t.timezone).startOf('day').toJSDate();
       if (!n.enabled) {
         // Club has SMS off: member messages are dropped, not piled up; system messages still go out.
         await tx`update sms_messages set status = 'skipped', error = 'SMS is off for this club'
-                 where status = 'queued' and kind not in ('test', 'system')`;
+                 where status = 'queued' and kind not in ('test', 'system', 'topup')`;
       }
       await tx`update sms_messages set status = 'skipped', error = 'too old to send'
-               where status = 'queued' and created_at < now() - interval '24 hours'`;
+               where status = 'queued' and (send_before < now() or (send_before is null and created_at < now() - interval '24 hours'))`;
       const club = await clubSms(tx, t.id, platform);
       let balance = club.balance;
-      const batch = await tx<{ id: string; phone: string; body: string; attempts: number; kind: string }[]>`
-        select id, phone, body, attempts, kind from sms_messages where status = 'queued'
-        order by (kind = 'system') desc, created_at limit 30 for update skip locked`;
+      // Waiting messages are labelled in bulk and left out of the batch, so they never hold up the rest.
+      const urgent = [...URGENT_KINDS];
+      const capped = [...CAPPED_KINDS];
+      if (quiet)
+        await tx`update sms_messages set error = 'waiting for quiet hours to end'
+                 where status = 'queued' and kind <> all(${urgent}) and error is distinct from 'waiting for quiet hours to end'`;
+      await tx`update sms_messages q set error = 'waiting: one message per member per day'
+               where q.status = 'queued' and q.kind = any(${capped}) and q.member_id is not null
+                 and q.error is distinct from 'waiting: one message per member per day'
+                 and exists (select 1 from sms_messages s where s.member_id = q.member_id and s.status = 'sent'
+                             and s.kind = any(${capped}) and s.sent_at >= ${dayStart})`;
+      const batch = await tx<
+        { id: string; phone: string; body: string; attempts: number; kind: string; member_id: string | null }[]
+      >`
+        select id, phone, body, attempts, kind, member_id from sms_messages q where status = 'queued'
+          and (${!quiet} or kind = any(${urgent}))
+          and not (kind = any(${capped}) and member_id is not null and exists (
+            select 1 from sms_messages s where s.member_id = q.member_id and s.status = 'sent'
+              and s.kind = any(${capped}) and s.sent_at >= ${dayStart}))
+        order by kind = any(${urgent}) desc, (kind = 'system') desc, (kind = 'reminder') desc, created_at
+        limit 40 for update skip locked`;
       for (const m of batch) {
         const to = msisdn(m.phone);
         if (!to) {
           await tx`update sms_messages set status = 'failed', error = 'not a Kenyan mobile number' where id = ${m.id}`;
           continue;
         }
-        const free = m.kind === 'system';
+        // Two capped messages for one member in the same batch: the first goes, the second waits.
+        if (CAPPED_KINDS.has(m.kind) && m.member_id) {
+          const [had] = await tx`select 1 from sms_messages where member_id = ${m.member_id} and status = 'sent'
+            and kind = any(${capped}) and sent_at >= ${dayStart} limit 1`;
+          if (had) {
+            await tx`update sms_messages set error = 'waiting: one message per member per day' where id = ${m.id}`;
+            continue;
+          }
+        }
+        const free = FREE_KINDS.has(m.kind);
         const units = smsUnits(m.body);
         if (!free && balance < units) {
           await tx`update sms_messages set error = 'waiting for SMS credit' where id = ${m.id}`;
@@ -211,6 +283,7 @@ export async function dispatchSms(
           r = { ok: false, code: 'network', desc: (e as Error).message, retry: true };
         }
         const attempts = m.attempts + 1;
+        if (r.balance != null) navacBalance = r.balance;
         if (r.ok) {
           sent++;
           await tx`update sms_messages set status = 'sent', sent_at = now(), attempts = ${attempts},
@@ -230,7 +303,8 @@ export async function dispatchSms(
         }
       }
       const threshold = n.lowBalance ?? 100;
-      if (!n.enabled || balance >= threshold) return null;
+      // Low-balance alerts and automatic M-Pesa prompts never arrive during quiet hours.
+      if (!n.enabled || balance >= threshold || quiet) return null;
       // At most one low-balance alert per day.
       const [recent] =
         await tx`select 1 from audit_log where action = 'sms.low_balance' and at > now() - interval '24 hours'`;
@@ -250,7 +324,49 @@ export async function dispatchSms(
     if (low && onLowBalance)
       await onLowBalance(t.id, low.balance, low.n).catch((e) => log(`auto top-up ${t.id}: ${(e as Error).message}`));
   }
+  if (navacBalance != null)
+    await sql`select app_platform_note('sms_status', ${sql.json({ balance: navacBalance, at: new Date().toISOString() } as never)})`;
   return sent;
+}
+
+/**
+ * Send one member message right now (portal sign-in codes): club sender, paid from the club's SMS credit, recorded
+ * like any other message. Returns false when SMS is off, the club has no credit, or Source Code refuses.
+ */
+export async function sendNow(
+  sql: Sql,
+  tenantId: string,
+  m: { phone: string; body: string; kind: string; memberId?: string },
+  client?: SourceCodeSms | null,
+): Promise<boolean> {
+  const sms = client ?? (await platformSms(sql));
+  const to = msisdn(m.phone);
+  if (!sms || !to) return false;
+  const platform = await platformSmsConfig(sql);
+  const ready = await withTenant(sql, tenantId, async (tx) => {
+    const n = await clubNotify(tx, tenantId);
+    const club = await clubSms(tx, tenantId, platform);
+    return n.enabled && club.balance >= smsUnits(m.body) ? club : null;
+  });
+  if (!ready) return false;
+  let r: SmsResult;
+  try {
+    r = await sms.send(to, m.body, ready.sender);
+  } catch (e) {
+    r = { ok: false, code: 'network', desc: (e as Error).message, retry: true };
+  }
+  const units = Math.max(smsUnits(m.body), r.cost ?? 0);
+  await withTenant(sql, tenantId, async (tx) => {
+    const [row] = await tx<{ id: string }[]>`
+      insert into sms_messages (tenant_id, member_id, phone, body, kind, status, provider_ref, error, attempts, sent_at)
+      values (${tenantId}, ${m.memberId ?? null}, ${to}, ${m.body}, ${m.kind}, ${r.ok ? 'sent' : 'failed'},
+              ${r.messageId ?? null}, ${r.ok ? null : `${r.code} ${r.desc}`.slice(0, 300)}, 1, ${r.ok ? new Date() : null})
+      returning id`;
+    if (r.ok)
+      await tx`insert into sms_ledger (tenant_id, units, kind, ref, amount_kes)
+               values (${tenantId}, ${-units}, 'send', ${row?.id ?? null}, ${units * ready.priceKes})`;
+  });
+  return r.ok;
 }
 
 /**
@@ -287,8 +403,8 @@ export async function queueReminders(sql: Sql, portalUrl: string): Promise<numbe
           which === 'today'
             ? `${t.name}: ${d.first_name}, your access ends today at ${end.toFormat('HH:mm')}. ${how}`
             : `${t.name}: ${d.first_name}, your access ends on ${end.toFormat('d LLL')}. ${how}`;
-        const r = await tx`insert into sms_messages (tenant_id, member_id, phone, body, kind, dedupe_key)
-          values (${t.id}, ${d.member_id}, ${d.phone}, ${body}, 'reminder', ${`reminder:${which}:${d.member_id}:${end.toISODate()}`})
+        const r = await tx`insert into sms_messages (tenant_id, member_id, phone, body, kind, dedupe_key, send_before)
+          values (${t.id}, ${d.member_id}, ${d.phone}, ${body}, 'reminder', ${`reminder:${which}:${d.member_id}:${end.toISODate()}`}, ${d.ends})
           on conflict (tenant_id, dedupe_key) where dedupe_key is not null do nothing returning id`;
         q += r.length;
       }

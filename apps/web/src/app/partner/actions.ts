@@ -3,6 +3,7 @@ import { randomBytes } from 'node:crypto';
 import {
   encrypt,
   hashPassword,
+  msisdn,
   newPairCode,
   SourceCodeSms,
   signSession,
@@ -113,7 +114,9 @@ export async function savePlatformSms(form: FormData) {
     stored = encrypt(apiKey);
   }
   if (!stored) back('sms-missing');
-  await db()`select app_platform_set(${s.uid}, 'sms', ${db().json({ apiKey: stored, sender, costKes, priceKes } as never)})`;
+  const alertPhone = msisdn(String(form.get('alertPhone') ?? '')) ?? undefined;
+  const lowCredit = Math.max(0, Number(form.get('lowCredit') ?? 0) || 0) || undefined;
+  await db()`select app_platform_set(${s.uid}, 'sms', ${db().json({ apiKey: stored, sender, costKes, priceKes, alertPhone, lowCredit } as never)})`;
   back('sms-ok');
 }
 

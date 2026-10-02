@@ -3,13 +3,25 @@
  * - TaifaPay reconciliation (safety net for missed webhooks), every 60 s
  * - SMS dispatch through the platform's Source Code account, every 20 s
  * - SMS credit top-ups (NAVAC TaifaPay), every 60 s
- * - expiry reminders, every 15 min
+ * - expiry reminders, "we miss you", 19:00 staff summaries, every 15 min
+ * - door PC (Site Bridge) offline / back online alerts, every 2 min
+ * - NAVAC platform alerts (Source Code credit, door PCs down over 1 h), every 15 min
+ * Quiet hours and the one-message-a-day limit are applied by the dispatcher, not here.
  */
 export async function register() {
   if (process.env.NEXT_RUNTIME !== 'nodejs' || !process.env.DATABASE_URL || process.env.LANGO_DISABLE_JOBS) return;
-  const { dispatchSms, platformSms, queueReminders, reconcileTaifaPay, reconcileTopups, startTopup } = await import(
-    '@lango/server'
-  );
+  const {
+    dispatchSms,
+    platformAlerts,
+    platformSms,
+    queueDailySummaries,
+    queueReminders,
+    queueWinbacks,
+    reconcileTaifaPay,
+    reconcileTopups,
+    startTopup,
+    watchBridges,
+  } = await import('@lango/server');
   const { db } = await import('./server/db');
   const portal = (process.env.PUBLIC_URL ?? '').replace(/\/$/, '');
   const every = (ms: number, first: number, name: string, job: () => Promise<number>, done: (n: number) => string) => {
@@ -62,10 +74,31 @@ export async function register() {
     (n) => `sms: sent ${n}`,
   );
   every(
+    60_000,
+    30_000,
+    'sms top-ups',
+    () => reconcileTopups(db(), (m) => console.warn(m)),
+    (n) => `sms: credited ${n} top-up(s)`,
+  );
+  every(
     15 * 60_000,
     60_000,
     'sms reminders',
-    () => queueReminders(db(), portal),
-    (n) => `sms: queued ${n} reminder(s)`,
+    async () => (await queueReminders(db(), portal)) + (await queueWinbacks(db())) + (await queueDailySummaries(db())),
+    (n) => `sms: queued ${n} reminder / we-miss-you / summary message(s)`,
+  );
+  every(
+    2 * 60_000,
+    90_000,
+    'bridge watch',
+    () => watchBridges(db()),
+    (n) => `sms: queued ${n} door PC alert(s)`,
+  );
+  every(
+    15 * 60_000,
+    120_000,
+    'platform alerts',
+    () => platformAlerts(db()),
+    (n) => `sms: sent ${n} NAVAC alert(s)`,
   );
 }

@@ -58,6 +58,15 @@ async function applyPayment(tx: Tx, tenantId: string, paymentId: string, p: Inco
     await tx`update payments set status = 'unmatched' where id = ${paymentId}`;
     await tx`insert into audit_log (tenant_id, actor, action, entity, data)
              values (${tenantId}, ${actor}, 'payment.unmatched', ${paymentId}, ${tx.json({ reason, amount: p.amountKes, accountRef: p.accountRef } as never)})`;
+    // The payer gets one reassurance so they do not pay twice; staff assign it from Payments (a receipt follows).
+    const n = await clubNotify(tx, tenantId);
+    if (p.phone && p.provider === 'taifapay' && n.enabled && n.unmatched !== false) {
+      const [club] = await tx<{ name: string }[]>`select name from tenants where id = ${tenantId}`;
+      const body = `${club?.name}: we've received your KES ${p.amountKes.toLocaleString('en-KE')} payment and are matching it to your membership. No need to pay again; we'll confirm by SMS.`;
+      await tx`insert into sms_messages (tenant_id, phone, body, kind, dedupe_key)
+               values (${tenantId}, ${p.phone}, ${body}, 'unmatched', ${`unmatched:${paymentId}`})
+               on conflict (tenant_id, dedupe_key) where dedupe_key is not null do nothing`;
+    }
     return { status: 'unmatched', paymentId, reason };
   };
   const memberNo = Number.parseInt((p.accountRef ?? '').trim(), 10);

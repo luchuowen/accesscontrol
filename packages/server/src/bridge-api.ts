@@ -9,6 +9,7 @@ import {
   InventoryRequest,
   type SyncResponse,
 } from '@lango/protocol';
+import { queueTamperAlert } from './notify.js';
 
 interface BridgeRow {
   id: string;
@@ -211,6 +212,7 @@ export async function handleDrift(sql: Sql, req: Request): Promise<Response> {
       // Scheduled segment switches are expected; only edits to dates/group/cards made by people are tamper.
       await tx`insert into audit_log (tenant_id, actor, action, entity, data)
                values (${b.tenant_id}, 'site-bridge', 'access.tamper_reverted', ${String(d.memberNo)}, ${tx.json({ changes: d.changes } as never)})`;
+      await queueTamperAlert(tx, b.tenant_id, d.memberNo);
     }
   });
   return json(200, { ok: true });

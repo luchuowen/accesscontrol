@@ -60,7 +60,7 @@ export async function createMember(form: FormData) {
       await tx`insert into audit_log (tenant_id, actor, action, entity, data) values (${s.tid}, ${s.uid}, 'member.created', ${newId}, ${tx.json({ memberNo } as never)})`;
       await rebuildAccessState(tx, s.tid, newId);
       const notify = await clubNotify(tx, s.tid);
-      if (phone && notify.enabled && notify.welcome) {
+      if (phone && notify.enabled && notify.welcome !== false) {
         const [t] = await tx<{ name: string; slug: string; paybill: string | null }[]>`
           select t.name, t.slug, ts.data->'channels'->>'paybill' as paybill
           from tenants t left join tenant_settings ts on ts.tenant_id = t.id where t.id = ${s.tid}`;

@@ -1,7 +1,17 @@
 'use server';
 import { createHmac } from 'node:crypto';
 import { withTenant } from '@lango/db';
-import { clientIp, initiatedTransactionId, isLimited, rateLimit, recordFailure, tenantTaifa } from '@lango/server';
+import {
+  clientIp,
+  initiatedTransactionId,
+  isLimited,
+  otpAvailable,
+  rateLimit,
+  recordFailure,
+  requestOtp,
+  tenantTaifa,
+  verifyOtp,
+} from '@lango/server';
 import { cookies, headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { sessionSecret } from '@/lib/session';
@@ -19,7 +29,73 @@ export async function readMember(): Promise<{ tenantId: string; memberId: string
 
 const digits = (p: string) => p.replace(/\D/g, '').replace(/^0/, '254').slice(-12);
 
-/** v1: club slug + member number + registered phone. (SMS one-time code replaces this once SMS is wired.) */
+const setMember = async (tenantId: string, memberId: string) =>
+  (await cookies()).set(COOKIE, sign(`${tenantId}:${memberId}`), {
+    httpOnly: true,
+    sameSite: 'lax',
+    path: '/m',
+    maxAge: 30 * 86400,
+    secure: process.env.NODE_ENV === 'production',
+  });
+
+const who = (form: FormData) => ({
+  slug: String(form.get('club') ?? '')
+    .trim()
+    .toLowerCase(),
+  no: Number.parseInt(String(form.get('memberNo') ?? ''), 10),
+});
+const q = (slug: string, no: number) => `c=${encodeURIComponent(slug)}&n=${Number.isSafeInteger(no) ? no : ''}`;
+
+/**
+ * Step 1: club code + member number. A 6-digit code goes by SMS to the phone the club has on file; the answer is
+ * the same whether or not the member exists. Clubs without SMS fall back to confirming the phone number.
+ */
+export async function memberStart(form: FormData) {
+  const { slug, no } = who(form);
+  const ip = clientIp(await headers());
+  if (!rateLimit(`member-start-ip:${ip}`, 20, 10 * 60_000)) redirect('/m?e=2');
+  if (!(await otpAvailable(db(), slug))) redirect(`/m?step=phone&${q(slug, no)}`);
+  const r = await requestOtp(db(), slug, no);
+  if (r === 'fallback') redirect(`/m?step=phone&${q(slug, no)}`);
+  redirect(`/m?step=code&${q(slug, no)}${r === 'wait' ? '&w=1' : ''}`);
+}
+
+/** Step 2: the code from the SMS. */
+export async function memberVerify(form: FormData) {
+  const { slug, no } = who(form);
+  const code = String(form.get('code') ?? '').replace(/\D/g, '');
+  const ip = clientIp(await headers());
+  const account = `member-code:${slug}:${no}`;
+  if (!rateLimit(`member-code-ip:${ip}`, 30, 10 * 60_000) || isLimited(account, 8, 15 * 60_000))
+    redirect(`/m?step=code&${q(slug, no)}&e=2`);
+  const m = await verifyOtp(db(), slug, no, code);
+  if (!m) {
+    recordFailure(account, 15 * 60_000);
+    redirect(`/m?step=code&${q(slug, no)}&e=1`);
+  }
+  await setMember(m.tenantId, m.memberId);
+  redirect('/m');
+}
+
+export async function memberLogout() {
+  (await cookies()).delete({ name: COOKIE, path: '/m' });
+  redirect('/m');
+}
+
+/** Club news and "we miss you" by SMS: the member's own choice (receipts and reminders always come). */
+export async function setNews(form: FormData) {
+  const me = await readMember();
+  if (!me) redirect('/m');
+  const on = form.get('news') === 'on';
+  await withTenant(db(), me.tenantId, async (tx) => {
+    await tx`update members set sms_news = ${on} where id = ${me.memberId}`;
+    await tx`insert into audit_log (tenant_id, actor, action, entity, data)
+             values (${me.tenantId}, 'member', 'member.sms_news', ${me.memberId}, ${tx.json({ on } as never)})`;
+  });
+  redirect(`/m?news=${on ? 'on' : 'off'}`);
+}
+
+/** Fallback when the club has no SMS: club code + member number + the phone number the club has on file. */
 export async function memberLogin(form: FormData) {
   const slug = String(form.get('club') ?? '')
     .trim()
@@ -28,11 +104,13 @@ export async function memberLogin(form: FormData) {
   const phone = digits(String(form.get('phone') ?? ''));
   const ip = clientIp(await headers());
   const account = `member-login:${slug}:${no}`;
-  if (!rateLimit(`member-login-ip:${ip}`, 20, 5 * 60_000) || isLimited(account, 5, 15 * 60_000)) redirect('/m?e=2');
+  const back = `/m?step=phone&c=${encodeURIComponent(slug)}&n=${Number.isSafeInteger(no) ? no : ''}`;
+  if (!rateLimit(`member-login-ip:${ip}`, 20, 5 * 60_000) || isLimited(account, 5, 15 * 60_000))
+    redirect(`${back}&e=2`);
   const [t] = await db()<{ id: string }[]>`select id from tenants where slug = ${slug}`;
   if (!t || !Number.isSafeInteger(no)) {
     recordFailure(account, 15 * 60_000);
-    redirect('/m?e=1');
+    redirect(`${back}&e=1`);
   }
   const [m] = await withTenant(
     db(),
@@ -44,15 +122,9 @@ export async function memberLogin(form: FormData) {
   );
   if (!m?.phone || digits(m.phone) !== phone) {
     recordFailure(account, 15 * 60_000);
-    redirect('/m?e=1');
+    redirect(`${back}&e=1`);
   }
-  (await cookies()).set(COOKIE, sign(`${t.id}:${m.id}`), {
-    httpOnly: true,
-    sameSite: 'lax',
-    path: '/m',
-    maxAge: 30 * 86400,
-    secure: process.env.NODE_ENV === 'production',
-  });
+  await setMember(t.id, m.id);
   redirect('/m');
 }
 

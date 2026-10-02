@@ -3,11 +3,15 @@ import { Activity, CheckCircle2, Smartphone } from 'lucide-react';
 import { SubmitButton } from '@/components/submit-button';
 import { date, daysLeft, kes } from '@/lib/format';
 import { db } from '@/server/db';
-import { memberLogin, memberPay, readMember } from './actions';
+import { memberLogin, memberLogout, memberPay, memberStart, memberVerify, readMember, setNews } from './actions';
 
 export const dynamic = 'force-dynamic';
 
-export default async function MemberPortal({ searchParams }: { searchParams: Promise<{ e?: string; pay?: string }> }) {
+export default async function MemberPortal({
+  searchParams,
+}: {
+  searchParams: Promise<{ e?: string; pay?: string; step?: string; c?: string; n?: string; w?: string; news?: string }>;
+}) {
   const sp = await searchParams;
   const who = await readMember();
   const Shell = ({ children }: { children: React.ReactNode }) => (
@@ -24,49 +28,112 @@ export default async function MemberPortal({ searchParams }: { searchParams: Pro
     </div>
   );
   if (!who) {
+    const step = sp.step === 'code' || sp.step === 'phone' ? sp.step : 'start';
+    const club = (sp.c ?? '').slice(0, 40);
+    const no = (sp.n ?? '').replace(/\D/g, '').slice(0, 10);
+    const field = 'input bg-white/5 text-white ring-white/10';
+    const button = 'btn w-full bg-brand-500 text-ink-950 hover:bg-brand-600';
+    const Hidden = () => (
+      <>
+        <input type="hidden" name="club" value={club} />
+        <input type="hidden" name="memberNo" value={no} />
+      </>
+    );
+    const error =
+      sp.e === '2'
+        ? 'Too many attempts. Wait a few minutes and try again.'
+        : sp.e === '1'
+          ? step === 'code'
+            ? 'That code is not right or has expired. Check the SMS or ask for a new code.'
+            : 'We couldn\u2019t find an active membership with those details. Check your number and phone.'
+          : null;
     return (
       <Shell>
         <h1 className="text-2xl font-semibold tracking-tight">Your membership</h1>
-        <p className="mt-1 text-sm text-ink-300">Check your access and renew with M-Pesa before you arrive.</p>
-        {sp.e && (
-          <div className="mt-4 rounded-xl bg-rose-500/15 p-3 text-sm text-rose-200">
-            {sp.e === '2'
-              ? 'Too many attempts. Wait a few minutes and try again.'
-              : 'We couldn\u2019t find an active membership with those details. Check your number and phone.'}
+        <p className="mt-1 text-sm text-ink-300">
+          {step === 'code'
+            ? 'We\u2019ve sent a 6-digit code by SMS to the phone number your club has for you.'
+            : step === 'phone'
+              ? 'Confirm the phone number your club has for you.'
+              : 'Check your access and renew with M-Pesa before you arrive.'}
+        </p>
+        {error && <div className="mt-4 rounded-xl bg-rose-500/15 p-3 text-sm text-rose-200">{error}</div>}
+        {sp.w && !error && (
+          <div className="mt-4 rounded-xl bg-white/5 p-3 text-sm text-ink-200">
+            A code was sent a moment ago. Use that one, or wait a minute for a new one.
           </div>
         )}
-        <form action={memberLogin} className="mt-6 space-y-3">
-          <input
-            name="club"
-            placeholder="Club code (e.g. demo-club)"
-            required
-            className="input bg-white/5 text-white ring-white/10"
-          />
-          <input
-            name="memberNo"
-            inputMode="numeric"
-            placeholder="Member number"
-            required
-            className="input bg-white/5 text-white ring-white/10"
-          />
-          <input
-            name="phone"
-            inputMode="tel"
-            placeholder="Phone number"
-            required
-            className="input bg-white/5 text-white ring-white/10"
-          />
-          <SubmitButton pendingText="Checking…" className="btn w-full bg-brand-500 text-ink-950 hover:bg-brand-600">
-            Continue
-          </SubmitButton>
-        </form>
+        {step === 'start' && (
+          <form action={memberStart} className="mt-6 space-y-3">
+            <input
+              name="club"
+              defaultValue={club}
+              placeholder="Club code (e.g. demo-club)"
+              required
+              className={field}
+            />
+            <input
+              name="memberNo"
+              defaultValue={no}
+              inputMode="numeric"
+              placeholder="Member number"
+              required
+              className={field}
+            />
+            <SubmitButton pendingText="Checking…" className={button}>
+              Continue
+            </SubmitButton>
+          </form>
+        )}
+        {step === 'code' && (
+          <>
+            <form action={memberVerify} className="mt-6 space-y-3">
+              <Hidden />
+              <input
+                name="code"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                pattern="[0-9 ]{6,7}"
+                maxLength={7}
+                placeholder="6-digit code"
+                required
+                autoFocus
+                className={`${field} text-center font-mono text-xl tracking-[0.4em]`}
+              />
+              <SubmitButton pendingText="Checking…" className={button}>
+                Sign in
+              </SubmitButton>
+            </form>
+            <form action={memberStart} className="mt-4 flex items-center justify-between text-sm text-ink-300">
+              <Hidden />
+              <a href="/m" className="underline">
+                Change details
+              </a>
+              <button type="submit" className="underline">
+                Send a new code
+              </button>
+            </form>
+          </>
+        )}
+        {step === 'phone' && (
+          <form action={memberLogin} className="mt-6 space-y-3">
+            <Hidden />
+            <input name="phone" inputMode="tel" placeholder="Phone number" required autoFocus className={field} />
+            <SubmitButton pendingText="Checking…" className={button}>
+              Continue
+            </SubmitButton>
+            <a href="/m" className="block text-center text-sm text-ink-300 underline">
+              Change details
+            </a>
+          </form>
+        )}
       </Shell>
     );
   }
   const d = await withTenant(db(), who.tenantId, async (tx) => {
     const [m] = await tx<
-      { first_name: string; member_no: number }[]
-    >`select first_name, member_no from members where id = ${who.memberId}`;
+      { first_name: string; member_no: number; sms_news: boolean }[]
+    >`select first_name, member_no, sms_news from members where id = ${who.memberId}`;
     const ents = await tx<
       { zone_key: string; ends_at: Date; starts_at: Date }[]
     >`select zone_key, starts_at, ends_at from entitlements where member_id = ${who.memberId}`;
@@ -171,6 +238,29 @@ export default async function MemberPortal({ searchParams }: { searchParams: Pro
           </form>
         ))}
       </div>
+      <form action={setNews} className="mt-8 rounded-2xl bg-white/5 p-4 text-sm ring-1 ring-white/10">
+        <input type="hidden" name="news" value={d.m?.sms_news ? 'off' : 'on'} />
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <div className="font-medium">Club news by SMS</div>
+            <div className="text-xs text-ink-300">
+              {sp.news === 'off'
+                ? 'Turned off. Receipts and renewal reminders still come.'
+                : sp.news === 'on'
+                  ? 'Turned on.'
+                  : 'Closures, events and offers. Receipts and reminders always come.'}
+            </div>
+          </div>
+          <button type="submit" className="btn bg-white/10 px-3 py-2 text-xs hover:bg-white/15">
+            {d.m?.sms_news ? 'Turn off' : 'Turn on'}
+          </button>
+        </div>
+      </form>
+      <form action={memberLogout} className="mt-6 text-center">
+        <button type="submit" className="text-sm text-ink-300 underline">
+          Sign out
+        </button>
+      </form>
     </Shell>
   );
 }

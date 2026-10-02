@@ -7,6 +7,7 @@ import {
   Layers,
   LayoutDashboard,
   LogOut,
+  MessageSquare,
   Plug,
   Users,
 } from 'lucide-react';
@@ -19,6 +20,7 @@ const items = [
   { href: '/payments', label: 'Payments', icon: CreditCard },
   { href: '/plans', label: 'Plans & pricing', icon: Layers },
   { href: '/access', label: 'Doors & access', icon: DoorOpen },
+  { href: '/messages', label: 'Messages', icon: MessageSquare },
   { href: '/settings', label: 'Settings', icon: Plug },
 ];
 

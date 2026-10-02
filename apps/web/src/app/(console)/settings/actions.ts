@@ -2,10 +2,12 @@
 import { randomBytes } from 'node:crypto';
 import { withTenant } from '@lango/db';
 import {
+  clubSms,
   encrypt,
   hashPassword,
   msisdn,
   platformSms,
+  platformSmsConfig,
   rateLimit,
   startTopup,
   TaifaAuthError,
@@ -125,30 +127,6 @@ export async function changePassword(form: FormData) {
 }
 
 /** Club SMS switches: on/off, receipts, expiry reminders (N days before + last day), welcome message. */
-export async function saveNotifications(form: FormData) {
-  const s = await requireSession();
-  if (s.role !== 'owner') redirect('/settings?sms=forbidden');
-  const notifications = {
-    enabled: form.get('enabled') === 'on',
-    receipts: form.get('receipts') === 'on',
-    reminders: form.get('reminders') === 'on',
-    reminderDays: Math.min(14, Math.max(1, Number(form.get('reminderDays') ?? 3) || 3)),
-    welcome: form.get('welcome') === 'on',
-    lowBalance: Math.min(100_000, Math.max(0, Number(form.get('lowBalance') ?? 100) || 0)),
-    alertPhone: msisdn(String(form.get('alertPhone') ?? '')) ?? undefined,
-    autoTopup: form.get('autoTopup') === 'on',
-    autoTopupKes: Math.min(150_000, Math.max(100, Number(form.get('autoTopupKes') ?? 1000) || 1000)),
-  };
-  if (notifications.autoTopup && !notifications.alertPhone) redirect('/settings?sms=alert-phone');
-  await withTenant(db(), s.tid, async (tx) => {
-    await tx`insert into tenant_settings (tenant_id, data) values (${s.tid}, ${tx.json({ notifications } as never)})
-             on conflict (tenant_id) do update set data = tenant_settings.data || excluded.data`;
-    await tx`insert into audit_log (tenant_id, actor, action, data) values (${s.tid}, ${s.uid}, 'settings.notifications', ${tx.json(notifications as never)})`;
-  });
-  revalidatePath('/settings');
-  redirect('/settings?sms=saved');
-}
-
 /** Send one SMS now to a number the owner types, to prove delivery end to end. */
 export async function sendTestSms(form: FormData) {
   const s = await requireSession();
@@ -160,9 +138,11 @@ export async function sendTestSms(form: FormData) {
   if (!client) redirect('/settings?sms=platform');
   const [t] = await db()<{ name: string }[]>`select name from tenants where id = ${s.tid}`;
   const body = `${t?.name}: this is a test message from Lango. SMS receipts and reminders are working.`;
+  // Sent under the club's own sender ID, so this also proves the sender is registered.
+  const club = await withTenant(db(), s.tid, async (tx) => clubSms(tx, s.tid, await platformSmsConfig(db())));
   let r: Awaited<ReturnType<typeof client.send>>;
   try {
-    r = await client.send(to, body);
+    r = await client.send(to, body, club.sender);
   } catch (e) {
     r = { ok: false, code: 'network', desc: (e as Error).message, retry: true };
   }

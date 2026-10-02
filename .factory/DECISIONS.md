@@ -50,3 +50,12 @@
   C:\ProgramData\Lango\site.json (SYSTEM/Administrators only).
 - Active plans have unique prices (a paybill payment must match exactly one plan); mismatches go to the
   missed-payment queue, where staff assign them (amount must equal the plan price).
+- SMS etiquette (dispatcher-enforced): quiet hours per club (default 20:00–07:00, club timezone) hold everything
+  except receipts, "payment received, no need to pay again", portal codes, tests and SMS-credit receipts; a member
+  gets at most one non-urgent message (reminder, welcome, news, "we miss you") per local day; every event has a
+  dedupe key; time-bound messages carry `send_before` and lapse instead of arriving late. Imports never send.
+- Staff alerts (door PC offline 15 min / back, AxTraxNG hand edit reverted, 19:00 summary) are free, sent as the
+  platform sender, and need the club's SMS on + alert phone. NAVAC alerts (Source Code credit low, door PCs offline
+  over 1 h) go to the platform alert phone, 08:00–20:00 Nairobi, at most daily.
+- Member portal signs in with a 6-digit SMS code (10 min, 5 tries, 1/min, 5/h); clubs without SMS fall back to
+  confirming the phone number. Members can turn off club news (`members.sms_news`).

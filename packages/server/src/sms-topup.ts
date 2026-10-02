@@ -108,7 +108,7 @@ export async function reconcileTopups(
         const [club] = await tx<{ name: string }[]>`select name from tenants where id = ${p.tenant_id}`;
         const [bal] = await tx<{ units: string }[]>`select sum(units) as units from sms_ledger`;
         await tx`insert into sms_messages (tenant_id, phone, body, kind)
-                 values (${p.tenant_id}, ${t.phone}, ${`${club?.name}: KES ${t.amount_kes.toLocaleString('en-KE')} received. ${t.units.toLocaleString('en-KE')} SMS added; balance ${Number(bal?.units ?? 0).toLocaleString('en-KE')} SMS.`}, 'system')`;
+                 values (${p.tenant_id}, ${t.phone}, ${`${club?.name}: KES ${t.amount_kes.toLocaleString('en-KE')} received. ${t.units.toLocaleString('en-KE')} SMS added; balance ${Number(bal?.units ?? 0).toLocaleString('en-KE')} SMS.`}, 'topup')`;
         await tx`insert into audit_log (tenant_id, actor, action, entity, data)
                  values (${p.tenant_id}, 'taifapay', 'sms.topup_completed', ${p.id}, ${tx.json({ units: t.units, amountKes: t.amount_kes } as never)})`;
         return 1;
