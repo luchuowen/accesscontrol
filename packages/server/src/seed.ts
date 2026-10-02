@@ -104,9 +104,10 @@ export async function seed(o: SeedOptions) {
           ['6 months', 30000, 'month', 6],
           ['1 year', 60000, 'year', 1],
           ['day pass', 500, 'day', 1],
-          ['test 1 day (KES 10)', 10, 'day', 1],
         ],
       ],
+      // Lab only: a real M-Pesa payment of KES 10 opens the gym for the day.
+      ['Test (KES 10)', ['gym'], [['1 day', 10, 'day', 1]]],
       ['All-inclusive', ['gym', 'sauna', 'pool', 'spa'], [['1 month', 9000, 'month', 1]]],
       ['Swimming', ['pool'], [['day pass', 200, 'day', 1]]],
       [

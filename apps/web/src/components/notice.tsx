@@ -32,6 +32,7 @@ const MESSAGES: Record<string, { tone: 'ok' | 'warn' | 'err'; text: string }> = 
   saved: { tone: 'ok', text: 'Saved.' },
   'service-saved': { tone: 'ok', text: 'Service saved. Anyone already paid keeps exactly what they bought.' },
   'price-saved': { tone: 'ok', text: 'Price saved. It applies to new sales; anyone already paid is not affected.' },
+  'price-same': { tone: 'err', text: 'This service already has a price for that length. Change that price instead.' },
   'service-invalid': { tone: 'err', text: 'Give the service a name and at least one area.' },
   'price-invalid': {
     tone: 'err',

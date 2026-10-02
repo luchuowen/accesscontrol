@@ -60,20 +60,13 @@ const initials = (n: string) =>
     .slice(0, 2)
     .map((w) => w[0]?.toUpperCase())
     .join('');
-const AV = [
-  'bg-indigo-50 text-indigo-700',
-  'bg-orange-50 text-orange-700',
-  'bg-violet-50 text-violet-700',
-  'bg-sky-50 text-sky-700',
-  'bg-rose-50 text-rose-700',
-  'bg-emerald-50 text-emerald-700',
-];
+const AV = ['bg-slate-100 text-ink-700'];
 export const STATUS: Record<Row['status'], { label: string; cls: string; dot: string }> = {
-  active: { label: 'Active', cls: 'bg-emerald-50 text-emerald-700', dot: 'bg-emerald-500' },
-  ending: { label: 'Ending soon', cls: 'bg-amber-50 text-amber-700', dot: 'bg-amber-500' },
-  lapsed: { label: 'Lapsed', cls: 'bg-rose-50 text-rose-700', dot: 'bg-rose-500' },
-  never: { label: 'Never paid', cls: 'bg-slate-100 text-slate-600', dot: 'bg-slate-400' },
-  inactive: { label: 'Inactive', cls: 'bg-slate-100 text-slate-500', dot: 'bg-slate-300' },
+  active: { label: 'Active', cls: 'text-ink-700', dot: 'bg-emerald-500' },
+  ending: { label: 'Ending soon', cls: 'text-ink-700', dot: 'bg-amber-500' },
+  lapsed: { label: 'Lapsed', cls: 'text-ink-700', dot: 'bg-rose-500' },
+  never: { label: 'Never paid', cls: 'text-ink-500', dot: 'bg-slate-300' },
+  inactive: { label: 'Inactive', cls: 'text-ink-500', dot: 'bg-slate-300' },
 };
 const SYNC = {
   synced: { label: 'Synced', dot: 'bg-emerald-500' },
@@ -108,7 +101,7 @@ export function MembersTable({ rows, canPay }: { rows: Row[]; canPay: boolean })
                 <tr
                   key={r.id}
                   onClick={() => setOpen(r.id)}
-                  className={`cursor-pointer transition hover:bg-slate-50 ${open === r.id ? 'bg-emerald-50/40 shadow-[inset_3px_0_0_#047857]' : ''}`}
+                  className={`cursor-pointer transition hover:bg-slate-50 ${open === r.id ? 'bg-slate-50 shadow-[inset_3px_0_0_#0c1220]' : ''}`}
                 >
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-3">
@@ -135,7 +128,7 @@ export function MembersTable({ rows, canPay }: { rows: Row[]; canPay: boolean })
                     {r.services.length === 0 ? (
                       <span className="text-ink-500">None yet</span>
                     ) : (
-                      <div className="flex flex-wrap gap-1">
+                      <div className="flex flex-col gap-0.5">
                         {(r.services.some((x) => new Date(x.ends).getTime() > Date.now())
                           ? r.services.filter((x) => new Date(x.ends).getTime() > Date.now())
                           : r.services.slice(0, 1)
@@ -144,11 +137,8 @@ export function MembersTable({ rows, canPay }: { rows: Row[]; canPay: boolean })
                           .map((x) => {
                             const e = endLabel(x.ends);
                             return (
-                              <span
-                                key={x.name}
-                                className={`whitespace-nowrap rounded-md border px-1.5 py-0.5 text-[11.5px] ${chip[e.tone]}`}
-                              >
-                                {x.name} <span className="font-semibold">{e.text}</span>
+                              <span key={x.name} className="whitespace-nowrap text-[13px] text-ink-900">
+                                {x.name} <span className={`text-[12px] ${chip[e.tone]}`}>· {e.text}</span>
                               </span>
                             );
                           })}

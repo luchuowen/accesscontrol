@@ -25,8 +25,14 @@ export type WalkinPrice = {
 };
 const field =
   'h-11 w-full rounded-[11px] border border-[#E5E8EE] bg-white px-3.5 text-sm text-ink-900 outline-none transition placeholder:text-slate-400 focus:border-brand-500 focus:ring-4 focus:ring-emerald-500/15';
-const len = (p: WalkinPrice) =>
-  p.duration_unit === 'hour' ? `${p.duration_count} hour${p.duration_count === 1 ? '' : 's'}` : 'Until 23:59';
+// A service can sell more than one walk-in price ("Gym · day pass", "Gym · student day"): the part after the
+// service name tells them apart; a plain length ("1 day") becomes "Until 23:59".
+const len = (p: WalkinPrice) => {
+  const part = p.name.includes(' · ') ? p.name.split(' · ').slice(1).join(' · ') : '';
+  const plain = !part || /^\d+ (hour|day|week|month|year)s?$/i.test(part);
+  if (p.duration_unit === 'hour') return plain ? `${p.duration_count} hour${p.duration_count === 1 ? '' : 's'}` : part;
+  return plain ? 'Until 23:59' : `${part[0]?.toUpperCase()}${part.slice(1)} · until 23:59`;
+};
 
 function Go({ total, channel }: { total: number; channel: string }) {
   const { pending } = useFormStatus();
@@ -124,7 +130,6 @@ function Sale({ prices, onClose, onAgain }: { prices: WalkinPrice[]; onClose: ()
 
   const chosen = prices.filter((p) => picked.includes(p.id));
   const total = chosen.reduce((a, p) => a + p.price_kes, 0);
-  const services = [...new Set(prices.map((p) => p.service))];
   const lookUp = async () => {
     const h = await visitorHistory(phone);
     setKnown(h.visits ? { visits: h.visits, kes: h.kes } : null);
@@ -278,36 +283,32 @@ function Sale({ prices, onClose, onAgain }: { prices: WalkinPrice[]; onClose: ()
                 No day passes yet. Add a price of hours or 1 day to a service under Services.
               </p>
             )}
-            {services.map((sv) => (
-              <div key={sv} className="grid grid-cols-2 gap-2">
-                {prices
-                  .filter((p) => p.service === sv)
-                  .map((p) => {
-                    const on = picked.includes(p.id);
-                    return (
-                      <label
-                        key={p.id}
-                        className={`flex cursor-pointer flex-col rounded-[13px] border-[1.5px] px-3 py-2.5 ${on ? 'border-brand-500 bg-emerald-50' : 'border-[#E5E8EE] hover:border-slate-300'}`}
-                      >
-                        <input
-                          type="checkbox"
-                          name="priceId"
-                          value={p.id}
-                          checked={on}
-                          onChange={(e) =>
-                            setPicked(e.target.checked ? [...picked, p.id] : picked.filter((x) => x !== p.id))
-                          }
-                          className="sr-only"
-                        />
-                        <b className="text-sm font-semibold">{p.service}</b>
-                        <span className="text-xs text-ink-500">
-                          {len(p)} · KES {p.price_kes.toLocaleString('en-KE')}
-                        </span>
-                      </label>
-                    );
-                  })}
-              </div>
-            ))}
+            <div className="grid grid-cols-2 gap-2">
+              {prices.map((p) => {
+                const on = picked.includes(p.id);
+                return (
+                  <label
+                    key={p.id}
+                    className={`flex cursor-pointer flex-col rounded-[13px] border-[1.5px] px-3 py-2.5 ${on ? 'border-brand-500 bg-emerald-50' : 'border-[#E5E8EE] hover:border-slate-300'}`}
+                  >
+                    <input
+                      type="checkbox"
+                      name="priceId"
+                      value={p.id}
+                      checked={on}
+                      onChange={(e) =>
+                        setPicked(e.target.checked ? [...picked, p.id] : picked.filter((x) => x !== p.id))
+                      }
+                      className="sr-only"
+                    />
+                    <b className="text-sm font-semibold">{p.service}</b>
+                    <span className="text-xs text-ink-500">
+                      {len(p)} · KES {p.price_kes.toLocaleString('en-KE')}
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
           </fieldset>
           <div className="flex flex-col gap-1.5">
             <span className="text-[12.5px] font-semibold text-ink-700">Payment</span>

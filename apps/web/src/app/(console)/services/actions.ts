@@ -65,6 +65,8 @@ export async function createService(_prev: { error?: string }, form: FormData): 
   if (newArea && !areaKey(newArea)) return { error: 'Give the new area a name with letters or numbers.' };
   if (!zones.length && !newArea) return { error: 'Choose at least one area this service opens.' };
   if (!prices.length) return { error: 'Add at least one price.' };
+  if (new Set(prices.map((p) => `${p.count} ${p.unit}`)).size !== prices.length)
+    return { error: 'Two prices have the same length. Keep one price per length.' };
   const r = await withTenant(db(), s.tid, async (tx) => {
     const [dupe] = await tx`select 1 from services where lower(name) = lower(${name}) and active`;
     if (dupe) return 'A service with this name already exists.';
@@ -123,11 +125,15 @@ export async function savePrice(form: FormData) {
   const priceId = uid(form.get('priceId'));
   const p = readPrice(form.get('count') ?? 1, form.get('unit') ?? 'day', form.get('price'));
   if (!serviceId || !p) redirect('/services?n=price-invalid');
-  await withTenant(db(), s.tid, async (tx) => {
+  const r = await withTenant(db(), s.tid, async (tx) => {
     const [sv] = await tx<
       { name: string; zone_keys: string[] }[]
     >`select name, zone_keys from services where id = ${serviceId}`;
     if (!sv) return;
+    const [same] =
+      await tx`select 1 from products where service_id = ${serviceId} and active and duration_unit = ${p.unit}
+                            and duration_count = ${p.count} and id is distinct from ${priceId}`;
+    if (same) return 'same';
     if (priceId)
       await tx`update products set price_kes = ${p.price}, duration_unit = ${p.unit}, duration_count = ${p.count},
                  name = ${priceName(sv.name, p)} where id = ${priceId} and service_id = ${serviceId}`;
@@ -136,9 +142,10 @@ export async function savePrice(form: FormData) {
                values (${s.tid}, ${serviceId}, ${priceName(sv.name, p)}, ${p.price}, ${p.unit}, ${p.count}, ${sv.zone_keys})`;
     await tx`insert into audit_log (tenant_id, actor, action, entity, data)
              values (${s.tid}, ${s.uid}, ${priceId ? 'price.updated' : 'price.created'}, ${priceId ?? serviceId}, ${tx.json(p as never)})`;
+    return 'ok';
   });
   revalidatePath('/services');
-  redirect('/services?n=price-saved');
+  redirect(`/services?n=${r === 'same' ? 'price-same' : 'price-saved'}`);
 }
 
 /** Stop selling a price or a whole service (or put it back). Never affects anyone already paid. */

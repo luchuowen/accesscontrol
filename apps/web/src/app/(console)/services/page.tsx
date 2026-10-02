@@ -111,6 +111,12 @@ export default async function Services({ searchParams }: { searchParams: Promise
                     <div className="flex items-baseline justify-between gap-3">
                       <span className="text-[13.5px]">
                         {durationLabel({ unit: p.duration_unit, count: p.duration_count })}
+                        {(() => {
+                          const part = p.name.includes(' · ') ? p.name.split(' · ').slice(1).join(' · ') : '';
+                          return part && !/^\d+ (hour|day|week|month|year)s?$/i.test(part) ? (
+                            <span className="ml-1.5 text-[12px] text-ink-500">({part})</span>
+                          ) : null;
+                        })()}
                         <span className="ml-2 text-[11.5px] text-slate-400">{p.sold} sold</span>
                       </span>
                       <b className="text-[14px] font-semibold tabular-nums">{kes(p.price_kes)}</b>

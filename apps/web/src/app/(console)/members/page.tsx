@@ -1,6 +1,6 @@
 import { withTenant } from '@lango/db';
 import { can } from '@lango/server';
-import { AlertCircle, CheckCircle2, Clock, Search, Upload, UserPlus, Users } from 'lucide-react';
+import { Search, Upload } from 'lucide-react';
 import Link from 'next/link';
 import { AddMember } from '@/components/add-member';
 import { Notice } from '@/components/notice';
@@ -9,6 +9,7 @@ import { WalkIn } from '@/components/walk-in';
 import { membersBoard, nextMemberNo, walkinPrices } from '@/lib/data';
 import { requirePerm } from '@/lib/session';
 import { db } from '@/server/db';
+import { AutoSelect } from './auto-select';
 import { DayPasses } from './day-passes';
 import { MembersTable } from './table';
 
@@ -16,7 +17,7 @@ import { MembersTable } from './table';
  * Members (design A "Clean table + drawer", approved 2 Oct 2026): summary cards that double as filters, search and
  * filters, the list, and a side drawer with the member's services and quick actions. Day passes have their own tab.
  */
-type Params = { q?: string; n?: string; tab?: string; f?: string; service?: string; card?: string; page?: string };
+type Params = { q?: string; n?: string; tab?: string; f?: string; service?: string; page?: string };
 
 export default async function Members({ searchParams }: { searchParams: Promise<Params> }) {
   const s = await requirePerm('members.view');
@@ -24,7 +25,7 @@ export default async function Members({ searchParams }: { searchParams: Promise<
   const day = sp.tab === 'day';
   const page = Math.max(1, Number(sp.page) || 1);
   const [board, nextNo, [t], walkins, [bands]] = await Promise.all([
-    membersBoard(s.tid, { q: sp.q, f: sp.f, service: sp.service, card: sp.card, page }),
+    membersBoard(s.tid, { q: sp.q, f: sp.f, service: sp.service, page }),
     nextMemberNo(s.tid),
     db()<{ name: string }[]>`select name from tenants where id = ${s.tid}`,
     walkinPrices(s.tid),
@@ -40,7 +41,7 @@ export default async function Members({ searchParams }: { searchParams: Promise<
   // Links keep the other filters; changing a filter goes back to page 1.
   const href = (p: Partial<Params>) => {
     const u = new URLSearchParams();
-    const next = { q: sp.q, f: sp.f, service: sp.service, card: sp.card, ...p };
+    const next = { q: sp.q, f: sp.f, service: sp.service, ...p };
     for (const [k, v] of Object.entries(next)) if (v) u.set(k, String(v));
     const qs = u.toString();
     return qs ? `/members?${qs}` : '/members';
@@ -48,61 +49,18 @@ export default async function Members({ searchParams }: { searchParams: Promise<
   const tabClass = (on: boolean) =>
     `inline-flex items-center gap-2 border-b-2 px-1 pb-2.5 text-sm font-semibold ${on ? 'border-ink-900 text-ink-900' : 'border-transparent text-ink-500 hover:text-ink-900'}`;
   const cards = [
-    {
-      key: '',
-      label: 'All members',
-      n: c.all,
-      sub: `+${c.joined} this month`,
-      icon: Users,
-      tone: 'bg-slate-100 text-ink-700',
-      subCls: 'text-ink-500',
-    },
+    { key: '', label: 'All members', n: c.all, sub: `+${c.joined} this month` },
     {
       key: 'active',
       label: 'Active now',
       n: c.active,
       sub: c.all ? `${Math.round((c.active / c.all) * 100)}% of members` : '—',
-      icon: CheckCircle2,
-      tone: 'bg-emerald-50 text-[#047857]',
-      subCls: 'text-[#047857]',
     },
-    {
-      key: 'ending',
-      label: 'Ending in 7 days',
-      n: c.ending,
-      sub: `KES ${c.dueKes.toLocaleString('en-KE')} due`,
-      icon: Clock,
-      tone: 'bg-amber-50 text-amber-700',
-      subCls: 'text-amber-700',
-    },
-    {
-      key: 'lapsed',
-      label: 'Lapsed',
-      n: c.lapsed,
-      sub: 'Ended in the last 30 days',
-      icon: AlertCircle,
-      tone: 'bg-rose-50 text-rose-700',
-      subCls: 'text-rose-700',
-    },
-    {
-      key: 'never',
-      label: 'Never paid',
-      n: c.never,
-      sub: 'Added, no payment yet',
-      icon: UserPlus,
-      tone: 'bg-slate-100 text-slate-600',
-      subCls: 'text-ink-500',
-    },
+    { key: 'ending', label: 'Ending in 7 days', n: c.ending, sub: `KES ${c.dueKes.toLocaleString('en-KE')} due` },
+    { key: 'lapsed', label: 'Lapsed', n: c.lapsed, sub: 'Ended in the last 30 days' },
+    { key: 'never', label: 'Never paid', n: c.never, sub: 'Added, no payment yet' },
   ];
-  const chips = [
-    ['', 'All', ''],
-    ['active', 'Active', 'bg-emerald-500'],
-    ['ending', 'Ending in 7 days', 'bg-amber-500'],
-    ['lapsed', 'Lapsed', 'bg-rose-500'],
-    ['never', 'Never paid', 'bg-slate-400'],
-  ] as const;
   const pages = Math.max(1, Math.ceil(board.total / 50));
-  const sel = 'h-10 rounded-[10px] border border-[#E5E8EE] bg-white px-3 text-[13px] font-semibold text-ink-900';
 
   return (
     <>
@@ -127,10 +85,7 @@ export default async function Members({ searchParams }: { searchParams: Promise<
       <Notice code={sp.n} />
       <nav className="mb-5 flex gap-6 border-b border-[#E7EBF3]" aria-label="Members or day passes">
         <Link href="/members" className={tabClass(!day)} aria-current={!day ? 'page' : undefined}>
-          Members{' '}
-          <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] tabular-nums text-[#047857]">
-            {c.all}
-          </span>
+          Members <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] tabular-nums">{c.all}</span>
         </Link>
         <Link href="/members?tab=day" className={tabClass(day)} aria-current={day ? 'page' : undefined}>
           Day passes{' '}
@@ -144,25 +99,17 @@ export default async function Members({ searchParams }: { searchParams: Promise<
         <>
           <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
             {cards.map((k) => {
-              const Icon = k.icon;
               const on = f === k.key;
               return (
                 <Link
                   key={k.key || 'all'}
                   href={href({ f: k.key || undefined, page: undefined })}
                   aria-current={on ? 'true' : undefined}
-                  className={`rounded-2xl border bg-white p-4 transition hover:border-slate-300 ${on ? 'border-[#10B981] ring-2 ring-emerald-500/20' : 'border-[#E7EBF3]'}`}
+                  className={`rounded-2xl border bg-white p-4 transition hover:border-slate-300 ${on ? 'border-ink-900 shadow-[0_0_0_1px_#0c1220]' : 'border-[#E7EBF3]'}`}
                 >
-                  <div className="flex items-start justify-between gap-2">
-                    <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-500">
-                      {k.label}
-                    </span>
-                    <span className={`grid h-7 w-7 shrink-0 place-items-center rounded-lg ${k.tone}`}>
-                      <Icon size={15} />
-                    </span>
-                  </div>
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-500">{k.label}</div>
                   <div className="mt-2 text-[26px] font-semibold tabular-nums tracking-tight">{k.n}</div>
-                  <div className={`mt-0.5 truncate text-[12.5px] ${k.subCls}`}>{k.sub}</div>
+                  <div className="mt-0.5 truncate text-[12.5px] text-ink-500">{k.sub}</div>
                 </Link>
               );
             })}
@@ -171,48 +118,26 @@ export default async function Members({ searchParams }: { searchParams: Promise<
           <section className="rounded-2xl border border-[#E7EBF3] bg-white">
             <form action="/members" className="flex flex-wrap items-center gap-2 border-b border-[#EEF1F6] p-3">
               {f && <input type="hidden" name="f" value={f} />}
-              <div className="relative min-w-[220px] flex-1 md:max-w-[300px]">
+              <div className="relative min-w-[220px] flex-1">
                 <Search size={16} className="absolute left-3 top-3 text-ink-300" />
                 <input
                   name="q"
                   defaultValue={sp.q}
                   placeholder="Search name, number or phone"
-                  className="h-10 w-full rounded-[10px] border border-[#E5E8EE] bg-slate-50 pl-9 pr-3 text-sm outline-none focus:border-[#10B981] focus:bg-white"
+                  className="h-10 w-full rounded-[10px] border border-[#E5E8EE] bg-white pl-9 pr-3 text-sm outline-none focus:border-ink-300"
                 />
               </div>
-              <div className="flex flex-wrap gap-1.5">
-                {chips.map(([k, l, dot]) => (
-                  <Link
-                    key={k || 'all'}
-                    href={href({ f: k || undefined, page: undefined })}
-                    className={`inline-flex h-9 items-center gap-1.5 rounded-full border px-3 text-[13px] font-semibold ${f === k ? 'border-ink-950 bg-ink-950 text-white' : 'border-[#E5E8EE] bg-white text-ink-700 hover:bg-slate-50'}`}
-                  >
-                    {dot && <i className={`h-1.5 w-1.5 rounded-full ${dot}`} />}
-                    {l}
-                  </Link>
-                ))}
-              </div>
-              <div className="ml-auto flex gap-2">
-                <select name="service" defaultValue={sp.service ?? ''} aria-label="Service" className={sel}>
-                  <option value="">All services</option>
-                  {board.services.map((n) => (
-                    <option key={n} value={n}>
-                      {n}
-                    </option>
-                  ))}
-                </select>
-                <select name="card" defaultValue={sp.card ?? ''} aria-label="Card" className={sel}>
-                  <option value="">Any card</option>
-                  <option value="yes">Card linked</option>
-                  <option value="no">No card</option>
-                </select>
-                <button
-                  type="submit"
-                  className="h-10 rounded-[10px] bg-ink-900 px-3.5 text-[13px] font-semibold text-white"
-                >
-                  Apply
-                </button>
-              </div>
+              <AutoSelect
+                name="service"
+                value={sp.service ?? ''}
+                label="Service"
+                options={[['', 'All services'], ...board.services.map((n) => [n, n] as [string, string])]}
+              />
+              {(f || sp.q || sp.service) && (
+                <Link href="/members" className="px-2 text-[13px] text-ink-500 hover:text-ink-900">
+                  Clear
+                </Link>
+              )}
             </form>
             {board.rows.length === 0 ? (
               <div className="px-5 py-10 text-center text-sm text-ink-500">
