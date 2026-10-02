@@ -1,6 +1,7 @@
 'use client';
 import {
   ArrowLeftRight,
+  ChartColumn,
   CircleUserRound,
   CreditCard,
   DoorOpen,
@@ -28,6 +29,7 @@ export const ITEMS = [
     icon: CreditCard,
     any: ['payments.record', 'payments.assign', 'reports.all'],
   },
+  { href: '/reports', label: 'Reports', icon: ChartColumn, any: ['reports.all'] },
   { href: '/messages', label: 'Messages', icon: MessageSquare, any: ['messages.manage'] },
   { href: '/team', label: 'Team', icon: UsersRound, any: ['team.manage'] },
   {
