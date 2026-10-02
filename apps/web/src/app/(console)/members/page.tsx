@@ -8,7 +8,6 @@ import { WalkIn } from '@/components/walk-in';
 import { membersBoard, nextMemberNo, walkinPrices } from '@/lib/data';
 import { requirePerm } from '@/lib/session';
 import { db } from '@/server/db';
-import { RemindAll } from '../_dash/remind-all';
 import { DayPasses } from './day-passes';
 import { MemberFilters } from './filters';
 import { ImportMembers } from './import/import-modal';
@@ -56,7 +55,6 @@ export default async function Members({ searchParams }: { searchParams: Promise<
     { key: 'lapsed', label: 'Lapsed', n: c.lapsed, dot: 'bg-rose-400' },
     { key: 'never', label: 'Never paid', n: c.never, dot: 'bg-slate-300' },
   ];
-  const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
   const pages = Math.max(1, Math.ceil(board.total / 50));
 
   return (
@@ -87,7 +85,7 @@ export default async function Members({ searchParams }: { searchParams: Promise<
         <DayPasses canAdd={can(s, 'members.edit')} />
       ) : (
         <>
-          <section className="relative mb-5 grid gap-6 overflow-hidden rounded-[18px] bg-[linear-gradient(120deg,#0B1629_0%,#11284A_62%,#0E3A33_100%)] p-6 text-white lg:grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)]">
+          <section className="relative mb-5 grid items-center gap-5 overflow-hidden rounded-[18px] bg-[linear-gradient(120deg,#0B1629_0%,#11284A_62%,#0E3A33_100%)] px-6 py-5 text-white lg:grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)]">
             <div
               aria-hidden
               className="pointer-events-none absolute -right-20 -top-28 h-80 w-80 rounded-full bg-[radial-gradient(circle,rgba(16,185,129,0.28),transparent_65%)]"
@@ -99,15 +97,6 @@ export default async function Members({ searchParams }: { searchParams: Promise<
               <div className="mt-1.5 text-[34px] font-semibold tabular-nums tracking-[-0.03em]">
                 KES {c.dueKes.toLocaleString('en-KE')}
               </div>
-              <p className="mt-0.5 text-[13px] text-[#B9C6D8]">
-                {c.ending ? `${plural(c.ending, 'member ends', 'members end')} this week.` : 'Nobody ends this week.'}{' '}
-                {c.lapsed ? `${plural(c.lapsed, 'member', 'members')} lapsed in the last 30 days.` : ''}
-              </p>
-              {c.ending > 0 && can(s, 'messages.manage') && (
-                <div className="mt-4">
-                  <RemindAll light label="Remind them by SMS" />
-                </div>
-              )}
             </div>
             <div className="relative grid grid-cols-2 gap-2.5 self-center sm:grid-cols-4">
               {tiles.map((k) => {

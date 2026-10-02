@@ -77,7 +77,7 @@ export async function sellDayPass(_prev: SaleState, form: FormData): Promise<Sal
   const sale = await withTenant(db(), s.tid, async (tx) => {
     const prices = await tx<{ id: string; name: string; price_kes: number }[]>`
       select p.id, p.name, p.price_kes from products p join services sv on sv.id = p.service_id
-      where p.id = any(${ids}) and p.active and sv.active`;
+      where p.id = any(${ids}) and p.active and sv.active and sv.sold_to <> 'members'`;
     if (prices.length !== ids.length)
       return { error: 'One of the passes is no longer on sale. Refresh and try again.' };
     const [band] = await tx<{ id: string; busy: boolean }[]>`

@@ -179,7 +179,9 @@ export default async function MemberPortal({
     >`select zone_key, starts_at, ends_at from entitlements where member_id = ${who.memberId}`;
     const plans = await tx<
       { id: string; name: string; price_kes: number }[]
-    >`select id, name, price_kes from products where active and price_kes >= 100 order by price_kes`;
+    >`select p.id, p.name, p.price_kes from products p left join services s on s.id = p.service_id
+       where p.active and p.price_kes >= 100 and coalesce(s.sold_to, 'both') <> 'walkins' and coalesce(s.active, true)
+       order by p.price_kes`;
     const [t] = await tx<{ name: string }[]>`select name from tenants where id = ${who.tenantId}`;
     const [ch] = await tx<{ paybill: string | null; till: string | null }[]>`
       select data->'channels'->>'paybill' as paybill, data->'channels'->>'till' as till from tenant_settings`;

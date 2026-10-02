@@ -1,16 +1,16 @@
 'use server';
 import { durationLabel } from '@lango/core';
-import { withTenant } from '@lango/db';
+import { type Tx, withTenant } from '@lango/db';
 import { can } from '@lango/server';
 import { revalidatePath } from 'next/cache';
-import { redirect } from 'next/navigation';
 import { requireSession } from '@/lib/session';
 import { db } from '@/server/db';
+import { CATALOG_ITEMS, CATEGORIES, type SoldTo } from './catalog';
 
 /**
- * Services (Owen, 2 Oct 2026): a club names what it sells, which areas each opens, and its prices with a length in
- * hours, days, weeks, months or years. Prices may repeat. Editing or retiring never touches anyone already paid:
- * what they bought is copied onto their payment.
+ * Services (design A "Table + side panel", 2 Oct 2026): a club picks what it sells from the ready list (or names its
+ * own), which areas each opens, who can buy it, and its prices with a length in hours, days, weeks, months or years.
+ * Editing or retiring never touches anyone already paid: what they bought is copied onto their payment.
  */
 const UNITS = ['hour', 'day', 'week', 'month', 'year'] as const;
 type Unit = (typeof UNITS)[number];
@@ -40,100 +40,122 @@ function readPrice(count: unknown, unit: unknown, price: unknown): PriceInput | 
 }
 const priceName = (service: string, d: PriceInput) => `${service} · ${durationLabel({ unit: d.unit, count: d.count })}`;
 
-async function guard() {
+type Result = { error?: string; ok?: string };
+const ICONS = new Set([...CATALOG_ITEMS.map((i) => i.icon), 'layers']);
+
+async function editor() {
   const s = await requireSession();
-  if (!can(s, 'plans.manage')) redirect('/services?n=forbidden');
-  return s;
+  return can(s, 'plans.manage') ? s : null;
 }
 
-/** New service: name, the areas it opens (existing or a new one by name), and one or more prices. */
-export async function createService(_prev: { error?: string }, form: FormData): Promise<{ error?: string }> {
-  const s = await requireSession();
-  if (!can(s, 'plans.manage')) return { error: 'Your role can’t change services.' };
-  const name = clean(form.get('name'), 60);
-  const newArea = clean(form.get('newArea'), 40);
-  let zones = form.getAll('zones').map(String).filter(Boolean);
-  let prices: PriceInput[] = [];
-  try {
-    const raw = JSON.parse(String(form.get('prices') ?? '[]')) as { count: unknown; unit: unknown; price: unknown }[];
-    prices = raw.map((r) => readPrice(r.count, r.unit, r.price)).filter((x): x is PriceInput => !!x);
-    if (prices.length !== raw.length) return { error: 'Check the prices: each needs a length and an amount in KES.' };
-  } catch {
-    return { error: 'Check the prices.' };
-  }
-  if (!name) return { error: 'Give the service a name.' };
-  if (newArea && !areaKey(newArea)) return { error: 'Give the new area a name with letters or numbers.' };
-  if (!zones.length && !newArea) return { error: 'Choose at least one area this service opens.' };
-  if (!prices.length) return { error: 'Add at least one price.' };
-  if (new Set(prices.map((p) => `${p.count} ${p.unit}`)).size !== prices.length)
-    return { error: 'Two prices have the same length. Keep one price per length.' };
+/** The area a new service opens by default: an existing area with its name, or a new area named after it. */
+async function areaFor(tx: Tx, tid: string, name: string) {
+  const key = areaKey(name);
+  if (!key) return null;
+  const [hit] = await tx<{ key: string }[]>`
+    select key from zones where key = ${key} or lower(name) = lower(${name}) limit 1`;
+  if (hit) return hit.key;
+  const [site] = await tx<{ id: string }[]>`select id from sites order by created_at limit 1`;
+  if (!site) return null;
+  await tx`insert into zones (tenant_id, site_id, key, name, reader_ids) values (${tid}, ${site.id}, ${key}, ${name}, ${[]})`;
+  return key;
+}
+
+/**
+ * Add services from the ready list (or one of the club's own). Each opens an area with its name (an existing one when
+ * it matches, e.g. "Gym"); doors are linked to that area under Doors & access. Prices are added next.
+ */
+export async function addServices(picks: { name: string; category?: string; icon?: string }[]): Promise<Result> {
+  const s = await editor();
+  if (!s) return { error: 'Your role can’t change services.' };
+  const list = (Array.isArray(picks) ? picks : []).slice(0, 40).map((p) => {
+    const name = clean(String(p?.name ?? ''), 60);
+    const known = CATALOG_ITEMS.find((i) => i.name === name);
+    const category = known?.cat ?? (CATEGORIES.includes(String(p?.category)) ? String(p?.category) : 'Other');
+    const icon = known?.icon ?? (ICONS.has(String(p?.icon)) ? String(p?.icon) : 'layers');
+    return { name, category, icon };
+  });
+  if (!list.length || list.some((p) => !p.name)) return { error: 'Give the service a name.' };
   const r = await withTenant(db(), s.tid, async (tx) => {
-    const [dupe] = await tx`select 1 from services where lower(name) = lower(${name}) and active`;
-    if (dupe) return 'A service with this name already exists.';
+    let added = 0;
+    for (const p of list) {
+      const [dupe] = await tx`select 1 from services where lower(name) = lower(${p.name})`;
+      if (dupe) continue;
+      const zone = await areaFor(tx, s.tid, p.name);
+      if (!zone) return 'Set up the club’s site first (Doors & access).';
+      const [sv] = await tx<{ id: string }[]>`
+        insert into services (tenant_id, name, zone_keys, category, icon)
+        values (${s.tid}, ${p.name}, ${[zone]}, ${p.category}, ${p.icon}) returning id`;
+      await tx`insert into audit_log (tenant_id, actor, action, entity, data)
+               values (${s.tid}, ${s.uid}, 'service.created', ${sv?.id as string}, ${tx.json(p as never)})`;
+      added++;
+    }
+    return added ? `${added}` : 'Those services are already on your list.';
+  });
+  if (!/^\d+$/.test(r)) return { error: r };
+  revalidatePath('/services');
+  return { ok: r };
+}
+
+/** Save a service's details: name, group, the areas it opens (or a new area by name) and who can buy it. */
+export async function saveService(_prev: Result, form: FormData): Promise<Result> {
+  const s = await editor();
+  if (!s) return { error: 'Your role can’t change services.' };
+  const id = uid(form.get('serviceId'));
+  const name = clean(form.get('name'), 60);
+  const category = CATEGORIES.includes(String(form.get('category'))) ? String(form.get('category')) : 'Other';
+  const soldTo = String(form.get('soldTo')) as SoldTo;
+  const newArea = clean(form.get('newArea'), 40);
+  let zones = [...new Set(form.getAll('zones').map(String).filter(Boolean))];
+  if (!id) return { error: 'That service no longer exists.' };
+  if (!name) return { error: 'Give the service a name.' };
+  if (!['members', 'walkins', 'both'].includes(soldTo)) return { error: 'Choose who can buy it.' };
+  if (!zones.length && !newArea) return { error: 'Choose at least one area this service opens.' };
+  const err = await withTenant(db(), s.tid, async (tx) => {
+    const [dupe] = await tx`select 1 from services where lower(name) = lower(${name}) and id <> ${id}`;
+    if (dupe) return 'Another service already has this name.';
     const known = (await tx<{ key: string }[]>`select distinct key from zones`).map((z) => z.key);
     if (zones.some((z) => !known.includes(z))) return 'One of the areas no longer exists.';
     if (newArea) {
-      const key = areaKey(newArea);
-      if (!known.includes(key)) {
-        const [site] = await tx<{ id: string }[]>`select id from sites order by created_at limit 1`;
-        if (!site) return 'Set up the club’s site first.';
-        await tx`insert into zones (tenant_id, site_id, key, name, reader_ids) values (${s.tid}, ${site.id}, ${key}, ${newArea}, ${[]})`;
-      }
+      const key = await areaFor(tx, s.tid, newArea);
+      if (!key) return 'Give the new area a name with letters or numbers.';
       zones = [...new Set([...zones, key])];
     }
     const [sv] = await tx<{ id: string }[]>`
-      insert into services (tenant_id, name, zone_keys) values (${s.tid}, ${name}, ${zones}) returning id`;
-    for (const p of prices)
-      await tx`insert into products (tenant_id, service_id, name, price_kes, duration_unit, duration_count, zone_keys)
-               values (${s.tid}, ${sv?.id as string}, ${priceName(name, p)}, ${p.price}, ${p.unit}, ${p.count}, ${zones})`;
-    await tx`insert into audit_log (tenant_id, actor, action, entity, data)
-             values (${s.tid}, ${s.uid}, 'service.created', ${sv?.id as string}, ${tx.json({ name, zones, prices } as never)})`;
-    return null;
-  });
-  if (r) return { error: r };
-  revalidatePath('/services');
-  redirect('/services?n=service-saved');
-}
-
-/** Rename a service or change its areas. Prices follow; people already paid keep exactly what they bought. */
-export async function updateService(form: FormData) {
-  const s = await guard();
-  const id = uid(form.get('serviceId'));
-  const name = clean(form.get('name'), 60);
-  const zones = form.getAll('zones').map(String).filter(Boolean);
-  if (!id || !name || !zones.length) redirect('/services?n=service-invalid');
-  await withTenant(db(), s.tid, async (tx) => {
-    const known = (await tx<{ key: string }[]>`select distinct key from zones`).map((z) => z.key);
-    if (zones.some((z) => !known.includes(z))) return;
-    await tx`update services set name = ${name}, zone_keys = ${zones} where id = ${id}`;
+      update services set name = ${name}, category = ${category}, sold_to = ${soldTo}, zone_keys = ${zones}
+      where id = ${id} returning id`;
+    if (!sv) return 'That service no longer exists.';
     const prices = await tx<{ id: string; duration_unit: Unit; duration_count: number }[]>`
       select id, duration_unit, duration_count from products where service_id = ${id}`;
     for (const p of prices)
       await tx`update products set zone_keys = ${zones},
                  name = ${priceName(name, { unit: p.duration_unit, count: p.duration_count, price: 0 })} where id = ${p.id}`;
     await tx`insert into audit_log (tenant_id, actor, action, entity, data)
-             values (${s.tid}, ${s.uid}, 'service.updated', ${id}, ${tx.json({ name, zones } as never)})`;
+             values (${s.tid}, ${s.uid}, 'service.updated', ${id}, ${tx.json({ name, category, soldTo, zones } as never)})`;
+    return null;
   });
+  if (err) return { error: err };
   revalidatePath('/services');
-  redirect('/services?n=service-saved');
+  return { ok: 'Saved' };
 }
 
-/** Add a price to a service, or change an existing price's amount (applies to new sales only). */
-export async function savePrice(form: FormData) {
-  const s = await guard();
+/** Add a price to a service, or change one (applies to new sales only). One price per length per service. */
+export async function savePrice(_prev: Result, form: FormData): Promise<Result> {
+  const s = await editor();
+  if (!s) return { error: 'Your role can’t change prices.' };
   const serviceId = uid(form.get('serviceId'));
   const priceId = uid(form.get('priceId'));
   const p = readPrice(form.get('count') ?? 1, form.get('unit') ?? 'day', form.get('price'));
-  if (!serviceId || !p) redirect('/services?n=price-invalid');
-  const r = await withTenant(db(), s.tid, async (tx) => {
-    const [sv] = await tx<
-      { name: string; zone_keys: string[] }[]
-    >`select name, zone_keys from services where id = ${serviceId}`;
-    if (!sv) return;
-    const [same] =
-      await tx`select 1 from products where service_id = ${serviceId} and active and duration_unit = ${p.unit}
-                            and duration_count = ${p.count} and id is distinct from ${priceId}`;
-    if (same) return 'same';
+  if (!serviceId) return { error: 'That service no longer exists.' };
+  if (!p) return { error: 'Enter a length and an amount in KES.' };
+  const err = await withTenant(db(), s.tid, async (tx) => {
+    const [sv] = await tx<{ name: string; zone_keys: string[] }[]>`
+      select name, zone_keys from services where id = ${serviceId}`;
+    if (!sv) return 'That service no longer exists.';
+    const [same] = await tx`
+      select 1 from products where service_id = ${serviceId} and active and duration_unit = ${p.unit}
+        and duration_count = ${p.count} and id is distinct from ${priceId}`;
+    if (same) return 'There’s already a price for that length. Change that one instead.';
     if (priceId)
       await tx`update products set price_kes = ${p.price}, duration_unit = ${p.unit}, duration_count = ${p.count},
                  name = ${priceName(sv.name, p)} where id = ${priceId} and service_id = ${serviceId}`;
@@ -142,27 +164,26 @@ export async function savePrice(form: FormData) {
                values (${s.tid}, ${serviceId}, ${priceName(sv.name, p)}, ${p.price}, ${p.unit}, ${p.count}, ${sv.zone_keys})`;
     await tx`insert into audit_log (tenant_id, actor, action, entity, data)
              values (${s.tid}, ${s.uid}, ${priceId ? 'price.updated' : 'price.created'}, ${priceId ?? serviceId}, ${tx.json(p as never)})`;
-    return 'ok';
+    return null;
   });
+  if (err) return { error: err };
   revalidatePath('/services');
-  redirect(`/services?n=${r === 'same' ? 'price-same' : 'price-saved'}`);
+  return { ok: priceId ? 'Price saved' : 'Price added' };
 }
 
 /** Stop selling a price or a whole service (or put it back). Never affects anyone already paid. */
-export async function setOnSale(form: FormData) {
-  const s = await guard();
-  const serviceId = uid(form.get('serviceId'));
-  const priceId = uid(form.get('priceId'));
-  const on = form.get('on') === 'true';
+export async function setOnSale(target: { serviceId?: string; priceId?: string }, on: boolean): Promise<Result> {
+  const s = await editor();
+  if (!s) return { error: 'Your role can’t change services.' };
+  const serviceId = uid(target.serviceId ?? null);
+  const priceId = uid(target.priceId ?? null);
+  if (!serviceId && !priceId) return { error: 'Nothing to change.' };
   await withTenant(db(), s.tid, async (tx) => {
     if (priceId) await tx`update products set active = ${on} where id = ${priceId}`;
-    else if (serviceId) {
-      await tx`update services set active = ${on} where id = ${serviceId}`;
-      await tx`update products set active = ${on} where service_id = ${serviceId}`;
-    }
+    else if (serviceId) await tx`update services set active = ${on} where id = ${serviceId}`;
     await tx`insert into audit_log (tenant_id, actor, action, entity)
              values (${s.tid}, ${s.uid}, ${on ? 'sale.resumed' : 'sale.stopped'}, ${priceId ?? serviceId})`;
   });
   revalidatePath('/services');
-  redirect('/services');
+  return { ok: on ? 'On sale' : 'Stopped' };
 }

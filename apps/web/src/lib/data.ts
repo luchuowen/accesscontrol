@@ -222,7 +222,9 @@ export async function products(tenantId: string) {
       }[]
     >`
     select p.*, (select count(*)::int from payments x where x.product_id = p.id and x.status = 'applied') as sold
-    from products p order by p.active desc, p.price_kes`,
+    from products p left join services s on s.id = p.service_id
+    where coalesce(s.sold_to, 'both') <> 'walkins'
+    order by p.active desc, p.price_kes`,
   );
 }
 
@@ -582,6 +584,13 @@ export interface ServiceRow {
   name: string;
   zone_keys: string[];
   active: boolean;
+  category: string | null;
+  icon: string | null;
+  sold_to: 'members' | 'walkins' | 'both';
+  /** People whose access to this service is running now. */
+  using: number;
+  /** Sales in the last 30 days. */
+  sold30: number;
   prices: ServicePrice[];
 }
 
@@ -590,7 +599,11 @@ export async function servicesOverview(tenantId: string) {
   return T(tenantId, async (tx) => {
     const [services, areas] = await Promise.all([
       tx<ServiceRow[]>`
-        select s.id, s.name, s.zone_keys, s.active,
+        select s.id, s.name, s.zone_keys, s.active, s.category, s.icon, s.sold_to,
+          (select count(distinct e.member_id)::int from entitlements e
+             where e.service_id = s.id and e.starts_at <= now() and e.ends_at > now()) as using,
+          (select count(*)::int from payment_lines l join payments p on p.id = l.payment_id
+             where l.service_id = s.id and p.status = 'applied' and p.paid_at > now() - interval '30 days') as sold30,
           coalesce((select json_agg(x order by x.price_kes) from (
             select p.id, p.name, p.price_kes, p.duration_unit, p.duration_count, p.active,
                    (select count(*)::int from payment_lines l where l.product_id = p.id) as sold
@@ -617,18 +630,21 @@ export async function sellablePrices(tenantId: string) {
         duration_unit: string;
         duration_count: number;
         zone_keys: string[];
+        sold_to: 'members' | 'walkins' | 'both';
       }[]
     >`
-    select p.id, s.name as service, s.id as service_id, p.name, p.price_kes, p.duration_unit, p.duration_count, p.zone_keys
+    select p.id, s.name as service, s.id as service_id, p.name, p.price_kes, p.duration_unit, p.duration_count, p.zone_keys,
+      s.sold_to
     from products p join services s on s.id = p.service_id
     where p.active and s.active order by s.created_at, p.price_kes`,
   );
 }
 
-/** Prices a walk-in can buy: anything up to one day (hours, or a 1-day pass), grouped by service. */
+/** Prices a walk-in can buy: services sold to walk-ins, anything up to one day (hours, or a 1-day pass). */
 export async function walkinPrices(tenantId: string) {
   return (await sellablePrices(tenantId)).filter(
-    (p) => p.duration_unit === 'hour' || (p.duration_unit === 'day' && p.duration_count === 1),
+    (p) =>
+      p.sold_to !== 'members' && (p.duration_unit === 'hour' || (p.duration_unit === 'day' && p.duration_count === 1)),
   );
 }
 
