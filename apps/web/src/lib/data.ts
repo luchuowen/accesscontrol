@@ -309,3 +309,151 @@ export async function unmatchedPayments(tenantId: string) {
     from payments p where p.status = 'unmatched' order by p.paid_at desc limit 100`,
   );
 }
+
+/** The owner dashboard (design B, "Business health", approved 2 Oct 2026). One period: 7, 30 or 90 days. */
+export interface OwnerDashboard {
+  tenantName: string;
+  days: number;
+  live: { inside: number; busiestHour: number | null; todayByHour: number[] };
+  revenue: { now: number; prev: number; mpesa: number; cash: number; spark: number[] };
+  daily: { day: string; mpesa: number; cash: number }[];
+  members: { active: number; joined: number; lapsed: number; spark: number[] };
+  renewals: { ended: number; renewed: number; lapsed: number };
+  endingSoon: { id: string; memberNo: number; name: string; endsAt: Date }[];
+  atRisk: { id: string; memberNo: number; name: string; daysAway: number }[];
+  atRiskTotal: number;
+  attention: {
+    unmatched: number;
+    unmatchedKes: number;
+    bridgeLastSeen: Date | null;
+    syncFailed: number;
+    smsUnits: number;
+  };
+}
+
+export async function ownerDashboard(tenantId: string, days: number): Promise<OwnerDashboard> {
+  return T(tenantId, async (tx) => {
+    const [t] = await tx<
+      { name: string; timezone: string }[]
+    >`select name, timezone from tenants where id = ${tenantId}`;
+    const tz = t?.timezone ?? 'Africa/Nairobi';
+    const span = `${days} days`;
+    const span2 = `${days * 2} days`;
+    // In the club now: doors record entries only, so "inside" = distinct members who entered in the last 90 minutes.
+    const [inside] = await tx<{ n: number }[]>`
+      select count(distinct member_no)::int as n from access_events where granted and at >= now() - interval '90 minutes'`;
+    const [busy] = await tx<{ h: number | null }[]>`
+      select extract(hour from at at time zone ${tz})::int as h from access_events
+      where granted and at >= now() - interval '56 days'
+        and extract(isodow from at at time zone ${tz}) = extract(isodow from now() at time zone ${tz})
+      group by 1 order by count(*) desc limit 1`;
+    const today = await tx<{ h: number; n: number }[]>`
+      select extract(hour from at at time zone ${tz})::int as h, count(*)::int as n from access_events
+      where granted and at >= date_trunc('day', now() at time zone ${tz}) at time zone ${tz} group by 1`;
+    const [rev] = await tx<{ now: number; prev: number; mpesa: number; cash: number }[]>`
+      select coalesce(sum(amount_kes) filter (where paid_at >= now() - ${span}::interval), 0)::int as now,
+             coalesce(sum(amount_kes) filter (where paid_at >= now() - ${span2}::interval and paid_at < now() - ${span}::interval), 0)::int as prev,
+             coalesce(sum(amount_kes) filter (where paid_at >= now() - ${span}::interval and channel <> 'cash'), 0)::int as mpesa,
+             coalesce(sum(amount_kes) filter (where paid_at >= now() - ${span}::interval and channel = 'cash'), 0)::int as cash
+      from payments where status = 'applied'`;
+    const daily = await tx<{ day: string; mpesa: number; cash: number }[]>`
+      select to_char(d, 'YYYY-MM-DD') as day,
+             coalesce(sum(p.amount_kes) filter (where p.channel <> 'cash'), 0)::int as mpesa,
+             coalesce(sum(p.amount_kes) filter (where p.channel = 'cash'), 0)::int as cash
+      from generate_series((now() at time zone ${tz})::date - ${days - 1}::int, (now() at time zone ${tz})::date, '1 day') d
+      left join payments p on p.status = 'applied' and (p.paid_at at time zone ${tz})::date = d
+      group by d order by d`;
+    // Seven points across the period, for the small trend bars.
+    const points = await tx<{ i: number; rev: number; active: number }[]>`
+      select g.i,
+        (select coalesce(sum(amount_kes), 0)::int from payments where status = 'applied'
+           and paid_at > now() - ${span}::interval + (g.i - 1) * (${span}::interval / 7)
+           and paid_at <= now() - ${span}::interval + g.i * (${span}::interval / 7)) as rev,
+        (select count(distinct member_id)::int from entitlements
+           where now() - ${span}::interval + g.i * (${span}::interval / 7) between starts_at and ends_at) as active
+      from generate_series(1, 7) g(i) order by g.i`;
+    const [act] = await tx<{ n: number }[]>`
+      select count(distinct member_id)::int as n from entitlements where now() between starts_at and ends_at`;
+    const [joined] = await tx<{ n: number }[]>`
+      select count(*)::int as n from (select member_id, min(paid_at) as first from payments
+        where status = 'applied' and member_id is not null group by member_id) f where f.first >= now() - ${span}::interval`;
+    // Renewals: members whose membership ended in the period, and how many of them are active again now.
+    const [ren] = await tx<{ ended: number; renewed: number }[]>`
+      with ended as (
+        select member_id from entitlements group by member_id
+        having bool_or(ends_at between now() - ${span}::interval and now()))
+      select count(*)::int as ended,
+             count(*) filter (where exists (select 1 from entitlements e where e.member_id = ended.member_id
+                                             and now() between e.starts_at and e.ends_at))::int as renewed
+      from ended`;
+    const ending = await tx<{ id: string; member_no: number; first_name: string; last_name: string; ends: Date }[]>`
+      select m.id, m.member_no, m.first_name, m.last_name, max(e.ends_at) as ends
+      from members m join entitlements e on e.member_id = m.id
+      where m.first_name <> 'Wristband'
+      group by m.id having max(e.ends_at) between now() and now() + interval '7 days'
+      order by ends limit 6`;
+    // At risk: paid up, but no entry for 14+ days (the clearest early sign that someone is about to leave).
+    const risk = await tx<{ id: string; member_no: number; first_name: string; last_name: string; away: number }[]>`
+      select m.id, m.member_no, m.first_name, m.last_name,
+             extract(day from now() - coalesce(max(a.at), min(e.starts_at)))::int as away
+      from members m
+      join entitlements e on e.member_id = m.id and now() between e.starts_at and e.ends_at
+      left join access_events a on a.member_no = m.member_no and a.granted
+      group by m.id
+      having coalesce(max(a.at), min(e.starts_at)) < now() - interval '14 days'
+      order by away desc`;
+    const [um] = await tx<{ n: number; kes: number }[]>`
+      select count(*)::int as n, coalesce(sum(amount_kes), 0)::int as kes from payments where status = 'unmatched'`;
+    const [st] = await tx<
+      { failed: number }[]
+    >`select count(*) filter (where error is not null)::int as failed from access_states`;
+    const [br] = await tx<{ last: Date | null }[]>`select max(last_seen_at) as last from app_tenant_bridges()`;
+    const [sms] = await tx<{ units: string | null }[]>`select sum(units) as units from sms_ledger`;
+    const ended = ren?.ended ?? 0;
+    const renewed = ren?.renewed ?? 0;
+    return {
+      tenantName: t?.name ?? '',
+      days,
+      live: {
+        inside: inside?.n ?? 0,
+        busiestHour: busy?.h ?? null,
+        todayByHour: Array.from({ length: 24 }, (_, h) => today.find((x) => x.h === h)?.n ?? 0),
+      },
+      revenue: {
+        now: rev?.now ?? 0,
+        prev: rev?.prev ?? 0,
+        mpesa: rev?.mpesa ?? 0,
+        cash: rev?.cash ?? 0,
+        spark: points.map((p) => p.rev),
+      },
+      daily,
+      members: {
+        active: act?.n ?? 0,
+        joined: joined?.n ?? 0,
+        lapsed: ended - renewed,
+        spark: points.map((p) => p.active),
+      },
+      renewals: { ended, renewed, lapsed: ended - renewed },
+      endingSoon: ending.map((x) => ({
+        id: x.id,
+        memberNo: x.member_no,
+        name: `${x.first_name} ${x.last_name}`,
+        endsAt: x.ends,
+      })),
+      atRisk: risk.slice(0, 5).map((x) => ({
+        id: x.id,
+        memberNo: x.member_no,
+        name: `${x.first_name} ${x.last_name}`,
+        daysAway: x.away,
+      })),
+      atRiskTotal: risk.length,
+      attention: {
+        unmatched: um?.n ?? 0,
+        unmatchedKes: um?.kes ?? 0,
+        bridgeLastSeen: br?.last ?? null,
+        syncFailed: st?.failed ?? 0,
+        smsUnits: Number(sms?.units ?? 0),
+      },
+    };
+  });
+}
