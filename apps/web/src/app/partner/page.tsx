@@ -44,9 +44,11 @@ export default async function PartnerHome() {
         title="Clubs"
         subtitle="Every club on Lango, how far its setup has come, and what flowed through TaifaPay in the last 30 days."
         actions={
-          <Link href="/partner/new" className="btn-primary">
-            <Plus size={16} /> Add a club
-          </Link>
+          s.kind === 'partner_admin' && (
+            <Link href="/partner/new" className="btn-primary">
+              <Plus size={16} /> Add a club
+            </Link>
+          )
         }
       />
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">

@@ -1,3 +1,4 @@
+import { can } from '@lango/server';
 import { Plus, Search } from 'lucide-react';
 import Link from 'next/link';
 import { Notice } from '@/components/notice';
@@ -5,7 +6,7 @@ import { SubmitButton } from '@/components/submit-button';
 import { Badge, PageHeader } from '@/components/ui';
 import { members } from '@/lib/data';
 import { date, daysLeft } from '@/lib/format';
-import { requireSession } from '@/lib/session';
+import { requirePerm } from '@/lib/session';
 import { createMember } from '../actions';
 
 export default async function Members({
@@ -13,7 +14,7 @@ export default async function Members({
 }: {
   searchParams: Promise<{ q?: string; new?: string; n?: string }>;
 }) {
-  const s = await requireSession();
+  const s = await requirePerm('members.view');
   const { q = '', new: showNew, n } = await searchParams;
   const rows = await members(s.tid, q);
   return (
@@ -22,13 +23,15 @@ export default async function Members({
         title="Members"
         subtitle="Every member keeps one permanent number — it is their card code and their M-Pesa account number."
         actions={
-          <Link href="/members?new=1" className="btn-primary">
-            <Plus size={16} /> New member
-          </Link>
+          can(s, 'members.edit') && (
+            <Link href="/members?new=1" className="btn-primary">
+              <Plus size={16} /> New member
+            </Link>
+          )
         }
       />
       <Notice code={n} />
-      {showNew && (
+      {showNew && can(s, 'members.edit') && (
         <form action={createMember} className="card mb-6 grid gap-4 p-6 md:grid-cols-5">
           <input name="firstName" required placeholder="First name" className="input" />
           <input name="lastName" required placeholder="Last name" className="input" />
@@ -47,7 +50,7 @@ export default async function Members({
         <Search size={16} className="absolute left-3.5 top-3 text-ink-300" />
         <input name="q" defaultValue={q} placeholder="Search name, number or phone" className="input pl-10" />
       </form>
-      <div className="card overflow-hidden">
+      <div className="card overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-ink-50/60 text-left">
             <tr>

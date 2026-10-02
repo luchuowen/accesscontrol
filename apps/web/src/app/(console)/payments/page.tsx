@@ -1,18 +1,27 @@
+import { can } from '@lango/server';
 import Link from 'next/link';
+import { redirect } from 'next/navigation';
 import { Notice } from '@/components/notice';
 import { SubmitButton } from '@/components/submit-button';
 import { Badge, PageHeader, Stat } from '@/components/ui';
 import { payments, products, unmatchedPayments } from '@/lib/data';
 import { dateTime, kes } from '@/lib/format';
-import { requireSession } from '@/lib/session';
+import { canAny, requireSession } from '@/lib/session';
 import { assignUnmatched } from '../actions';
 
 export default async function Payments({ searchParams }: { searchParams: Promise<{ n?: string }> }) {
   const s = await requireSession();
+  if (!canAny(s, 'payments.record', 'payments.assign', 'reports.all')) redirect('/?denied=1');
   const { n } = await searchParams;
-  const [rows, queue, plans] = await Promise.all([payments(s.tid), unmatchedPayments(s.tid), products(s.tid)]);
+  const [all, queue, plans] = await Promise.all([payments(s.tid), unmatchedPayments(s.tid), products(s.tid)]);
+  // Front desk sees today only (Nairobi day).
+  const full = can(s, 'reports.all');
+  const today = new Date(Date.now() + 3 * 3600_000).toISOString().slice(0, 10);
+  const rows = full
+    ? all
+    : all.filter((r) => new Date(r.paid_at.getTime() + 3 * 3600_000).toISOString().slice(0, 10) === today);
   const onSale = plans.filter((p) => p.active);
-  const canAssign = ['owner', 'manager', 'accountant'].includes(s.role);
+  const canAssign = can(s, 'payments.assign');
   const applied = rows.filter((r) => r.status === 'applied');
   const unmatched = rows.filter((r) => r.status === 'unmatched');
   const sum = (xs: readonly { amount_kes: number }[]) => xs.reduce((a, b) => a + b.amount_kes, 0);
@@ -24,10 +33,14 @@ export default async function Payments({ searchParams }: { searchParams: Promise
       <Notice code={n} />
       <PageHeader
         title="Payments"
-        subtitle="Every shilling, where it came from, and what it unlocked. Compare these totals with your M-Pesa and bank statements."
+        subtitle={
+          full
+            ? 'Every shilling, where it came from, and what it unlocked. Compare these totals with your M-Pesa and bank statements.'
+            : 'Today’s payments at this club.'
+        }
       />
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <Stat label="Applied (last 200)" value={kes(sum(applied))} />
+        <Stat label={full ? 'Applied (last 200)' : 'Applied today'} value={kes(sum(applied))} />
         <Stat label="Through TaifaPay" value={kes(sum(viaTaifa))} hint="M-Pesa, paybill, card, bank" />
         <Stat label="Cash at the desk" value={kes(sum(cash))} hint="recorded by staff, audited" />
         <Stat
@@ -90,7 +103,7 @@ export default async function Payments({ searchParams }: { searchParams: Promise
           </ul>
         </section>
       )}
-      <div className="card mt-6 overflow-hidden">
+      <div className="card mt-6 overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-ink-50/60 text-left">
             <tr>

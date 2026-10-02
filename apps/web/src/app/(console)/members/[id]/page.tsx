@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { withTenant } from '@lango/db';
+import { can } from '@lango/server';
 import { ArrowLeft, CheckCircle2, Clock, CreditCard, ShieldAlert } from 'lucide-react';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
@@ -8,7 +9,7 @@ import { SubmitButton } from '@/components/submit-button';
 import { Badge, Empty } from '@/components/ui';
 import { member, products } from '@/lib/data';
 import { date, dateTime, daysLeft, kes } from '@/lib/format';
-import { requireSession } from '@/lib/session';
+import { requirePerm } from '@/lib/session';
 import { db } from '@/server/db';
 import { grantOverride, linkCard, recordDeskPayment, requestMpesa } from '../../actions';
 
@@ -19,7 +20,7 @@ export default async function MemberPage({
   params: Promise<{ id: string }>;
   searchParams: Promise<{ n?: string }>;
 }) {
-  const s = await requireSession();
+  const s = await requirePerm('members.view');
   const { id } = await params;
   const { n } = await searchParams;
   const d = await member(s.tid, id);
@@ -141,77 +142,83 @@ export default async function MemberPage({
         </section>
 
         <div className="space-y-4">
-          <form action={requestMpesa} className="card p-6">
-            <div className="label">Send M-Pesa prompt</div>
-            <input type="hidden" name="memberId" value={d.m.id} />
-            <select name="productId" className="input mt-4" required>
-              {plans.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name} — {kes(p.price_kes)}
-                </option>
-              ))}
-            </select>
-            <input name="phone" defaultValue={d.m.phone ?? ''} placeholder="07…" className="input mt-3" required />
-            <SubmitButton pendingText="Sending to phone…" className="btn-primary mt-4 w-full">
-              Send prompt to phone
-            </SubmitButton>
-            <p className="mt-3 text-xs text-ink-500">
-              The member approves on their phone; doors open automatically once M-Pesa confirms.
-            </p>
-          </form>
-
-          <form action={recordDeskPayment} className="card p-6">
-            <div className="label">Cash at the desk</div>
-            <input type="hidden" name="memberId" value={d.m.id} />
-            <input type="hidden" name="nonce" value={randomUUID()} />
-            <select name="productId" className="input mt-4" required>
-              {plans.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name} — {kes(p.price_kes)}
-                </option>
-              ))}
-            </select>
-            <input type="hidden" name="channel" value="cash" />
-            <SubmitButton pendingText="Recording…" className="btn-ghost mt-4 w-full">
-              <CreditCard size={16} /> Record cash &amp; open doors
-            </SubmitButton>
-            {payTo && (
-              <p className="mt-3 text-xs text-ink-500">
-                Or M-Pesa {payTo} with account <b>{d.m.member_no}</b>; access updates automatically.
-              </p>
-            )}
-          </form>
-
-          <form action={linkCard} className="card p-6">
-            <div className="label">Cards &amp; wristbands</div>
-            <ul className="mt-3 space-y-1.5 text-sm">
-              {d.creds.map((c) => (
-                <li key={c.id} className="flex justify-between">
-                  <span className="capitalize">{c.kind}</span>
-                  <span className="font-mono text-ink-500">
-                    {c.site_code}:{String(c.card_code)}
-                  </span>
-                </li>
-              ))}
-            </ul>
-            <input type="hidden" name="memberId" value={d.m.id} />
-            <div className="mt-4 flex gap-2">
-              <input
-                name="cardCode"
-                type="number"
-                min={1}
-                max={65535}
-                required
-                placeholder="Card number"
-                className="input"
-              />
-              <SubmitButton pendingText="Linking…" className="btn-ghost">
-                Link
+          {can(s, 'payments.record') && (
+            <form action={requestMpesa} className="card p-6">
+              <div className="label">Send M-Pesa prompt</div>
+              <input type="hidden" name="memberId" value={d.m.id} />
+              <select name="productId" className="input mt-4" required>
+                {plans.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name} — {kes(p.price_kes)}
+                  </option>
+                ))}
+              </select>
+              <input name="phone" defaultValue={d.m.phone ?? ''} placeholder="07…" className="input mt-3" required />
+              <SubmitButton pendingText="Sending to phone…" className="btn-primary mt-4 w-full">
+                Send prompt to phone
               </SubmitButton>
-            </div>
-          </form>
+              <p className="mt-3 text-xs text-ink-500">
+                The member approves on their phone; doors open automatically once M-Pesa confirms.
+              </p>
+            </form>
+          )}
 
-          {['owner', 'manager'].includes(s.role) && (
+          {can(s, 'payments.record') && (
+            <form action={recordDeskPayment} className="card p-6">
+              <div className="label">Cash at the desk</div>
+              <input type="hidden" name="memberId" value={d.m.id} />
+              <input type="hidden" name="nonce" value={randomUUID()} />
+              <select name="productId" className="input mt-4" required>
+                {plans.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name} — {kes(p.price_kes)}
+                  </option>
+                ))}
+              </select>
+              <input type="hidden" name="channel" value="cash" />
+              <SubmitButton pendingText="Recording…" className="btn-ghost mt-4 w-full">
+                <CreditCard size={16} /> Record cash &amp; open doors
+              </SubmitButton>
+              {payTo && (
+                <p className="mt-3 text-xs text-ink-500">
+                  Or M-Pesa {payTo} with account <b>{d.m.member_no}</b>; access updates automatically.
+                </p>
+              )}
+            </form>
+          )}
+
+          {can(s, 'members.edit') && (
+            <form action={linkCard} className="card p-6">
+              <div className="label">Cards &amp; wristbands</div>
+              <ul className="mt-3 space-y-1.5 text-sm">
+                {d.creds.map((c) => (
+                  <li key={c.id} className="flex justify-between">
+                    <span className="capitalize">{c.kind}</span>
+                    <span className="font-mono text-ink-500">
+                      {c.site_code}:{String(c.card_code)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              <input type="hidden" name="memberId" value={d.m.id} />
+              <div className="mt-4 flex gap-2">
+                <input
+                  name="cardCode"
+                  type="number"
+                  min={1}
+                  max={65535}
+                  required
+                  placeholder="Card number"
+                  className="input"
+                />
+                <SubmitButton pendingText="Linking…" className="btn-ghost">
+                  Link
+                </SubmitButton>
+              </div>
+            </form>
+          )}
+
+          {can(s, 'access.comp') && (
             <form action={grantOverride} className="card p-6">
               <div className="label">Complimentary access</div>
               <input type="hidden" name="memberId" value={d.m.id} />

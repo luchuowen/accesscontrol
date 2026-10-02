@@ -11,3 +11,4 @@ export * from './payments.js';
 export * from './sms.js';
 export * from './sms-topup.js';
 export * from './taifapay.js';
+export * from './team.js';

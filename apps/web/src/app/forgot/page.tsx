@@ -15,7 +15,7 @@ export default function Forgot() {
       <form action={forgot} className="mt-8 grid gap-[18px]">
         <div>
           <label htmlFor="email" className="auth-label">
-            Work email
+            Your email
           </label>
           <input
             id="email"
@@ -25,6 +25,7 @@ export default function Forgot() {
             autoFocus
             autoComplete="username"
             inputMode="email"
+            placeholder="Enter email address"
             className="auth-input"
           />
         </div>

@@ -1,6 +1,7 @@
 'use client';
 import {
   ArrowLeftRight,
+  CircleUserRound,
   CreditCard,
   DoorOpen,
   Layers,
@@ -9,78 +10,125 @@ import {
   MessageSquare,
   Plug,
   Users,
+  UsersRound,
 } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { LangoMark } from '@/components/logo';
 
-const items = [
-  { href: '/', label: 'Overview', icon: LayoutDashboard },
-  { href: '/members', label: 'Members', icon: Users },
-  { href: '/payments', label: 'Payments', icon: CreditCard },
-  { href: '/plans', label: 'Plans & pricing', icon: Layers },
-  { href: '/access', label: 'Doors & access', icon: DoorOpen },
-  { href: '/messages', label: 'Messages', icon: MessageSquare },
-  { href: '/settings', label: 'Settings', icon: Plug },
+/** Each page and the permissions that open it (any one is enough). Pages a role cannot use are not shown. */
+const ITEMS = [
+  { href: '/', label: 'Overview', icon: LayoutDashboard, any: [] },
+  { href: '/members', label: 'Members', icon: Users, any: ['members.view'] },
+  {
+    href: '/payments',
+    label: 'Payments',
+    icon: CreditCard,
+    any: ['payments.record', 'payments.assign', 'reports.all'],
+  },
+  { href: '/plans', label: 'Plans & pricing', icon: Layers, any: ['plans.manage', 'reports.all'] },
+  { href: '/access', label: 'Doors & access', icon: DoorOpen, any: ['doors.manage'] },
+  { href: '/messages', label: 'Messages', icon: MessageSquare, any: ['messages.manage'] },
+  { href: '/team', label: 'Team', icon: UsersRound, any: ['team.manage'] },
+  { href: '/settings', label: 'Settings', icon: Plug, any: ['settings.payments', 'sms.buy', 'messages.manage'] },
 ];
 
 export function Nav({
   tenant,
   user,
-  role,
+  roleLabel,
+  perms,
   partner,
+  platform,
+  switchClubs,
 }: {
   tenant: string;
   user: string;
-  role: string;
+  roleLabel: string;
+  perms: string[];
   partner?: boolean;
+  platform?: boolean;
+  switchClubs?: boolean;
 }) {
   const path = usePathname();
+  const items = ITEMS.filter((i) => i.any.length === 0 || i.any.some((p) => perms.includes(p)));
+  const on = (href: string) => (href === '/' ? path === '/' : path.startsWith(href));
   return (
-    <aside className="fixed inset-y-0 left-0 hidden w-64 flex-col bg-ink-950 px-4 py-6 text-ink-300 lg:flex print:hidden">
-      <div className="flex items-center gap-2.5 px-2">
-        <LangoMark size={32} />
-        <div>
-          <div className="text-[15px] font-semibold tracking-tight text-white">Lango</div>
-          <div className="text-[11px] text-ink-500">{tenant}</div>
+    <>
+      <header className="sticky top-0 z-20 bg-ink-950 text-ink-300 lg:hidden print:hidden">
+        <div className="flex items-center gap-2.5 px-4 pt-3">
+          <LangoMark size={26} />
+          <div className="min-w-0 flex-1 truncate text-sm font-medium text-white">{tenant}</div>
+          {(switchClubs || partner) && (
+            <Link href={partner ? '/partner' : '/choose'} className="text-xs text-ink-300" aria-label="Switch club">
+              <ArrowLeftRight size={16} />
+            </Link>
+          )}
+          <Link href="/account" aria-label="Your account">
+            <CircleUserRound size={18} />
+          </Link>
         </div>
-      </div>
-      <nav className="mt-10 flex flex-col gap-1">
-        {items.map(({ href, label, icon: Icon }) => {
-          const on = href === '/' ? path === '/' : path.startsWith(href);
-          return (
+        <nav className="flex gap-4 overflow-x-auto px-4 pb-3 pt-2.5 text-[13px]">
+          {items.map(({ href, label }) => (
+            <Link key={href} href={href} className={`whitespace-nowrap ${on(href) ? 'text-white' : ''}`}>
+              {label}
+            </Link>
+          ))}
+        </nav>
+      </header>
+      <aside className="fixed inset-y-0 left-0 hidden w-64 flex-col bg-ink-950 px-4 py-6 text-ink-300 lg:flex print:hidden">
+        <div className="flex items-center gap-2.5 px-2">
+          <LangoMark size={32} />
+          <div className="min-w-0">
+            <div className="text-[15px] font-semibold tracking-tight text-white">Lango</div>
+            <div className="truncate text-[11px] text-ink-500">{tenant}</div>
+          </div>
+        </div>
+        <nav className="mt-10 flex flex-col gap-1">
+          {items.map(({ href, label, icon: Icon }) => (
             <Link
               key={href}
               href={href}
-              className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition ${on ? 'bg-white/10 text-white' : 'hover:bg-white/5 hover:text-white'}`}
+              className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition ${on(href) ? 'bg-white/10 text-white' : 'hover:bg-white/5 hover:text-white'}`}
             >
               <Icon size={17} />
               {label}
             </Link>
-          );
-        })}
-      </nav>
-      <div className="mt-auto rounded-xl bg-white/5 p-3">
-        <div className="text-sm text-white">{user}</div>
-        <div className={`text-[11px] text-ink-500 ${partner ? '' : 'capitalize'}`}>
-          {partner ? 'Partner · acting as owner' : role}
+          ))}
+        </nav>
+        <div className="mt-auto rounded-xl bg-white/5 p-3">
+          <Link href="/account" className="block text-sm text-white hover:underline">
+            {user}
+          </Link>
+          <div className="text-[11px] text-ink-500">{partner ? `Partner · acting as ${roleLabel}` : roleLabel}</div>
+          {switchClubs && (
+            <Link href="/choose" className="mt-3 flex items-center gap-2 text-xs text-ink-300 hover:text-white">
+              <ArrowLeftRight size={14} /> Switch club
+            </Link>
+          )}
+          {partner && (
+            <Link href="/partner" className="mt-3 flex items-center gap-2 text-xs text-ink-300 hover:text-white">
+              <ArrowLeftRight size={14} /> All clubs
+            </Link>
+          )}
+          {platform && (
+            <Link
+              href="/partner/settings"
+              className="mt-2 flex items-center gap-2 text-xs text-ink-300 hover:text-white"
+            >
+              <Plug size={14} /> SaaS console
+            </Link>
+          )}
+          <Link href="/account" className="mt-2 flex items-center gap-2 text-xs text-ink-300 hover:text-white">
+            <CircleUserRound size={14} /> Your account
+          </Link>
+          <form action="/logout" method="post" className="mt-2">
+            <button type="submit" className="flex items-center gap-2 text-xs text-ink-300 hover:text-white">
+              <LogOut size={14} /> Sign out
+            </button>
+          </form>
         </div>
-        {partner && (
-          <Link href="/partner" className="mt-3 flex items-center gap-2 text-xs text-ink-300 hover:text-white">
-            <ArrowLeftRight size={14} /> All clubs
-          </Link>
-        )}
-        {partner && (
-          <Link href="/partner/settings" className="mt-2 flex items-center gap-2 text-xs text-ink-300 hover:text-white">
-            <Plug size={14} /> SaaS console
-          </Link>
-        )}
-        <form action="/logout" method="post" className="mt-3">
-          <button type="submit" className="flex items-center gap-2 text-xs text-ink-300 hover:text-white">
-            <LogOut size={14} /> Sign out
-          </button>
-        </form>
-      </div>
-    </aside>
+      </aside>
+    </>
   );
 }

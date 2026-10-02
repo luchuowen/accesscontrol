@@ -1,8 +1,9 @@
 import { withTenant } from '@lango/db';
-import { clubSms, onboardingChecklist, platformSmsConfig, roleLabel, staffById } from '@lango/server';
-import { CheckCircle2, CreditCard, KeyRound, MessageSquare, Smartphone, UsersRound } from 'lucide-react';
+import { can, clubSms, onboardingChecklist, platformSmsConfig } from '@lango/server';
+import { CheckCircle2, CreditCard, MessageSquare, Smartphone } from 'lucide-react';
 import { headers } from 'next/headers';
 import Link from 'next/link';
+import { redirect } from 'next/navigation';
 import { Checklist } from '@/components/checklist';
 import { CopyField } from '@/components/copy-field';
 import { SubmitButton } from '@/components/submit-button';
@@ -10,26 +11,16 @@ import { Badge, PageHeader } from '@/components/ui';
 import { dateTime, kes } from '@/lib/format';
 import { requireSession } from '@/lib/session';
 import { db } from '@/server/db';
-import { signOut } from '../../login/actions';
-import {
-  buySms,
-  changePassword,
-  resendStaffInvite,
-  saveChannels,
-  savePhone,
-  saveTaifaPay,
-  sendTestSms,
-  setStaffActive,
-} from './actions';
-import { AddStaffForm } from './team-form';
+import { buySms, saveChannels, saveTaifaPay, sendTestSms } from './actions';
 
 export default async function Settings({
   searchParams,
 }: {
-  searchParams: Promise<{ taifa?: string; ch?: string; team?: string; pw?: string; sms?: string }>;
+  searchParams: Promise<{ taifa?: string; ch?: string; sms?: string }>;
 }) {
   const s = await requireSession();
-  const { taifa, ch, team, pw, sms } = await searchParams;
+  if (!can(s, 'settings.payments') && !can(s, 'sms.buy') && !can(s, 'messages.manage')) redirect('/?denied=1');
+  const { taifa, ch, sms } = await searchParams;
   const [row] = await withTenant(
     db(),
     s.tid,
@@ -88,39 +79,18 @@ export default async function Settings({
       select id, created_at, amount_kes, units, status, trigger, invoice_no from sms_topups order by created_at desc limit 5`,
   );
   const checklist = await onboardingChecklist(db(), s.tid);
-  const staff = await withTenant(
-    db(),
-    s.tid,
-    (tx) => tx<{ id: string; name: string; email: string; role: string; active: boolean; accepted_at: Date | null }[]>`
-      select id, name, email, role, active, accepted_at from app_tenant_staff()`,
-  );
-  const me = await staffById(db(), s.uid);
   const msg: Record<string, [string, string]> = {
     ok: ['green', 'TaifaPay connected — the keys were verified and stored encrypted.'],
     rejected: ['red', 'TaifaPay rejected those keys. Check the environment (sandbox / live) and try again.'],
     missing: ['amber', 'Enter both the client ID and the client secret.'],
     unreachable: ['amber', 'TaifaPay did not answer in time, so nothing was saved. Try again in a minute.'],
-    forbidden: ['red', 'Only the club owner can change this.'],
+    forbidden: ['red', 'You don’t have permission to change this.'],
   };
   const other: Record<string, [string, string]> = {
     'ch:ok': ['green', 'Payment channels saved. Members now see these details on the portal and receipts.'],
     'ch:number': ['red', 'Paybill and till numbers are 5 to 7 digits.'],
-    'ch:forbidden': ['red', 'Only the club owner can change this.'],
-    'team:ok': ['green', 'Team updated.'],
-    'team:self': ['amber', 'You can’t deactivate your own account.'],
-    'team:forbidden': ['red', 'Only the club owner can change the team.'],
-    'team:invite-sent': ['green', 'A new invitation is on its way. The earlier link no longer works.'],
-    'team:invite-failed': ['amber', 'That invitation could not be sent. It may already have been accepted.'],
-    'pw:ok': ['green', 'Password changed. Your other devices have been signed out, and we emailed you a note.'],
-    'pw:short': ['red', 'Use at least 10 characters.'],
-    'pw:long': ['red', 'Use at most 128 characters.'],
-    'pw:guessable': ['red', 'That password is too easy to guess. Try a short phrase only you would use.'],
-    'pw:breached': ['red', 'That password has appeared in a data breach elsewhere. Choose another.'],
-    'pw:wrong': ['red', 'Your current password is not right.'],
-    'pw:wait': ['amber', 'Too many attempts. Wait 15 minutes and try again.'],
-    'pw:phone': ['red', 'Enter a Kenyan mobile number, e.g. 0712 345 678.'],
-    'pw:phone-ok': ['green', 'Mobile number saved. Sign-in codes go there from now on.'],
-    'sms:forbidden': ['red', 'Only the club owner can change this.'],
+    'ch:forbidden': ['red', 'You don’t have permission to change this.'],
+    'sms:forbidden': ['red', 'You don’t have permission to change this.'],
     'sms:number': ['red', 'Enter a Kenyan mobile number, e.g. 0712 345 678.'],
     'sms:wait': ['amber', 'A few test messages were just sent. Wait a few minutes.'],
     'sms:platform': ['amber', 'SMS is not connected on the platform yet. Ask NAVAC to connect it.'],
@@ -132,23 +102,13 @@ export default async function Settings({
     'sms:topup-no-platform-taifapay': ['amber', 'SMS credit sales are not switched on yet. Ask NAVAC.'],
     'sms:topup-failed': ['red', 'M-Pesa could not be reached just now. Try again in a minute.'],
   };
-  const m = taifa
-    ? msg[taifa]
-    : ch
-      ? other[`ch:${ch}`]
-      : team
-        ? other[`team:${team}`]
-        : pw
-          ? other[`pw:${pw}`]
-          : sms
-            ? other[`sms:${sms}`]
-            : undefined;
-  const owner = s.role === 'owner';
+  const m = taifa ? msg[taifa] : ch ? other[`ch:${ch}`] : sms ? other[`sms:${sms}`] : undefined;
+  const owner = can(s, 'settings.payments');
   return (
     <>
       <PageHeader
         title="Settings"
-        subtitle="Payments, how members pay, and the club's team. Every payment runs through TaifaPay and settles to the club's bank."
+        subtitle="Payment keys, how members pay, and SMS credit. Every payment runs through TaifaPay and settles to the club's bank."
       />
       <div className="mb-6">
         <Checklist items={checklist} />
@@ -223,7 +183,7 @@ export default async function Settings({
               </SubmitButton>
             </form>
           ) : (
-            <p className="mt-6 text-sm text-ink-500">Only the club owner can change payment settings.</p>
+            <p className="mt-6 text-sm text-ink-500">Only the owner or an admin can change payment settings.</p>
           )}
         </section>
         <section className="card p-6">
@@ -312,49 +272,6 @@ export default async function Settings({
             </p>
           )}
         </section>
-        <section id="team" className="card scroll-mt-6 p-6">
-          <div className="flex items-center gap-3">
-            <div className="grid h-10 w-10 place-items-center rounded-xl bg-ink-50">
-              <UsersRound size={18} />
-            </div>
-            <div className="flex-1">
-              <div className="font-medium">Team</div>
-              <div className="text-xs text-ink-500">Who can sign in to this console</div>
-            </div>
-          </div>
-          <ul className="mt-4 divide-y divide-ink-100 text-sm">
-            {staff.map((p) => (
-              <li key={p.id} className="flex items-center gap-3 py-2.5">
-                <div className="flex-1">
-                  <div className={p.active || !p.accepted_at ? '' : 'text-ink-300 line-through'}>{p.name}</div>
-                  <div className="text-xs text-ink-500">{p.email}</div>
-                </div>
-                {!p.accepted_at && <Badge tone="amber">invited</Badge>}
-                <Badge>{roleLabel(p.role)}</Badge>
-                {owner && !p.accepted_at ? (
-                  <form action={resendStaffInvite}>
-                    <input type="hidden" name="staffId" value={p.id} />
-                    <button type="submit" className="text-xs text-ink-500 hover:text-ink-900">
-                      Resend
-                    </button>
-                  </form>
-                ) : (
-                  owner &&
-                  p.id !== s.uid && (
-                    <form action={setStaffActive}>
-                      <input type="hidden" name="staffId" value={p.id} />
-                      <input type="hidden" name="active" value={p.active ? 'false' : 'true'} />
-                      <button type="submit" className="text-xs text-ink-500 hover:text-ink-900">
-                        {p.active ? 'Deactivate' : 'Reactivate'}
-                      </button>
-                    </form>
-                  )
-                )}
-              </li>
-            ))}
-          </ul>
-          {owner && <AddStaffForm />}
-        </section>
         <section className="card p-6">
           <div className="flex items-center gap-3">
             <div className="grid h-10 w-10 place-items-center rounded-xl bg-ink-50">
@@ -395,7 +312,7 @@ export default async function Settings({
               <div className="text-xs text-ink-500">shown on phones</div>
             </div>
           </div>
-          {['owner', 'manager', 'accountant'].includes(s.role) && (
+          {can(s, 'sms.buy') && (
             <form action={buySms} className="mt-3 flex flex-wrap gap-2">
               <input
                 name="amountKes"
@@ -452,7 +369,7 @@ export default async function Settings({
             </span>
             <span className="font-medium">Messages →</span>
           </Link>
-          {smsSender && ['owner', 'manager'].includes(s.role) && (
+          {smsSender && can(s, 'messages.manage') && (
             <form action={sendTestSms} className="mt-4 flex gap-2 border-t border-ink-100 pt-4">
               <input
                 name="phone"
@@ -466,71 +383,6 @@ export default async function Settings({
               </SubmitButton>
             </form>
           )}
-        </section>
-        <section id="account" className="card scroll-mt-6 p-6">
-          <div className="flex items-center gap-3">
-            <div className="grid h-10 w-10 place-items-center rounded-xl bg-ink-50">
-              <KeyRound size={18} />
-            </div>
-            <div className="flex-1">
-              <div className="font-medium">Your account</div>
-              <div className="text-xs text-ink-500">{me?.email}</div>
-            </div>
-          </div>
-          <form action={savePhone} className="mt-6 space-y-3">
-            <div className="label">Mobile for sign-in codes</div>
-            <input
-              name="phone"
-              type="tel"
-              inputMode="tel"
-              required
-              defaultValue={me?.phone ? `0${me.phone.slice(3)}` : ''}
-              placeholder="0712 345 678"
-              autoComplete="tel"
-              className="input"
-            />
-            <input
-              name="current"
-              type="password"
-              required
-              placeholder="Your password, to confirm"
-              autoComplete="current-password"
-              className="input"
-            />
-            <SubmitButton pendingText="Saving…" className="btn-ghost w-full">
-              Save mobile
-            </SubmitButton>
-          </form>
-          <form action={changePassword} className="mt-6 space-y-3 border-t border-ink-100 pt-6">
-            <div className="label">Change password</div>
-            <input
-              name="current"
-              type="password"
-              required
-              placeholder="Current password"
-              autoComplete="current-password"
-              className="input"
-            />
-            <input
-              name="next"
-              type="password"
-              required
-              minLength={10}
-              placeholder="New password (10+ characters)"
-              autoComplete="new-password"
-              className="input"
-            />
-            <SubmitButton pendingText="Saving…" className="btn-ghost w-full">
-              Change password
-            </SubmitButton>
-          </form>
-          <form action={signOut} className="mt-6 border-t border-ink-100 pt-6">
-            <input type="hidden" name="everywhere" value="on" />
-            <button type="submit" className="text-sm font-medium text-rose-700 hover:text-rose-800">
-              Sign out on every device
-            </button>
-            <p className="mt-1 text-xs text-ink-500">Use this if you signed in on a shared or lost device.</p>
-          </form>
         </section>
       </div>
     </>

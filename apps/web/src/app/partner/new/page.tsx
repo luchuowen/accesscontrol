@@ -1,9 +1,13 @@
 import { ArrowLeft } from 'lucide-react';
 import Link from 'next/link';
+import { redirect } from 'next/navigation';
 import { PageHeader } from '@/components/ui';
+import { requirePartner } from '@/lib/session';
 import { NewClubForm } from './form';
 
-export default function NewClub() {
+export default async function NewClub() {
+  const s = await requirePartner();
+  if (s.kind !== 'partner_admin') redirect('/partner');
   const base = (process.env.PUBLIC_URL ?? '').replace(/\/$/, '');
   return (
     <>
@@ -12,7 +16,7 @@ export default function NewClub() {
       </Link>
       <PageHeader
         title="Add a club"
-        subtitle="Creates the club, its owner login and a pairing code for the Site Bridge. Payments, doors and members are set up from the club’s own console."
+        subtitle="Creates the club, invites its owner by email, and makes a pairing code for the Site Bridge. Payments, doors and members are set up from the club’s own console."
       />
       <NewClubForm consoleUrl={base} />
     </>

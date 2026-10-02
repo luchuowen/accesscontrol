@@ -54,8 +54,8 @@ export default async function Code({
             autoComplete="one-time-code"
             pattern="[0-9 ]{6,7}"
             maxLength={7}
-            placeholder="123456"
-            className="auth-input text-center font-mono text-lg tracking-[0.4em]"
+            placeholder="Enter 6-digit code"
+            className="auth-input text-center font-mono text-lg tracking-[0.4em] placeholder:font-sans placeholder:text-sm placeholder:tracking-normal"
           />
         </div>
         <label className="flex items-center gap-2.5 text-sm text-slate-600">

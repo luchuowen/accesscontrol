@@ -17,16 +17,21 @@ export function ResetForm({ token, email }: { token: string; email: string }) {
           <label htmlFor="password" className="auth-label">
             New password
           </label>
-          <PasswordField name="password" autoComplete="new-password" minLength={10} />
+          <PasswordField name="password" autoComplete="new-password" minLength={10} placeholder="Enter new password" />
           <p className="mt-1.5 text-xs text-slate-500">
             At least 10 characters. A short phrase is easy to remember and hard to guess.
           </p>
         </div>
         <div>
           <label htmlFor="confirm" className="auth-label">
-            Type it again
+            Confirm password
           </label>
-          <PasswordField name="confirm" autoComplete="new-password" minLength={10} />
+          <PasswordField
+            name="confirm"
+            autoComplete="new-password"
+            minLength={10}
+            placeholder="Re-enter new password"
+          />
         </div>
         <SubmitButton pendingText="Saving…" className="auth-btn mt-1">
           Set new password

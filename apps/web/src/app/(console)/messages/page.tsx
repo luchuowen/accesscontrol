@@ -1,11 +1,11 @@
 import { withTenant } from '@lango/db';
-import { clubSms, type NotifySettings, platformSmsConfig, quietHours } from '@lango/server';
+import { can, clubSms, type NotifySettings, platformSmsConfig, quietHours } from '@lango/server';
 import { BellRing, Megaphone, MessageSquare, Moon } from 'lucide-react';
 import Link from 'next/link';
 import { SubmitButton } from '@/components/submit-button';
 import { Badge, PageHeader } from '@/components/ui';
 import { dateTime } from '@/lib/format';
-import { requireSession } from '@/lib/session';
+import { requirePerm } from '@/lib/session';
 import { db } from '@/server/db';
 import { saveNotifications } from './actions';
 import { AnnounceForm } from './announce-form';
@@ -36,7 +36,7 @@ function Toggle({ name, on, children }: { name: string; on: boolean; children: R
 }
 
 export default async function Messages({ searchParams }: { searchParams: Promise<{ m?: string }> }) {
-  const s = await requireSession();
+  const s = await requirePerm('messages.manage');
   const { m } = await searchParams;
   const [row] = await withTenant(
     db(),
@@ -78,7 +78,7 @@ export default async function Messages({ searchParams }: { searchParams: Promise
     'alert-phone': ['red', 'Add the alert phone: the daily summary and automatic top-up are sent to it.'],
   };
   const note = m ? notices[m] : undefined;
-  const owner = s.role === 'owner';
+  const owner = can(s, 'messages.manage');
   const perMember = month?.members ? (month.sent / month.members).toFixed(1) : null;
   return (
     <>
@@ -109,7 +109,7 @@ export default async function Messages({ searchParams }: { searchParams: Promise
           </div>
           {!n.enabled ? (
             <p className="mt-6 text-sm text-ink-500">Switch SMS on below to send news.</p>
-          ) : ['owner', 'manager'].includes(s.role) ? (
+          ) : owner ? (
             <AnnounceForm club={row?.name ?? ''} />
           ) : (
             <p className="mt-6 text-sm text-ink-500">The owner or a manager can send news.</p>
@@ -142,7 +142,7 @@ export default async function Messages({ searchParams }: { searchParams: Promise
                 <li key={r.id} className="flex items-center gap-3 py-2">
                   <span className="w-24 shrink-0 text-ink-500">{dateTime(r.created_at)}</span>
                   <span className="w-24 shrink-0 text-ink-500">{KIND[r.kind] ?? r.kind}</span>
-                  <span className="flex-1 truncate" title={r.body}>
+                  <span className="min-w-0 flex-1 truncate" title={r.body}>
                     {r.body}
                     {r.error && r.status !== 'sent' && <span className="block truncate text-ink-500">{r.error}</span>}
                   </span>

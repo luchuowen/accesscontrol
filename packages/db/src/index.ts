@@ -38,7 +38,7 @@ export async function migrate(ownerUrl: string, appRole = 'lango_app') {
     await sql.unsafe(`grant usage on schema public to ${appRole};
       grant select, insert, update, delete on all tables in schema public to ${appRole};
       grant usage, select on all sequences in schema public to ${appRole};
-      revoke all on staff_users, bridges, schema_migrations, platform_settings from ${appRole};
+      revoke all on staff_users, club_memberships, partner_assignments, bridges, schema_migrations, platform_settings from ${appRole};
       revoke insert, update, delete on tenants, partners, tenant_sms from ${appRole};
       grant execute on all functions in schema public to ${appRole}`);
   } finally {

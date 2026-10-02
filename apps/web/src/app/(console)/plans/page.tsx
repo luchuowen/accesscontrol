@@ -1,11 +1,13 @@
 import { withTenant } from '@lango/db';
+import { can } from '@lango/server';
 import { Plus } from 'lucide-react';
+import { redirect } from 'next/navigation';
 import { Notice } from '@/components/notice';
 import { SubmitButton } from '@/components/submit-button';
 import { Badge, PageHeader } from '@/components/ui';
 import { products } from '@/lib/data';
 import { kes } from '@/lib/format';
-import { requireSession } from '@/lib/session';
+import { canAny, requireSession } from '@/lib/session';
 import { db } from '@/server/db';
 import { savePlan, setPlanActive } from '../actions';
 
@@ -85,6 +87,7 @@ function PlanForm({ plan, zones }: { plan?: Plan; zones: { key: string; name: st
 
 export default async function Plans({ searchParams }: { searchParams: Promise<{ n?: string }> }) {
   const s = await requireSession();
+  if (!canAny(s, 'plans.manage', 'reports.all')) redirect('/?denied=1');
   const { n } = await searchParams;
   const rows = await products(s.tid);
   const zones = await withTenant(
@@ -92,7 +95,7 @@ export default async function Plans({ searchParams }: { searchParams: Promise<{ 
     s.tid,
     (tx) => tx<{ key: string; name: string }[]>`select distinct on (key) key, name from zones order by key`,
   );
-  const edit = ['owner', 'manager'].includes(s.role);
+  const edit = can(s, 'plans.manage');
   return (
     <>
       <Notice code={n} />

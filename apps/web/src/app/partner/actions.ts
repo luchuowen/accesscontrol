@@ -2,10 +2,14 @@
 import { randomBytes } from 'node:crypto';
 import {
   accountEmail,
+  assignClubs,
+  clientIp,
   encrypt,
   hashPassword,
   inviteClubOwner,
   inviteStaff,
+  isPartnerLevel,
+  logAuth,
   msisdn,
   newPairCode,
   type PlatformEmail,
@@ -15,10 +19,16 @@ import {
   resendInvite,
   SourceCodeSms,
   sendEmail,
+  setPartnerLoginActive,
   setSessionClub,
+  staffByEmail,
+  staffById,
   TaifaAuthError,
   TaifaPay,
+  teamError,
 } from '@lango/server';
+import { revalidatePath } from 'next/cache';
+import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { publicUrl, requirePartner, sessionToken } from '@/lib/session';
 import { db } from '@/server/db';
@@ -31,7 +41,8 @@ export async function openClub(form: FormData) {
   if (!c) redirect('/partner');
   const token = await sessionToken();
   if (!token) redirect('/login?m=signed-out');
-  await setSessionClub(db(), token, c.id, 'owner');
+  await setSessionClub(db(), token, c.id, null);
+  await logAuth(db(), { kind: 'club.opened', staffId: s.uid, tenantId: c.id });
   redirect('/');
 }
 
@@ -66,6 +77,7 @@ async function inviterName(uid: string, name: string) {
 /** One form → a ready club: tenant, site, pairing code for the Site Bridge, and an emailed invitation for the owner. */
 export async function createClub(_prev: CreateClubState, form: FormData): Promise<CreateClubState> {
   const s = await requirePartner();
+  if (s.kind !== 'partner_admin') return { error: 'Only a partner admin can add clubs.' };
   const name = String(form.get('name') ?? '')
     .trim()
     .slice(0, 80);
@@ -88,8 +100,10 @@ export async function createClub(_prev: CreateClubState, form: FormData): Promis
   );
   let slug = base;
   for (let i = 2; taken.has(slug); i++) slug = `${base}-${i}`;
-  const [exists] = await db()<{ id: string }[]>`select id from app_staff_login(${ownerEmail})`;
-  if (exists) return { error: 'That email already has a Lango account. Use another email for this club’s owner.' };
+  // Someone who already runs another club keeps one login; a partner or NAVAC login cannot own a club.
+  const existing = await staffByEmail(db(), ownerEmail);
+  if (existing && isPartnerLevel(existing))
+    return { error: 'That email belongs to a partner or NAVAC login. Use the club owner’s own email.' };
   const pairCode = newPairCode();
   let tenantId: string;
   try {
@@ -321,12 +335,31 @@ export async function grantSms(form: FormData) {
   back('grant-ok');
 }
 
+/** People: a NAVAC admin manages every partner-level login; a partner admin their own company's. */
+const peopleManager = async () => {
+  const s = await requirePartner();
+  if (s.kind !== 'partner_admin') redirect('/partner');
+  const [p] = await db()<{ ok: boolean }[]>`select app_is_platform(${s.uid}) as ok`;
+  const me = await staffById(db(), s.uid);
+  return { s, platform: !!p?.ok, partnerId: me?.partner_id ?? null };
+};
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const target = (form: FormData) => {
+  const v = String(form.get('staffId') ?? '');
+  return UUID.test(v) ? v : backPartners('missing');
+};
+
 export async function setPartnerActive(form: FormData) {
-  const s = await platformOnly();
-  const id = String(form.get('staffId') ?? '');
-  const active = form.get('active') === 'true';
+  const { s } = await peopleManager();
+  const id = target(form);
   if (id === s.uid) backPartners('self');
-  await db()`select app_platform_set_partner_active(${s.uid}, ${id}, ${active})`;
+  const active = form.get('active') === 'true';
+  try {
+    await setPartnerLoginActive(db(), s.uid, id, active, clientIp(await headers()));
+  } catch {
+    backPartners('denied');
+  }
   backPartners(active ? 'partner-on' : 'partner-off');
 }
 
@@ -335,50 +368,104 @@ export interface AddPartnerState {
   done?: { name: string; email: string; emailed: boolean };
 }
 
-/** Invite a login for an installer company (sees only its own clubs). */
+const PEOPLE_ROLES = ['partner_admin', 'partner_tech', 'navac_support', 'navac_admin'] as const;
+
+/**
+ * Invite a partner-level person. NAVAC admins: partner admins and technicians for any company, NAVAC support,
+ * NAVAC admins. Partner admins: admins and technicians for their own company.
+ */
 export async function addPartner(_prev: AddPartnerState, form: FormData): Promise<AddPartnerState> {
-  const s = await platformOnly();
+  const { s, platform, partnerId } = await peopleManager();
   const name = String(form.get('name') ?? '')
     .trim()
     .slice(0, 80);
   const email = String(form.get('email') ?? '')
     .trim()
     .toLowerCase();
-  const company = String(form.get('company') ?? '')
-    .trim()
-    .slice(0, 80);
-  if (!name || !company) return { error: 'Enter the person’s name and their company.' };
+  const phone = String(form.get('phone') ?? '').trim();
+  const kind = String(form.get('role') ?? 'partner_admin') as (typeof PEOPLE_ROLES)[number];
+  if (!PEOPLE_ROLES.includes(kind)) return { error: 'Choose a role.' };
+  if (!platform && !['partner_admin', 'partner_tech'].includes(kind)) return { error: 'Choose a role.' };
+  if (!name) return { error: 'Enter the person’s name.' };
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { error: 'Enter a valid email.' };
-  const [taken] = await db()<{ id: string }[]>`select id from app_staff_login(${email})`;
-  if (taken) return { error: 'That email already has a Lango account.' };
-  const [p] = await db()<{ id: string }[]>`select app_platform_partner_id(${s.uid}, ${company}) as id`;
+  if (phone && !msisdn(phone)) return { error: 'Enter their mobile as 07XX XXX XXX, or leave it blank.' };
+  const navac = kind === 'navac_support' || kind === 'navac_admin';
+  let company = 'NAVAC Global';
+  let pid: string | null = null;
+  if (!navac) {
+    if (platform) {
+      company = String(form.get('company') ?? '')
+        .trim()
+        .slice(0, 80);
+      if (!company) return { error: 'Enter their company, e.g. Trisol.' };
+      const [p] = await db()<{ id: string }[]>`select app_platform_partner_id(${s.uid}, ${company}) as id`;
+      pid = p?.id ?? null;
+    } else {
+      pid = partnerId;
+      const [p] = await db()<{ name: string }[]>`select name from partners where id = ${pid}`;
+      company = p?.name ?? company;
+    }
+  }
+  const role = kind === 'navac_admin' ? 'partner_admin' : kind;
+  const label =
+    kind === 'navac_admin'
+      ? 'NAVAC admin'
+      : kind === 'navac_support'
+        ? 'NAVAC support'
+        : kind === 'partner_tech'
+          ? 'Technician'
+          : 'Partner admin';
   try {
     const r = await inviteStaff(db(), {
       inviterId: s.uid,
       email,
       name,
-      phone: String(form.get('phone') ?? '') || undefined,
-      role: 'partner_admin',
+      phone: phone || undefined,
+      role,
       tenantId: null,
-      partnerId: p?.id ?? null,
+      partnerId: pid,
       baseUrl: publicUrl(),
       ctx: {
         inviterName: await inviterName(s.uid, s.name),
         to: company,
-        roleLabel: 'Partner',
-        next: 'Once you accept, you can add clubs and invite their owners.',
+        roleLabel: label,
+        next:
+          kind === 'partner_tech'
+            ? 'Once you accept, you’ll see the clubs assigned to you for installation.'
+            : kind === 'partner_admin'
+              ? 'Once you accept, you can add clubs and invite their owners.'
+              : undefined,
       },
     });
+    revalidatePath('/partner/partners');
     return { done: { name, email, emailed: r.emailed } };
   } catch (e) {
-    console.error('partner invitation failed', (e as Error).message);
-    return { error: 'The invitation could not be created. Try again.' };
+    return { error: teamError(e) };
   }
 }
 
 /** A fresh invitation link (the earlier one stops working). */
 export async function resendPartnerInvite(form: FormData) {
-  const s = await platformOnly();
-  const r = await resendInvite(db(), String(form.get('staffId') ?? ''), s.uid, publicUrl());
+  const { s } = await peopleManager();
+  const id = target(form);
+  const [ok] = await db()<{ ok: boolean }[]>`select app_partner_can_manage(${s.uid}, ${id}) as ok`;
+  if (!ok?.ok) backPartners('denied');
+  const r = await resendInvite(db(), id, s.uid, publicUrl());
   backPartners(r.ok ? 'invite-sent' : 'invite-failed');
+}
+
+/** Which clubs a technician installs and supports. */
+export async function assignTechClubs(form: FormData) {
+  const { s } = await peopleManager();
+  const id = target(form);
+  const clubs = form
+    .getAll('club')
+    .map(String)
+    .filter((v) => UUID.test(v));
+  try {
+    await assignClubs(db(), s.uid, id, clubs, clientIp(await headers()));
+  } catch {
+    backPartners('denied');
+  }
+  backPartners('assigned');
 }

@@ -1,5 +1,5 @@
 import { withTenant } from '@lango/db';
-import { inventorySummary, planImport } from '@lango/server';
+import { can, inventorySummary, planImport } from '@lango/server';
 import { DoorOpen, Download, RefreshCw, Server, ShieldCheck, UserPlus } from 'lucide-react';
 import { headers } from 'next/headers';
 import { CopyField } from '@/components/copy-field';
@@ -8,7 +8,7 @@ import { SubmitButton } from '@/components/submit-button';
 import { Badge, PageHeader, Stat } from '@/components/ui';
 import { accessOverview } from '@/lib/data';
 import { ago, dateTime } from '@/lib/format';
-import { requireSession } from '@/lib/session';
+import { requirePerm } from '@/lib/session';
 import { db } from '@/server/db';
 import { importFromAxtrax, reissuePairCode, requestInventory, saveZone } from '../actions';
 
@@ -31,12 +31,12 @@ export default async function Access({
 }: {
   searchParams: Promise<{ n?: string; imported?: string; withAccess?: string; existing?: string; skipped?: string }>;
 }) {
-  const s = await requireSession();
+  const s = await requirePerm('doors.manage');
   const sp = await searchParams;
   const d = await accessOverview(s.tid);
   const base = (process.env.PUBLIC_URL ?? `https://${(await headers()).get('host')}`).replace(/\/$/, '');
   const install = `irm ${base}/bridge/install.ps1 | iex`;
-  const manage = ['owner', 'manager'].includes(s.role);
+  const manage = can(s, 'doors.manage');
   const sites = await withTenant(db(), s.tid, async (tx) => {
     const [t] = await tx<{ timezone: string }[]>`select timezone from tenants where id = ${s.tid}`;
     return Promise.all(
@@ -142,7 +142,7 @@ export default async function Access({
                     </SubmitButton>
                   </form>
                 )}
-                {s.role === 'owner' && b?.last_seen_at && (
+                {manage && b?.last_seen_at && (
                   <form action={reissuePairCode}>
                     <SubmitButton pendingText="Issuing…" className="btn-ghost px-3 py-2 text-xs">
                       <Download size={14} /> New PC? New pairing code

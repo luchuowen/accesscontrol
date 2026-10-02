@@ -12,12 +12,15 @@ import { msisdn, platformSms, type SourceCodeSms } from './sms.js';
 export const sha = (s: string) => createHash('sha256').update(s).digest('hex');
 export const newToken = () => randomBytes(32).toString('base64url');
 
+/** 'club' = a club login (roles per club in club_memberships); the rest are partner-level logins. */
+export type StaffKind = 'club' | 'partner_admin' | 'partner_tech' | 'navac_support';
+
 export interface StaffRow {
   id: string;
   name: string;
   email: string;
   phone: string | null;
-  role: string;
+  role: StaffKind;
   tenant_id: string | null;
   partner_id: string | null;
   active: boolean;
@@ -29,7 +32,8 @@ export const staffById = async (sql: Sql, id: string) =>
 export const staffByEmail = async (sql: Sql, email: string) =>
   (await sql<StaffRow[]>`select * from app_staff_by_email(${email})`)[0] ?? null;
 
-const isPlatformOrPartner = (s: Pick<StaffRow, 'role'>) => s.role === 'partner_admin';
+/** NAVAC and partner logins work across clubs from the partner console. */
+export const isPartnerLevel = (s: Pick<StaffRow, 'role'>) => s.role !== 'club';
 
 // ---------- passwords ----------
 
@@ -96,25 +100,32 @@ export async function passwordProblem(pw: string, email?: string, f?: typeof fet
 export interface LiveSession {
   sid: string;
   uid: string;
+  /** The club being worked in; '' when none is chosen yet. */
   tid: string;
+  /** Role in that club (for partner logins, the role they act under), or the login kind when no club is open. */
   role: string;
+  /** What this person may do in the club right now (role defaults plus per-person changes). */
+  perms: string[];
   name: string;
   email: string;
+  kind: StaffKind;
+  /** A partner-level login (NAVAC admin, NAVAC support, partner admin, technician). */
   partner?: boolean;
 }
 
 /** NAVAC and partners: 30 min idle, 8 h at most. Club staff: 2 h idle, 12 h at most (a full shift). */
-export const sessionLimits = (role: string) =>
-  role === 'partner_admin' ? { idleMinutes: 30, maxHours: 8 } : { idleMinutes: 120, maxHours: 12 };
+export const sessionLimits = (kind: string) =>
+  kind !== 'club' ? { idleMinutes: 30, maxHours: 8 } : { idleMinutes: 120, maxHours: 12 };
 
 export async function createSession(
   sql: Sql,
-  s: { staff: StaffRow; ip?: string; userAgent?: string },
+  s: { staff: StaffRow; tenantId?: string | null; ip?: string; userAgent?: string },
 ): Promise<{ token: string; maxHours: number }> {
   const token = newToken();
   const lim = sessionLimits(s.staff.role);
+  const tenant = isPartnerLevel(s.staff) ? null : s.tenantId === undefined ? s.staff.tenant_id : s.tenantId;
   await sql`insert into auth_sessions (token_hash, staff_id, tenant_id, idle_minutes, expires_at, ip, user_agent)
-            values (${sha(token)}, ${s.staff.id}, ${isPlatformOrPartner(s.staff) ? null : s.staff.tenant_id},
+            values (${sha(token)}, ${s.staff.id}, ${tenant},
                     ${lim.idleMinutes}, now() + make_interval(hours => ${lim.maxHours}),
                     ${s.ip ?? null}, ${(s.userAgent ?? '').slice(0, 300) || null})`;
   return { token, maxHours: lim.maxHours };
@@ -143,16 +154,35 @@ export async function readSession(sql: Sql, token: string | undefined): Promise<
   }
   const staff = await staffById(sql, s.staff_id);
   if (!staff?.active) return null;
+  const partner = isPartnerLevel(staff);
+  let tid = s.tenant_id ?? '';
+  let role: string = staff.role;
+  let perms: string[] = [];
+  if (tid) {
+    const [p] = await sql<{ role: string; perms: string[] }[]>`select * from app_staff_perms(${staff.id}, ${tid})`;
+    if (p) {
+      role = p.role;
+      perms = p.perms;
+    } else if (partner) {
+      // No longer allowed in that club (e.g. a technician's assignment changed): back to the clubs list.
+      await sql`update auth_sessions set tenant_id = null, acting_role = null where id = ${s.id}`;
+      tid = '';
+    } else {
+      await sql`update auth_sessions set revoked_at = now(), revoked_reason = 'removed' where id = ${s.id}`;
+      return null;
+    }
+  }
   if (Date.now() - s.last_seen_at.getTime() > 60_000)
     await sql`update auth_sessions set last_seen_at = now() where id = ${s.id}`;
-  const partner = staff.role === 'partner_admin';
   return {
     sid: s.id,
     uid: staff.id,
-    tid: s.tenant_id ?? (partner ? '' : (staff.tenant_id ?? '')),
-    role: s.acting_role ?? staff.role,
+    tid,
+    role,
+    perms,
     name: staff.name,
     email: staff.email,
+    kind: staff.role,
     ...(partner ? { partner: true } : {}),
   };
 }
@@ -186,7 +216,7 @@ export async function setSessionClub(sql: Sql, token: string, tenantId: string |
 
 // ---------- remembered devices ----------
 
-export const deviceDays = (role: string) => (role === 'partner_admin' ? 7 : 30);
+export const deviceDays = (kind: string) => (kind !== 'club' ? 7 : 30);
 
 export async function rememberDevice(sql: Sql, staff: StaffRow, userAgent?: string) {
   const token = newToken();
@@ -205,10 +235,11 @@ export async function isTrustedDevice(sql: Sql, token: string | undefined, staff
 
 // ---------- single-use links ----------
 
-type Kind = 'invite' | 'reset';
-const TTL: Record<Kind, number> = { invite: 7 * 24 * 3600_000, reset: 30 * 60_000 };
+export type LinkKind = 'invite' | 'reset' | 'transfer';
+type Kind = LinkKind;
+const TTL: Record<Kind, number> = { invite: 7 * 24 * 3600_000, reset: 30 * 60_000, transfer: 7 * 24 * 3600_000 };
 
-async function issueLink(sql: Sql, kind: Kind, staffId: string, createdBy: string | null, data?: unknown) {
+export async function issueLink(sql: Sql, kind: Kind, staffId: string, createdBy: string | null, data?: unknown) {
   const token = newToken();
   // Only the newest link of a kind works: earlier ones stop working when a new one is sent.
   await sql`update auth_tokens set used_at = now() where staff_id = ${staffId} and kind = ${kind} and used_at is null`;
@@ -238,7 +269,7 @@ export async function checkLink(sql: Sql, kind: Kind, token: string): Promise<Li
 }
 
 /** Mark a link used; true only for the one request that wins (a double click cannot use it twice). */
-async function useLink(sql: Sql, tokenId: string) {
+export async function useLink(sql: Sql, tokenId: string) {
   const r = await sql`update auth_tokens set used_at = now() where id = ${tokenId} and used_at is null
                       and expires_at > now() returning id`;
   return r.length === 1;
@@ -253,14 +284,22 @@ export interface InviteContext {
   roleLabel: string;
   /** shown under the button, e.g. "Next you'll review your quote and pay the setup fee." */
   next?: string;
+  /** the club the invitation is for (delivery log) */
+  tenantId?: string;
 }
 
 const ROLE_LABEL: Record<string, string> = {
   owner: 'Owner',
+  admin: 'Admin',
   manager: 'Manager',
   reception: 'Front desk',
   accountant: 'Accountant',
+  viewer: 'Viewer',
+  technician: 'Technician',
   partner_admin: 'Partner admin',
+  partner_tech: 'Technician',
+  navac_support: 'NAVAC support',
+  club: 'Club team',
 };
 export const roleLabel = (r: string) => ROLE_LABEL[r] ?? r;
 
@@ -296,7 +335,7 @@ async function sendInvite(
     ...mail,
     kind: 'invite',
     key: `invite:${sha(token).slice(0, 32)}`,
-    tenantId: staff.tenant_id ?? undefined,
+    tenantId: ctx.tenantId ?? undefined,
   });
   // An SMS nudge so an email in spam does not stall a club. Sent from NAVAC's sender, free to the club.
   let texted = false;
@@ -320,7 +359,11 @@ async function sendInvite(
   return { emailed, texted };
 }
 
-/** Invite a colleague, a partner login, or (inviter = partner) a club owner. Creates the account switched off. */
+/**
+ * Invite a colleague, a partner login, or (inviter = partner) a club owner. A new person gets an account that stays
+ * switched off until they accept the emailed link. Someone who already has a club login is added to the club at
+ * once and told by email (one login, several clubs).
+ */
 export async function inviteStaff(
   sql: Sql,
   a: {
@@ -335,31 +378,85 @@ export async function inviteStaff(
     ctx: InviteContext;
   },
   sms?: SourceCodeSms | null,
-) {
+): Promise<{ staffId: string; emailed: boolean; texted: boolean; added: boolean }> {
+  const before = await staffByEmail(sql, a.email);
   const [r] = await sql<{ id: string }[]>`
     select app_invite_staff(${a.inviterId}, ${a.email}, ${a.name}, ${msisdn(a.phone) ?? ''}, ${a.role},
                             ${a.tenantId}, ${a.partnerId ?? null}) as id`;
   const staff = await staffById(sql, r?.id as string);
   if (!staff) throw new Error('invite failed');
-  const token = await issueLink(sql, 'invite', staff.id, a.inviterId, { ctx: a.ctx });
-  return { staffId: staff.id, ...(await sendInvite(sql, staff, token, a.baseUrl, a.ctx, sms)) };
+  const ctx = { ...a.ctx, tenantId: a.tenantId ?? undefined };
+  await logAuth(sql, {
+    kind: 'invite.sent',
+    staffId: staff.id,
+    tenantId: a.tenantId,
+    actor: a.inviterId,
+    email: staff.email,
+    data: { role: a.role },
+  });
+  if (before?.accepted_at) {
+    const emailed = await sendAddedToClub(sql, staff, a.baseUrl, ctx);
+    return { staffId: staff.id, emailed, texted: false, added: true };
+  }
+  const token = await issueLink(sql, 'invite', staff.id, a.inviterId, { ctx });
+  return { staffId: staff.id, added: false, ...(await sendInvite(sql, staff, token, a.baseUrl, ctx, sms)) };
 }
 
-/** The owner account of a club a partner has just created waits for its emailed invitation. */
+/** An existing login was given access to another club: no new password, just a note and a sign-in button. */
+export async function sendAddedToClub(sql: Sql, staff: StaffRow, baseUrl: string, ctx: InviteContext) {
+  const mail = accountEmail({
+    heading: `You now have access to ${ctx.to}`,
+    paragraphs: [
+      `Hi ${staff.name.split(' ')[0] || staff.name},`,
+      `${ctx.inviterName} has added you to ${ctx.to} on Lango as ${/^[aeiou]/i.test(ctx.roleLabel) ? 'an' : 'a'} ${ctx.roleLabel}.`,
+      'Sign in with your usual email and password, then pick the club to work in.',
+    ],
+    button: { label: 'Sign in to Lango', url: `${baseUrl}/login` },
+    after: [ctx.next ?? ''],
+  });
+  return sendEmail(sql, {
+    to: staff.email,
+    subject: `You now have access to ${ctx.to} on Lango`,
+    ...mail,
+    kind: 'club_added',
+    key: `club-added:${staff.id}:${ctx.tenantId ?? ''}:${Date.now()}`,
+    tenantId: ctx.tenantId,
+  });
+}
+
+/**
+ * The owner of a club a partner has just created: a new login gets the invitation; someone who already runs another
+ * club on Lango is told they now own this one too.
+ */
 export async function inviteClubOwner(
   sql: Sql,
   a: { partnerStaffId: string; tenantId: string; baseUrl: string; ctx: InviteContext; phone?: string },
   sms?: SourceCodeSms | null,
-) {
+): Promise<{ staffId: string; emailed: boolean; texted: boolean; added: boolean }> {
+  const ctx = { ...a.ctx, tenantId: a.tenantId };
   const [r] = await sql<
     { id: string | null }[]
   >`select app_club_owner_pending(${a.partnerStaffId}, ${a.tenantId}) as id`;
-  if (!r?.id) throw new Error('owner already active');
+  if (!r?.id) {
+    const [o] = await sql<{ id: string }[]>`select id from app_club_owner(${a.tenantId})`;
+    const owner = o ? await staffById(sql, o.id) : null;
+    if (!owner) throw new Error('owner missing');
+    const emailed = await sendAddedToClub(sql, owner, a.baseUrl, ctx);
+    return { staffId: owner.id, emailed, texted: false, added: true };
+  }
   if (a.phone) await sql`select app_staff_set_phone(${r.id}, ${msisdn(a.phone) ?? ''})`;
   const staff = await staffById(sql, r.id);
   if (!staff) throw new Error('owner missing');
-  const token = await issueLink(sql, 'invite', staff.id, a.partnerStaffId, { ctx: a.ctx });
-  return { staffId: staff.id, ...(await sendInvite(sql, staff, token, a.baseUrl, a.ctx, sms)) };
+  const token = await issueLink(sql, 'invite', staff.id, a.partnerStaffId, { ctx });
+  await logAuth(sql, {
+    kind: 'invite.sent',
+    staffId: staff.id,
+    tenantId: a.tenantId,
+    actor: a.partnerStaffId,
+    email: staff.email,
+    data: { role: 'owner' },
+  });
+  return { staffId: staff.id, added: false, ...(await sendInvite(sql, staff, token, a.baseUrl, ctx, sms)) };
 }
 
 /** A fresh link for a pending invitation (the old one stops working). */
@@ -372,6 +469,11 @@ export async function resendInvite(
 ) {
   const staff = await staffById(sql, staffId);
   if (!staff || staff.accepted_at) return { ok: false as const };
+  // A cancelled invitation (removed from every club before accepting) is not sent again.
+  if (staff.role === 'club') {
+    const [c] = await sql<{ n: number }[]>`select app_staff_club_count(${staffId}) as n`;
+    if (!c?.n) return { ok: false as const };
+  }
   const [last] = await sql<{ data: { ctx?: InviteContext } | null }[]>`
     select data from auth_tokens where staff_id = ${staffId} and kind = 'invite' order by created_at desc limit 1`;
   const ctx = last?.data?.ctx ?? { inviterName: 'Your administrator', to: 'Lango', roleLabel: roleLabel(staff.role) };
@@ -404,7 +506,9 @@ export async function acceptInvite(
   if (inviter) {
     const mail = accountEmail({
       heading: `${staff.name} accepted your invitation`,
-      paragraphs: [`${staff.name} (${staff.email}) has joined ${ctx?.to ?? 'Lango'} as ${roleLabel(staff.role)}.`],
+      paragraphs: [
+        `${staff.name} (${staff.email}) has joined ${ctx?.to ?? 'Lango'} as ${ctx?.roleLabel ?? 'a team member'}.`,
+      ],
     });
     await sendEmail(sql, {
       to: inviter.email,
@@ -516,7 +620,14 @@ export async function startSignInCode(
   const [r] = await sql<{ hour: number; minute: number }[]>`
     select count(*)::int as hour, (count(*) filter (where created_at > now() - interval '60 seconds'))::int as minute
     from auth_tokens where staff_id = ${staff.id} and kind = 'signin_code' and created_at > now() - interval '1 hour'`;
-  if ((r?.hour ?? 0) >= 5 || (r?.minute ?? 0) > 0) return 'wait';
+  if ((r?.minute ?? 0) > 0) {
+    // A code went out under a minute ago (e.g. the person pressed Sign in twice): keep using that one.
+    const [live] = await sql<{ id: string; data: { channel: 'sms' | 'email'; masked: string } | null }[]>`
+      select id, data from auth_tokens where staff_id = ${staff.id} and kind = 'signin_code' and used_at is null
+        and expires_at > now() and data is not null order by created_at desc limit 1`;
+    return live?.data ? { id: live.id, channel: live.data.channel, masked: live.data.masked } : 'wait';
+  }
+  if ((r?.hour ?? 0) >= 5) return 'wait';
   const code = String(randomInt(0, 1_000_000)).padStart(6, '0');
   const id = (
     await sql<{ id: string }[]>`
@@ -524,6 +635,10 @@ export async function startSignInCode(
     values ('signin_code', ${sha(`pending:${newToken()}`)}, ${staff.id}, now() + interval '10 minutes') returning id`
   )[0]?.id as string;
   await sql`update auth_tokens set token_hash = ${sha(`${id}:${code}`)} where id = ${id}`;
+  const sentVia = async (c: CodeChallenge) => {
+    await sql`update auth_tokens set data = ${sql.json({ channel: c.channel, masked: c.masked } as never)} where id = ${id}`;
+    return c;
+  };
   const phone = msisdn(staff.phone);
   if (prefer === 'sms' && phone) {
     const client = sms === undefined ? await platformSms(sql) : sms;
@@ -533,7 +648,7 @@ export async function startSignInCode(
           phone,
           `Your Lango sign-in code is ${code}. It expires in 10 minutes. Never share it.`,
         );
-        if (res.ok) return { id, channel: 'sms', masked: maskPhone(phone) };
+        if (res.ok) return sentVia({ id, channel: 'sms', masked: maskPhone(phone) });
       } catch {
         /* fall through to email */
       }
@@ -553,8 +668,9 @@ export async function startSignInCode(
     kind: 'signin_code',
     key: `code:${id}`,
   });
-  if (sent) return { id, channel: 'email', masked: maskEmail(staff.email) };
-  await sql`update auth_tokens set used_at = now() where id = ${id}`;
+  if (sent) return sentVia({ id, channel: 'email', masked: maskEmail(staff.email) });
+  // Nothing could be sent: forget the attempt so it does not count against the person.
+  await sql`delete from auth_tokens where id = ${id}`;
   return null;
 }
 
@@ -572,4 +688,58 @@ export async function verifySignInCode(sql: Sql, challengeId: string, staffId: s
   if (a.length !== b.length || !timingSafeEqual(a, b)) return false;
   const used = await sql`update auth_tokens set used_at = now() where id = ${t.id} and used_at is null returning id`;
   return used.length === 1;
+}
+
+// ---------- audit ----------
+
+/** One line in the sign-in audit: who, what, when, from where. Never throws. */
+export async function logAuth(
+  sql: Sql,
+  e: {
+    kind: string;
+    staffId?: string | null;
+    tenantId?: string | null;
+    actor?: string | null;
+    email?: string | null;
+    ip?: string | null;
+    userAgent?: string | null;
+    data?: Record<string, unknown>;
+  },
+) {
+  try {
+    await sql`insert into auth_events (kind, staff_id, tenant_id, actor, email, ip, user_agent, data)
+              values (${e.kind}, ${e.staffId ?? null}, ${e.tenantId || null}, ${e.actor ?? null},
+                      ${e.email?.toLowerCase().slice(0, 200) ?? null}, ${e.ip ?? null},
+                      ${(e.userAgent ?? '').slice(0, 300) || null}, ${e.data ? sql.json(e.data as never) : null})`;
+  } catch (err) {
+    console.error('auth audit failed', (err as Error).message);
+  }
+}
+
+/**
+ * After a failed sign-in: on the 5th failure for an existing account within 15 minutes, its holder is emailed once
+ * (someone may be guessing their password). Never a permanent lock-out (NIST 800-63B).
+ */
+export async function noteFailedSignIn(sql: Sql, email: string, ip?: string, userAgent?: string) {
+  const staff = await staffByEmail(sql, email);
+  await logAuth(sql, { kind: 'signin.fail', staffId: staff?.id, email, ip, userAgent });
+  if (!staff?.accepted_at || !staff.active) return;
+  const [n] = await sql<{ n: number }[]>`select count(*)::int as n from auth_events
+    where email = ${staff.email} and kind = 'signin.fail' and at > now() - interval '15 minutes'`;
+  if (n?.n !== 5) return;
+  const mail = accountEmail({
+    heading: 'Several failed sign-ins on your account',
+    paragraphs: [
+      `Hi ${staff.name.split(' ')[0] || staff.name},`,
+      'Someone has tried to sign in to your Lango account with the wrong password 5 times in the last 15 minutes.',
+      'If it was you, you can reset your password from the sign-in page. If it was not, your account is still safe: every sign-in also needs a code sent to your phone. Consider changing your password.',
+    ],
+  });
+  await sendEmail(sql, {
+    to: staff.email,
+    subject: 'Failed sign-ins on your Lango account',
+    ...mail,
+    kind: 'signin_alert',
+    key: `signin-alert:${staff.id}:${Math.floor(Date.now() / 900_000)}`,
+  });
 }

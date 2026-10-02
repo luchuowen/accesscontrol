@@ -4,20 +4,20 @@ import { useEffect, useState } from 'react';
 const SLIDES = [
   {
     eyebrow: 'MEMBERSHIP + ACCESS',
-    title: 'Paid members walk straight in.',
-    body: 'An M-Pesa payment opens the right doors within seconds. Nobody waits at the gate with a receipt.',
+    title: 'Paid members get access immediately.',
+    body: 'M-Pesa payments activate access within seconds, so members can enter without waiting at the gate for payment confirmation.',
     icon: 'door',
   },
   {
     eyebrow: 'PAYMENTS',
-    title: 'Payments reconcile themselves.',
-    body: 'Every payment runs through TaifaPay, lands on the right member and sends a receipt by SMS and email.',
+    title: 'Payments are recorded automatically.',
+    body: 'The payment gateway links each payment to the correct member and sends a receipt by SMS and email.',
     icon: 'receipt',
   },
   {
-    eyebrow: 'ALWAYS ON',
-    title: 'The doors keep working offline.',
-    body: "If the internet drops, the door PC keeps every member's access. Changes made by hand in AxTraxNG are put back.",
+    eyebrow: 'RELIABLE ACCESS',
+    title: 'Access continues even without internet.',
+    body: 'If the internet goes down, members can still enter. Any changes made at the door are saved and updated when the connection returns.',
     icon: 'shield',
   },
 ] as const;

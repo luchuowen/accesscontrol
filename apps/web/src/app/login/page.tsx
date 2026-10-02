@@ -17,12 +17,16 @@ const NOTES: Record<string, [tone: 'ok' | 'info', text: string]> = {
   'signed-out': ['info', 'Your session ended. Sign in again to continue.'],
   expired: ['info', 'That sign-in took too long. Start again.'],
   reset: ['ok', 'Your password has been changed. Sign in with the new one.'],
+  idle: ['info', 'You were signed out after a while without activity, to keep the club’s data safe.'],
+  removed: ['info', 'Your access to that club has ended. If this is a mistake, speak to the club’s owner.'],
+  password: ['info', 'Your password was changed, so every device was signed out. Sign in with the new password.'],
+  everywhere: ['info', 'You were signed out on every device.'],
 };
 
 export default async function Login({ searchParams }: { searchParams: Promise<{ e?: string; m?: string }> }) {
   const { e, m } = await searchParams;
   const s = await getSession();
-  if (s) redirect(s.partner && !s.tid ? '/partner' : '/');
+  if (s) redirect(s.partner && !s.tid ? '/partner' : s.tid ? '/' : '/choose');
   const note = m ? NOTES[m] : undefined;
   return (
     <AuthShell>
@@ -32,7 +36,7 @@ export default async function Login({ searchParams }: { searchParams: Promise<{ 
       <form action={login} className="mt-8 grid gap-[18px]">
         <div>
           <label htmlFor="email" className="auth-label">
-            Work email
+            Your email
           </label>
           <input
             id="email"
@@ -41,7 +45,7 @@ export default async function Login({ searchParams }: { searchParams: Promise<{ 
             required
             autoComplete="username"
             inputMode="email"
-            placeholder="you@yourclub.co.ke"
+            placeholder="Enter email address"
             className="auth-input"
           />
         </div>
@@ -52,13 +56,13 @@ export default async function Login({ searchParams }: { searchParams: Promise<{ 
               Forgot password?
             </Link>
           </div>
-          <PasswordField name="password" autoComplete="current-password" />
+          <PasswordField name="password" autoComplete="current-password" placeholder="Enter password" />
         </div>
         <SubmitButton pendingText="Signing in…" className="auth-btn mt-1">
           Sign in
         </SubmitButton>
         <p className="text-center text-[12.5px] text-slate-500">
-          New to Lango? Your club or partner sends you an invitation.
+          New to Lango? Your membership club will invite you to join.
         </p>
       </form>
     </AuthShell>

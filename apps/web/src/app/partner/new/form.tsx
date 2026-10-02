@@ -69,26 +69,32 @@ export function NewClubForm({ consoleUrl }: { consoleUrl: string }) {
       )}
       <label className="block">
         <span className="label">Club name</span>
-        <input name="name" required placeholder="e.g. Muthaiga Golf Club" className="input mt-1.5" />
+        <input name="name" required placeholder="Enter club name, e.g. Muthaiga Golf Club" className="input mt-1.5" />
       </label>
       <label className="block">
         <span className="label">Club code (optional)</span>
-        <input name="slug" placeholder="made from the name, e.g. muthaiga-golf-club" className="input mt-1.5" />
+        <input name="slug" placeholder="Enter club code, e.g. muthaiga-golf-club" className="input mt-1.5" />
         <span className="mt-1 block text-xs text-ink-500">Members type this on the member portal.</span>
       </label>
       <div className="grid gap-4 sm:grid-cols-2">
         <label className="block">
           <span className="label">Owner or manager</span>
-          <input name="ownerName" required placeholder="Full name" className="input mt-1.5" />
+          <input name="ownerName" required placeholder="Enter full name" className="input mt-1.5" />
         </label>
         <label className="block">
           <span className="label">Their email</span>
-          <input name="ownerEmail" type="email" required placeholder="name@club.co.ke" className="input mt-1.5" />
+          <input name="ownerEmail" type="email" required placeholder="Enter email address" className="input mt-1.5" />
         </label>
       </div>
       <label className="block">
         <span className="label">Their mobile (optional)</span>
-        <input name="ownerPhone" type="tel" inputMode="tel" placeholder="0712 345 678" className="input mt-1.5" />
+        <input
+          name="ownerPhone"
+          type="tel"
+          inputMode="tel"
+          placeholder="Enter mobile number"
+          className="input mt-1.5"
+        />
         <span className="mt-1 block text-xs text-ink-500">
           We text them a heads-up so the invitation email isn’t missed. Their sign-in codes go here.
         </span>

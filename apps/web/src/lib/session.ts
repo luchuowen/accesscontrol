@@ -1,6 +1,6 @@
 import 'server-only';
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import { type LiveSession, readSession } from '@lango/server';
+import { type LiveSession, type Perm, readSession, sessionEndReason } from '@lango/server';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { db } from '@/server/db';
@@ -82,17 +82,51 @@ export async function clearPending() {
   (await cookies()).delete({ name: PENDING_COOKIE, path: '/' });
 }
 
+/** Where to send someone whose session is gone, saying why (signed out elsewhere, idle, removed, expired). */
+async function signedOut(): Promise<never> {
+  const reason = await sessionEndReason(db(), await sessionToken());
+  const m =
+    reason === 'idle'
+      ? 'idle'
+      : reason === 'removed'
+        ? 'removed'
+        : reason === 'password-changed' || reason === 'password-reset'
+          ? 'password'
+          : reason === 'signed-out-everywhere'
+            ? 'everywhere'
+            : 'signed-out';
+  redirect(`/login?m=${m}`);
+}
+
+/** A signed-in person working in a club. Partner logins without an open club go to their clubs list. */
 export async function requireSession(): Promise<Session> {
   const s = await getSession();
-  if (!s) redirect('/login?m=signed-out');
-  if (!s.tid) redirect('/partner'); // a partner admin who has not opened a club yet
+  if (!s) return signedOut();
+  if (!s.tid) redirect(s.partner ? '/partner' : '/choose');
   return s;
 }
 
-/** Partner/platform admins only (the NAVAC / installer view across clubs). */
+/** The page or action needs this permission; without it the person is sent to the overview with a note. */
+export async function requirePerm(perm: Perm): Promise<Session> {
+  const s = await requireSession();
+  if (!s.perms.includes(perm)) redirect('/?denied=1');
+  return s;
+}
+
+/** True when the session holds any of these permissions. */
+export const canAny = (s: Session, ...perms: Perm[]) => perms.some((p) => s.perms.includes(p));
+
+/** Partner-level logins only (NAVAC admin and support, partner admins, technicians). */
 export async function requirePartner(): Promise<Session> {
   const s = await getSession();
-  if (!s) redirect('/login?m=signed-out');
+  if (!s) return signedOut();
   if (!s.partner) redirect('/');
+  return s;
+}
+
+/** Anyone signed in, with or without a club open (their own account pages). */
+export async function requireSignedIn(): Promise<Session> {
+  const s = await getSession();
+  if (!s) return signedOut();
   return s;
 }

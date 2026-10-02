@@ -1,14 +1,27 @@
 'use client';
-import { Building2, LogOut, Settings2, UsersRound } from 'lucide-react';
+import { Building2, CircleUserRound, LogOut, Settings2, UsersRound } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { LangoMark } from '@/components/logo';
 
 /** NAVAC console sidebar (deep navy, emerald accent: the NAVAC BMS look). */
-export function PartnerNav({ name, platform }: { name: string; platform: boolean }) {
+export function PartnerNav({
+  name,
+  platform,
+  people,
+  subtitle,
+}: {
+  name: string;
+  platform: boolean;
+  people: boolean;
+  subtitle: string;
+}) {
   const path = usePathname();
   const items = [
     { href: '/partner', label: 'Clubs', icon: Building2, on: path === '/partner' || path.startsWith('/partner/new') },
+    ...(people
+      ? [{ href: '/partner/partners', label: 'People', icon: UsersRound, on: path.startsWith('/partner/partners') }]
+      : []),
     ...(platform
       ? [
           {
@@ -17,7 +30,6 @@ export function PartnerNav({ name, platform }: { name: string; platform: boolean
             icon: Settings2,
             on: path.startsWith('/partner/settings'),
           },
-          { href: '/partner/partners', label: 'Partners', icon: UsersRound, on: path.startsWith('/partner/partners') },
         ]
       : []),
   ];
@@ -30,13 +42,16 @@ export function PartnerNav({ name, platform }: { name: string; platform: boolean
             {label}
           </Link>
         ))}
+        <Link href="/partner/account" className="ml-auto shrink-0" aria-label="Your account">
+          <CircleUserRound size={18} />
+        </Link>
       </header>
       <aside className="fixed inset-y-0 left-0 hidden w-60 flex-col bg-[#0B1629] px-3.5 py-5 text-[#C9D1DE] lg:flex print:hidden">
         <div className="flex items-center gap-2.5 px-2 pb-6">
           <LangoMark size={32} />
           <div>
             <div className="text-sm font-semibold text-white">Lango</div>
-            <div className="text-[11px] text-[#7B8799]">{platform ? 'NAVAC SaaS console' : 'Partner console'}</div>
+            <div className="text-[11px] text-[#7B8799]">{subtitle}</div>
           </div>
         </div>
         <div className="px-2.5 pb-1.5 text-[10px] font-medium uppercase tracking-[0.08em] text-[#5D6A7E]">Platform</div>
@@ -53,8 +68,16 @@ export function PartnerNav({ name, platform }: { name: string; platform: boolean
           ))}
         </nav>
         <div className="mt-auto rounded-xl bg-white/[0.05] p-3">
-          <div className="truncate text-[13px] text-white">{name}</div>
-          <form action="/logout" method="post" className="mt-2">
+          <Link href="/partner/account" className="block truncate text-[13px] text-white hover:underline">
+            {name}
+          </Link>
+          <Link
+            href="/partner/account"
+            className="mt-2 flex items-center gap-1.5 text-xs text-[#7B8799] hover:text-white"
+          >
+            <CircleUserRound size={13} /> Your account
+          </Link>
+          <form action="/logout" method="post" className="mt-1.5">
             <button type="submit" className="flex items-center gap-1.5 text-xs text-[#7B8799] hover:text-white">
               <LogOut size={13} /> Sign out
             </button>

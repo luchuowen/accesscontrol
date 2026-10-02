@@ -4,6 +4,7 @@ import {
   type AnnouncementPreview,
   AUDIENCES,
   type Audience,
+  can,
   msisdn,
   type NotifySettings,
   previewAnnouncement,
@@ -21,7 +22,7 @@ const hour = (v: FormDataEntryValue | null, d: number) => {
 
 export async function saveNotifications(form: FormData) {
   const s = await requireSession();
-  if (s.role !== 'owner') redirect('/messages?m=forbidden');
+  if (!can(s, 'messages.manage')) redirect('/messages?m=forbidden');
   const on = (k: string) => form.get(k) === 'on';
   const notifications: NotifySettings = {
     enabled: on('enabled'),
@@ -64,8 +65,7 @@ const audienceOf = (v: FormDataEntryValue | null): Audience =>
 /** Step 1 shows who receives it and what it costs; step 2 (confirm) queues it. */
 export async function announce(_prev: AnnounceState, form: FormData): Promise<AnnounceState> {
   const s = await requireSession();
-  if (!['owner', 'manager'].includes(s.role))
-    return { step: 'edit', error: 'Only the owner or a manager can send news.' };
+  if (!can(s, 'messages.manage')) return { step: 'edit', error: 'Only the owner or a manager can send news.' };
   const text = String(form.get('text') ?? '')
     .replace(/\s+/g, ' ')
     .trim()

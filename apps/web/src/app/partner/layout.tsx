@@ -9,7 +9,20 @@ export default async function PartnerLayout({ children }: { children: React.Reac
   const [plat] = await db()<{ ok: boolean }[]>`select app_is_platform(${s.uid}) as ok`;
   return (
     <div className="min-h-screen bg-[#F8FAFC]">
-      <PartnerNav name={s.name} platform={!!plat?.ok} />
+      <PartnerNav
+        name={s.name}
+        platform={!!plat?.ok}
+        people={s.kind === 'partner_admin'}
+        subtitle={
+          plat?.ok
+            ? 'NAVAC SaaS console'
+            : s.kind === 'navac_support'
+              ? 'NAVAC support'
+              : s.kind === 'partner_tech'
+                ? 'Technician'
+                : 'Partner console'
+        }
+      />
       <main className="px-5 py-8 lg:ml-60 lg:px-9">
         <div className="mx-auto max-w-[1180px]">{children}</div>
       </main>

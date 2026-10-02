@@ -13,6 +13,7 @@ import {
   checkLink,
   createSession,
   inviteStaff,
+  noteFailedSignIn,
   readSession,
   requestPasswordReset,
   resetPassword,
@@ -39,6 +40,16 @@ import { assignPayment, recordPayment } from './payments.js';
 import { dispatchSms, msisdn, queueReminders, SourceCodeSms, smsUnits } from './sms.js';
 import { reconcileTopups, smsDescription, startTopup } from './sms-topup.js';
 import { handleTaifaWebhook, reconcileTaifaPay, TaifaAuthError, TaifaPay } from './taifapay.js';
+import {
+  acceptOwnership,
+  assignClubs,
+  changeRole,
+  clubTeam,
+  myClubs,
+  offerOwnership,
+  removeMember,
+  setPermissions,
+} from './team.js';
 
 /**
  * Walking skeleton, end to end: payment → entitlement → AccessState → bridge long-poll → AxTraxNG (fake)
@@ -536,7 +547,8 @@ describe('walking skeleton: pay → door', () => {
       'GM@Muthaiga.test', 'General Manager', 'hash', 'ABCDE-23456', 'secret') as id`;
     const [t] = await owner`select slug, (select count(*)::int from sites where tenant_id = ${club?.id}) as sites,
       (select pair_code from bridges where tenant_id = ${club?.id}) as code,
-      (select role from staff_users where email = 'gm@muthaiga.test') as owner_role from tenants where id = ${club?.id}`;
+      (select m.role from club_memberships m join staff_users s on s.id = m.staff_id
+        where s.email = 'gm@muthaiga.test' and m.tenant_id = ${club?.id}) as owner_role from tenants where id = ${club?.id}`;
     expect(t).toEqual({ slug: 'muthaiga-test', sites: 1, code: 'ABCDE-23456', owner_role: 'owner' });
     const seen = await app`select slug from app_partner_clubs(${pa?.id})`;
     expect(seen.map((r) => r.slug)).toEqual(expect.arrayContaining(['demo-club', 'muthaiga-test']));
@@ -855,7 +867,7 @@ describe('walking skeleton: pay → door', () => {
       reason: 'used',
     });
     const desk = await staffByEmail(app, 'desk@demo.test');
-    expect(desk).toMatchObject({ active: true, role: 'reception', tenant_id: tenantId });
+    expect(desk).toMatchObject({ active: true, role: 'club', tenant_id: tenantId });
     // Only NAVAC adds partner logins; a club cannot invite into another club.
     await expect(
       inviteStaff(
@@ -901,6 +913,149 @@ describe('walking skeleton: pay → door', () => {
     expect(await verifySignInCode(app, id, desk?.id as string, code)).toBe(true);
     expect(await verifySignInCode(app, id, desk?.id as string, code)).toBe(false);
     expect(await revokeAllSessions(app, desk?.id as string, 'test')).toBe(0);
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+  it('user management: roles and permissions, per-person changes, removal, several clubs, ownership, partner teams', async () => {
+    const mails: { to: string[]; subject: string; html: string }[] = [];
+    const fake = (async (u: string, i: RequestInit) => {
+      if (String(u).includes('pwnedpasswords')) return new Response('');
+      const b = JSON.parse(String(i.body));
+      mails.push({ to: b.to, subject: b.subject, html: b.html });
+      return new Response(JSON.stringify({ id: `em_um_${mails.length}` }));
+    }) as typeof fetch;
+    vi.stubGlobal('fetch', fake);
+    vi.stubEnv('APP_ENCRYPTION_KEY', 'test-only-key-0123456789abcdef0123456789');
+    await owner`insert into platform_settings (key, data) values ('email', ${owner.json({ apiKey: encrypt('re_test'), from: 'Lango <lango@navac.co.ke>' } as never)})
+      on conflict (key) do update set data = excluded.data`;
+    const perms = async (staff: string, tenant: string) =>
+      (await app<{ role: string; perms: string[] }[]>`select * from app_staff_perms(${staff}, ${tenant})`)[0] ?? null;
+    const lastLink = (kind: string) =>
+      mails.at(-1)?.html.match(new RegExp(`https://lango\\.test/${kind}/([A-Za-z0-9_-]+)`))?.[1] as string;
+    /** Invite and accept in one go; returns the new person's id. */
+    const join = async (inviterId: string, email: string, role: string, tenant: string | null, partnerId?: string) => {
+      const r = await inviteStaff(
+        app,
+        {
+          inviterId,
+          email,
+          name: email.split('@')[0] as string,
+          role,
+          tenantId: tenant,
+          partnerId: partnerId ?? null,
+          baseUrl: 'https://lango.test',
+          ctx: { inviterName: 'Test', to: 'Test', roleLabel: role },
+        },
+        null,
+      );
+      if (!r.added)
+        expect((await acceptInvite(app, lastLink('invite'), { password: 'a long test phrase 42' })).ok).toBe(true);
+      return r.staffId;
+    };
+
+    // NAVAC sets up each club's owner (a club has exactly one).
+    const [pa] = await owner`select id from staff_users where email = 'sms-admin@navac.test'`;
+    const ownerId = await join(pa?.id, 'owner@um.test', 'owner', tenantId);
+    const otherOwnerId = await join(pa?.id, 'owner2@um.test', 'owner', otherTenant);
+    await expect(join(pa?.id, 'owner3@um.test', 'owner', tenantId)).rejects.toThrow(/already has an owner/);
+    expect(await perms(ownerId, tenantId)).toMatchObject({
+      role: 'owner',
+      perms: expect.arrayContaining(['club.own']),
+    });
+
+    // The owner invites a manager and an admin; a manager cannot invite anyone; an admin cannot add admins.
+    const mgr = await join(ownerId, 'mgr@um.test', 'manager', tenantId);
+    const adm = await join(ownerId, 'adm@um.test', 'admin', tenantId);
+    expect((await perms(mgr, tenantId))?.perms).not.toContain('team.manage');
+    expect((await perms(adm, tenantId))?.perms).toEqual(expect.arrayContaining(['team.manage', 'billing.manage']));
+    expect((await perms(adm, tenantId))?.perms).not.toContain('club.own');
+    await expect(join(mgr, 'nope@um.test', 'viewer', tenantId)).rejects.toThrow(/not allowed/);
+    await expect(join(adm, 'adm2@um.test', 'admin', tenantId)).rejects.toThrow(/only the owner/);
+    const viewer = await join(adm, 'view@um.test', 'viewer', tenantId);
+    expect((await perms(viewer, tenantId))?.perms).toEqual(['members.view', 'reports.all']);
+
+    // A role change applies on the next request of an open session.
+    const mgrStaff = await staffByEmail(app, 'mgr@um.test');
+    const sm = await createSession(app, { staff: mgrStaff as NonNullable<typeof mgrStaff> });
+    expect(await readSession(app, sm.token)).toMatchObject({ role: 'manager', tid: tenantId });
+    const who = { actorId: adm, actorName: 'Adm', tenantId };
+    await changeRole(app, who, mgr, 'reception');
+    expect(await readSession(app, sm.token)).toMatchObject({ role: 'reception' });
+    expect(mails.at(-1)?.subject).toMatch(/Your role at .* changed/);
+    // Nobody changes the owner; an admin cannot touch another admin or hand out team rights.
+    await expect(changeRole(app, who, ownerId, 'viewer')).rejects.toThrow(/owner/);
+    await expect(changeRole(app, { ...who, actorId: mgr }, viewer, 'manager')).rejects.toThrow(/team/);
+    await expect(setPermissions(app, who, mgr, ['team.manage'], [])).rejects.toThrow(/team/);
+
+    // Per-person fine-tuning: a front-desk lead may give complimentary access but not edit members.
+    await setPermissions(app, who, mgr, ['access.comp'], ['members.edit']);
+    const tuned = (await readSession(app, sm.token))?.perms ?? [];
+    expect(tuned).toContain('access.comp');
+    expect(tuned).not.toContain('members.edit');
+    await expect(setPermissions(app, who, mgr, ['club.own'], [])).rejects.toThrow(/unknown permission/);
+
+    // Removal: signed out of the club at once; history stays; they can no longer work anywhere.
+    await removeMember(app, who, mgr);
+    expect(await readSession(app, sm.token)).toBeNull();
+    expect(await myClubs(app, mgr)).toHaveLength(0);
+    expect((await clubTeam(app, tenantId)).map((t) => t.id)).not.toContain(mgr);
+
+    // One login, several clubs: the other club's owner adds the admin as a manager there; no second account.
+    const again = await inviteStaff(
+      app,
+      {
+        inviterId: otherOwnerId,
+        email: 'adm@um.test',
+        name: 'Adm',
+        role: 'manager',
+        tenantId: otherTenant,
+        baseUrl: 'https://lango.test',
+        ctx: { inviterName: 'Other', to: 'Other Club', roleLabel: 'Manager' },
+      },
+      null,
+    );
+    expect(again).toMatchObject({ staffId: adm, added: true, emailed: true });
+    expect(mails.at(-1)?.subject).toBe('You now have access to Other Club on Lango');
+    expect((await myClubs(app, adm)).map((c) => c.role).sort()).toEqual(['admin', 'manager']);
+    expect((await perms(adm, otherTenant))?.role).toBe('manager');
+
+    // Ownership: offered by the owner to an admin, confirmed by the admin; the old owner stays as admin.
+    expect(
+      (await offerOwnership(app, { actorId: adm, actorName: 'Adm', tenantId }, viewer, 'https://lango.test')).ok,
+    ).toBe(false);
+    const offer = await offerOwnership(
+      app,
+      { actorId: ownerId, actorName: 'Owner', tenantId },
+      adm,
+      'https://lango.test',
+    );
+    expect(offer.ok).toBe(true);
+    const tt = lastLink('transfer');
+    expect(await acceptOwnership(app, tt, viewer)).toBe(false);
+    expect(await acceptOwnership(app, tt, adm)).toBe(true);
+    expect(await acceptOwnership(app, tt, adm)).toBe(false);
+    expect((await perms(adm, tenantId))?.role).toBe('owner');
+    expect((await perms(ownerId, tenantId))?.role).toBe('admin');
+
+    // Partner teams: a technician sees only the clubs assigned to them and works there with door rights only.
+    const [trisol] = await app<{ id: string }[]>`select app_platform_partner_id(${pa?.id}, 'Trisol UM') as id`;
+    await owner`update tenants set partner_id = ${trisol?.id} where id = ${tenantId}`;
+    const tech = await join(pa?.id, 'tech@um.test', 'partner_tech', null, trisol?.id);
+    expect(await app`select * from app_partner_clubs(${tech})`).toHaveLength(0);
+    expect(await perms(tech, tenantId)).toBeNull();
+    await assignClubs(app, pa?.id, tech, [tenantId, otherTenant]);
+    expect((await app`select id from app_partner_clubs(${tech})`).map((r) => r.id)).toEqual([tenantId]);
+    expect(await perms(tech, tenantId)).toMatchObject({ role: 'technician' });
+    expect((await perms(tech, tenantId))?.perms).not.toContain('payments.record');
+    // NAVAC support sees every club, read-only.
+    const sup = await join(pa?.id, 'support@um.test', 'navac_support', null);
+    expect((await perms(sup, otherTenant))?.role).toBe('viewer');
+    await expect(join(tech, 'x2@um.test', 'partner_tech', null, trisol?.id)).rejects.toThrow(/not allowed/);
+
+    // Repeated failed sign-ins: the account holder is told once.
+    const before = mails.length;
+    for (let i = 0; i < 6; i++) await noteFailedSignIn(app, 'view@um.test', '10.0.0.1');
+    expect(mails.slice(before).map((m) => m.subject)).toEqual(['Failed sign-ins on your Lango account']);
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
   });

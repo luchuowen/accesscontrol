@@ -2,6 +2,7 @@
 import { withTenant } from '@lango/db';
 import {
   assignPayment,
+  can,
   clubNotify,
   importMembers,
   initiatedTransactionId,
@@ -15,8 +16,6 @@ import { redirect } from 'next/navigation';
 import { requireSession } from '@/lib/session';
 import { db } from '@/server/db';
 
-const can = (role: string, ...roles: string[]) => roles.includes(role);
-const FRONT_DESK = ['owner', 'manager', 'reception'];
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 /** Wiegand 26 card numbers (and the member numbers used as default card numbers) are 1..65535. */
 const W26_MAX = 65535;
@@ -31,7 +30,7 @@ const id = (form: FormData, k: string) => {
 
 export async function createMember(form: FormData) {
   const s = await requireSession();
-  if (!can(s.role, ...FRONT_DESK)) redirect('/members?new=1&n=forbidden');
+  if (!can(s, 'members.edit')) redirect('/members?new=1&n=forbidden');
   const first = String(form.get('firstName') ?? '')
     .trim()
     .slice(0, 80);
@@ -85,7 +84,7 @@ export async function recordDeskPayment(form: FormData) {
   const s = await requireSession();
   const memberId = id(form, 'memberId');
   if (!memberId) redirect('/members');
-  if (!can(s.role, ...FRONT_DESK)) back(memberId, 'forbidden');
+  if (!can(s, 'payments.record')) back(memberId, 'forbidden');
   const productId = id(form, 'productId');
   // Desk payments are cash only; card and bank go through TaifaPay so they are matched and fee-bearing.
   const channel = 'cash' as const;
@@ -117,7 +116,7 @@ export async function grantOverride(form: FormData) {
   const s = await requireSession();
   const memberId = id(form, 'memberId');
   if (!memberId) redirect('/members');
-  if (!can(s.role, 'owner', 'manager')) back(memberId, 'forbidden');
+  if (!can(s, 'access.comp')) back(memberId, 'forbidden');
   const zone = String(form.get('zone') ?? '');
   const days = Math.min(31, Math.max(1, Number.parseInt(String(form.get('days') ?? '1'), 10) || 1));
   const reason = String(form.get('reason') ?? '')
@@ -148,7 +147,7 @@ export async function linkCard(form: FormData) {
   const s = await requireSession();
   const memberId = id(form, 'memberId');
   if (!memberId) redirect('/members');
-  if (!can(s.role, ...FRONT_DESK)) back(memberId, 'forbidden');
+  if (!can(s, 'members.edit')) back(memberId, 'forbidden');
   const code = Number(String(form.get('cardCode') ?? '').trim());
   const site = Number(String(form.get('siteCode') ?? '0').trim() || 0);
   if (!Number.isInteger(code) || code < 1 || code > W26_MAX || !Number.isInteger(site) || site < 0 || site > 255)
@@ -172,7 +171,7 @@ export async function requestMpesa(form: FormData) {
   const s = await requireSession();
   const memberId = id(form, 'memberId');
   if (!memberId) redirect('/members');
-  if (!can(s.role, ...FRONT_DESK)) back(memberId, 'forbidden');
+  if (!can(s, 'payments.record')) back(memberId, 'forbidden');
   const productId = id(form, 'productId');
   const phone = String(form.get('phone') ?? '').replace(/\s+/g, '');
   if (!productId) back(memberId, 'invalid');
@@ -218,7 +217,7 @@ export async function requestMpesa(form: FormData) {
 /** Missed-payment queue: point an unmatched payment at the right member and plan (amount must equal the price). */
 export async function assignUnmatched(form: FormData) {
   const s = await requireSession();
-  if (!can(s.role, 'owner', 'manager', 'accountant')) redirect('/payments?n=forbidden');
+  if (!can(s, 'payments.assign')) redirect('/payments?n=forbidden');
   const paymentId = id(form, 'paymentId');
   const productId = id(form, 'productId');
   const memberNo = Number(String(form.get('memberNo') ?? '').trim());
@@ -235,7 +234,7 @@ const KINDS = ['membership', 'day_pass', 'addon', 'bundle'] as const;
 /** Create or edit a plan. Active plans keep unique prices so a paybill payment matches exactly one plan. */
 export async function savePlan(form: FormData) {
   const s = await requireSession();
-  if (!can(s.role, 'owner', 'manager')) redirect('/plans?n=forbidden');
+  if (!can(s, 'plans.manage')) redirect('/plans?n=forbidden');
   const planId = id(form, 'planId');
   const name = String(form.get('name') ?? '')
     .trim()
@@ -278,7 +277,7 @@ export async function savePlan(form: FormData) {
 
 export async function setPlanActive(form: FormData) {
   const s = await requireSession();
-  if (!can(s.role, 'owner', 'manager')) redirect('/plans?n=forbidden');
+  if (!can(s, 'plans.manage')) redirect('/plans?n=forbidden');
   const planId = id(form, 'planId');
   const active = form.get('active') === 'true';
   if (!planId) redirect('/plans');
@@ -307,7 +306,7 @@ const zoneKey = (name: string) =>
 /** Create a zone or change which AxTraxNG readers it opens (readers come from the Site Bridge's inventory). */
 export async function saveZone(form: FormData) {
   const s = await requireSession();
-  if (!can(s.role, 'owner', 'manager')) redirect('/access?n=forbidden');
+  if (!can(s, 'doors.manage')) redirect('/access?n=forbidden');
   const zoneId = id(form, 'zoneId');
   const siteId = id(form, 'siteId');
   const name = String(form.get('name') ?? '')
@@ -339,6 +338,7 @@ export async function saveZone(form: FormData) {
 /** Ask the Site Bridge to read AxTraxNG again (doors, groups, users) on its next sync. */
 export async function requestInventory(form: FormData) {
   const s = await requireSession();
+  if (!can(s, 'doors.manage')) redirect('/access?n=forbidden');
   const siteId = id(form, 'siteId');
   if (!siteId) redirect('/access');
   await withTenant(db(), s.tid, (tx) => tx`update sites set inventory_requested_at = now() where id = ${siteId}`);
@@ -349,7 +349,7 @@ export async function requestInventory(form: FormData) {
 /** Bring the club's existing AxTraxNG users in as members, keeping the access they have today. */
 export async function importFromAxtrax(form: FormData) {
   const s = await requireSession();
-  if (!can(s.role, 'owner', 'manager')) redirect('/access?n=forbidden');
+  if (!can(s, 'doors.manage')) redirect('/access?n=forbidden');
   const siteId = id(form, 'siteId');
   const groupIds = form.getAll('groups').map(Number).filter(Number.isInteger);
   const graceDays = Math.min(90, Math.max(0, Number(form.get('graceDays') ?? 14) || 0));
@@ -362,7 +362,7 @@ export async function importFromAxtrax(form: FormData) {
 /** A fresh pairing code, e.g. when the AxTraxNG PC is replaced (the old bridge must then be reinstalled). */
 export async function reissuePairCode() {
   const s = await requireSession();
-  if (s.role !== 'owner') redirect('/access?n=forbidden');
+  if (!can(s, 'doors.manage')) redirect('/access?n=forbidden');
   await withTenant(db(), s.tid, async (tx) => {
     await tx`select app_reissue_pair_code(${newPairCode()})`;
     await tx`insert into audit_log (tenant_id, actor, action) values (${s.tid}, ${s.uid}, 'bridge.pair_code_reissued')`;

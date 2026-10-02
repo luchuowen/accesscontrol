@@ -1,4 +1,4 @@
-import { onboardingChecklist } from '@lango/server';
+import { can, onboardingChecklist } from '@lango/server';
 import { ArrowUpRight, CircleAlert, Wifi, WifiOff } from 'lucide-react';
 import Link from 'next/link';
 import { Checklist } from '@/components/checklist';
@@ -8,8 +8,11 @@ import { ago, dateTime, daysLeft, kes, kesShort, time } from '@/lib/format';
 import { requireSession } from '@/lib/session';
 import { db } from '@/server/db';
 
-export default async function Overview() {
+export default async function Overview({ searchParams }: { searchParams: Promise<{ denied?: string }> }) {
   const s = await requireSession();
+  const { denied } = await searchParams;
+  const full = can(s, 'reports.all');
+  const admin = can(s, 'settings.payments') || can(s, 'team.manage');
   const [d, checklist] = await Promise.all([dashboard(s.tid), onboardingChecklist(db(), s.tid)]);
   const setupDone = checklist.every((i) => i.done);
   const growth = d.revenue.prevMonth
@@ -23,31 +26,40 @@ export default async function Overview() {
         title={`Good ${new Date().getUTCHours() + 3 < 12 ? 'morning' : 'afternoon'}, ${s.name.split(' ')[0]}`}
         subtitle={`${d.tenantName} · everything that came in, and everyone who walked through the doors.`}
         actions={
-          <Link href="/payments" className="btn-ghost">
-            Reconciliation <ArrowUpRight size={15} />
-          </Link>
+          full && (
+            <Link href="/payments" className="btn-ghost">
+              Reconciliation <ArrowUpRight size={15} />
+            </Link>
+          )
         }
       />
-      {!setupDone && (
+      {denied && (
+        <div className="mb-4 rounded-xl bg-amber-50 p-3 text-sm text-amber-900 ring-1 ring-amber-200">
+          Your role doesn’t include that page. Ask the club’s owner or an admin if you need it.
+        </div>
+      )}
+      {admin && !setupDone && (
         <div className="mb-4">
           <Checklist items={checklist} />
         </div>
       )}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <Stat label="Collected today" value={kes(d.revenue.today)} hint={`${kes(d.revenue.week)} in the last 7 days`} />
-        <Stat
-          label="Last 30 days"
-          value={kes(d.revenue.month)}
-          hint={
-            growth === null ? (
-              '—'
-            ) : (
-              <span className={growth >= 0 ? 'text-emerald-700' : 'text-rose-700'}>
-                {growth >= 0 ? '▲' : '▼'} {Math.abs(growth)}% vs previous 30 days
-              </span>
-            )
-          }
-        />
+        {full && (
+          <Stat
+            label="Last 30 days"
+            value={kes(d.revenue.month)}
+            hint={
+              growth === null ? (
+                '—'
+              ) : (
+                <span className={growth >= 0 ? 'text-emerald-700' : 'text-rose-700'}>
+                  {growth >= 0 ? '▲' : '▼'} {Math.abs(growth)}% vs previous 30 days
+                </span>
+              )
+            }
+          />
+        )}
         <Stat
           label="Active members"
           value={d.activeMembers}
@@ -57,24 +69,26 @@ export default async function Overview() {
       </div>
 
       <div className="mt-4 grid gap-4 lg:grid-cols-3">
-        <section className="card p-6 lg:col-span-2">
-          <div className="flex items-baseline justify-between">
-            <div>
-              <div className="label">Daily collections</div>
-              <div className="mt-1 text-sm text-ink-500">Last 30 days · M-Pesa, card and cash</div>
+        {full && (
+          <section className="card p-6 lg:col-span-2">
+            <div className="flex items-baseline justify-between">
+              <div>
+                <div className="label">Daily collections</div>
+                <div className="mt-1 text-sm text-ink-500">Last 30 days · M-Pesa, card and cash</div>
+              </div>
+              <div className="text-sm font-medium tabular-nums">{kes(d.daily.reduce((a, b) => a + b.amount, 0))}</div>
             </div>
-            <div className="text-sm font-medium tabular-nums">{kes(d.daily.reduce((a, b) => a + b.amount, 0))}</div>
-          </div>
-          <div className="mt-6">
-            <Bars
-              data={d.daily.map((x) => ({ label: x.day.slice(5), value: x.amount }))}
-              format={(n) => `KES ${kesShort(n)}`}
-              height={170}
-            />
-          </div>
-        </section>
+            <div className="mt-6">
+              <Bars
+                data={d.daily.map((x) => ({ label: x.day.slice(5), value: x.amount }))}
+                format={(n) => `KES ${kesShort(n)}`}
+                height={170}
+              />
+            </div>
+          </section>
+        )}
 
-        <section className="card flex flex-col p-6">
+        <section className={`card flex flex-col p-6 ${full ? '' : 'lg:col-span-3'}`}>
           <div className="label">Access system</div>
           <div className="mt-4 flex items-center gap-3">
             <div
@@ -155,9 +169,11 @@ export default async function Overview() {
         <section className="card p-6">
           <div className="flex items-center justify-between">
             <div className="label">Live at the doors</div>
-            <Link href="/access" className="text-xs text-ink-500 hover:text-ink-900">
-              All activity →
-            </Link>
+            {can(s, 'doors.manage') && (
+              <Link href="/access" className="text-xs text-ink-500 hover:text-ink-900">
+                All activity →
+              </Link>
+            )}
           </div>
           <ul className="mt-4 space-y-3">
             {d.recent.map((r, i) => (
@@ -169,7 +185,7 @@ export default async function Overview() {
               </li>
             ))}
           </ul>
-          {d.unmatched > 0 && (
+          {d.unmatched > 0 && can(s, 'payments.assign') && (
             <Link
               href="/payments"
               className="mt-6 flex items-center gap-2 rounded-xl bg-amber-50 p-3 text-xs text-amber-900 ring-1 ring-amber-200"

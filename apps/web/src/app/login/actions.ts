@@ -6,8 +6,13 @@ import {
   createSession,
   hashPassword,
   isLimited,
+  isPartnerLevel,
   isTrustedDevice,
+  logAuth,
+  myClubs,
+  noteFailedSignIn,
   rateLimit,
+  readSession,
   recordFailure,
   rememberDevice,
   requestPasswordReset,
@@ -16,6 +21,7 @@ import {
   revokeAllSessions,
   revokeSession,
   type StaffRow,
+  setSessionClub,
   staffById,
   startSignInCode,
   verifyPassword,
@@ -38,17 +44,31 @@ import { db } from '@/server/db';
 let dummy: Promise<string> | undefined;
 const dummyHash = () => (dummy ??= hashPassword('lango-timing-equaliser'));
 
-const home = (s: Pick<StaffRow, 'role'>) => (s.role === 'partner_admin' ? '/partner' : '/');
-
-async function startSession(staff: StaffRow) {
+/**
+ * Start the session and say where to go: partner logins to the partner console; club logins straight into their
+ * club, or to "choose club" when they belong to several. A new session ID every time (OWASP).
+ */
+async function startSession(staff: StaffRow): Promise<string> {
   const h = await headers();
-  const { token, maxHours } = await createSession(db(), {
-    staff,
-    ip: clientIp(h),
-    userAgent: h.get('user-agent') ?? undefined,
-  });
+  const ip = clientIp(h);
+  const userAgent = h.get('user-agent') ?? undefined;
+  let tenantId: string | null = null;
+  let next = '/partner';
+  if (!isPartnerLevel(staff)) {
+    const clubs = await myClubs(db(), staff.id);
+    tenantId = clubs.length === 1 ? (clubs[0]?.tenant_id ?? null) : null;
+    next = tenantId ? '/' : '/choose';
+  }
+  const { token, maxHours } = await createSession(db(), { staff, tenantId, ip, userAgent });
   await setSessionCookie(token, maxHours);
   await clearPending();
+  await logAuth(db(), { kind: 'signin.ok', staffId: staff.id, tenantId, email: staff.email, ip, userAgent });
+  return next;
+}
+
+/** A login that can work somewhere: a partner-level login, or a club login still in at least one club. */
+async function canWork(staff: StaffRow) {
+  return isPartnerLevel(staff) || (await myClubs(db(), staff.id)).length > 0;
 }
 
 /**
@@ -67,20 +87,15 @@ export async function login(form: FormData) {
     select id, password_hash, active from app_staff_login(${email})`;
   const ok = await verifyPassword(password, u?.password_hash ?? (await dummyHash()));
   const staff = ok && u?.active ? await staffById(db(), u.id) : null;
-  if (!staff || (!staff.tenant_id && staff.role !== 'partner_admin')) {
+  if (!staff || !(await canWork(staff))) {
     recordFailure(account, 15 * 60_000);
+    await noteFailedSignIn(db(), email, ip, (await headers()).get('user-agent') ?? undefined);
     redirect('/login?e=1');
   }
-  if (await isTrustedDevice(db(), await deviceToken(), staff.id)) {
-    await startSession(staff);
-    redirect(home(staff));
-  }
+  if (await isTrustedDevice(db(), await deviceToken(), staff.id)) redirect(await startSession(staff));
   const ch = await startSignInCode(db(), staff, 'sms');
-  if (ch === null) {
-    // No phone and no email channel yet: sign in on the password alone (the account page asks for a phone).
-    await startSession(staff);
-    redirect(home(staff));
-  }
+  // No phone and no email channel yet: sign in on the password alone (the account page asks for a phone).
+  if (ch === null) redirect(await startSession(staff));
   if (ch === 'wait') {
     await setPending({ staffId: staff.id, challengeId: null });
     redirect('/login/code?w=1');
@@ -96,7 +111,10 @@ export async function verifyCode(form: FormData) {
   const code = String(form.get('code') ?? '').replace(/\D/g, '');
   const ip = clientIp(await headers());
   if (!rateLimit(`code-ip:${ip}`, 30, 10 * 60_000)) redirect('/login/code?e=2');
-  if (!p.challengeId || !(await verifySignInCode(db(), p.challengeId, p.staffId, code))) redirect('/login/code?e=1');
+  if (!p.challengeId || !(await verifySignInCode(db(), p.challengeId, p.staffId, code))) {
+    await logAuth(db(), { kind: 'code.fail', staffId: p.staffId, ip });
+    redirect('/login/code?e=1');
+  }
   const staff = await staffById(db(), p.staffId);
   if (!staff?.active) redirect('/login?e=1');
   if (form.get('remember') === 'on') {
@@ -104,8 +122,7 @@ export async function verifyCode(form: FormData) {
     const d = await rememberDevice(db(), staff, h.get('user-agent') ?? undefined);
     await setDeviceCookie(d.token, d.days);
   }
-  await startSession(staff);
-  redirect(home(staff));
+  redirect(await startSession(staff));
 }
 
 /** Send the code again, by SMS or by email. */
@@ -147,6 +164,7 @@ export async function reset(_prev: PasswordState, form: FormData): Promise<Passw
     if (r.reason === 'password') return { error: r.message };
     redirect(`/reset/${encodeURIComponent(token)}`);
   }
+  await logAuth(db(), { kind: 'reset.done', staffId: r.staff.id, ip: clientIp(await headers()) });
   redirect('/login?m=reset');
 }
 
@@ -165,8 +183,8 @@ export async function accept(_prev: PasswordState, form: FormData): Promise<Pass
     if (r.reason === 'password') return { error: r.message };
     redirect(`/invite/${encodeURIComponent(token)}`);
   }
-  await startSession(r.staff);
-  redirect(home(r.staff));
+  await logAuth(db(), { kind: 'invite.accepted', staffId: r.staff.id, tenantId: r.staff.tenant_id });
+  redirect(await startSession(r.staff));
 }
 
 /** "Send me a new link" from an expired invitation page. Keyed by the expired link itself, so nobody can reset
@@ -186,11 +204,28 @@ export async function signOut(form: FormData) {
   const token = await sessionToken();
   if (token) {
     if (form.get('everywhere') === 'on') {
-      const { readSession } = await import('@lango/server');
       const s = await readSession(db(), token);
-      if (s) await revokeAllSessions(db(), s.uid, 'signed-out-everywhere');
+      if (s) {
+        await revokeAllSessions(db(), s.uid, 'signed-out-everywhere');
+        await logAuth(db(), { kind: 'signout.everywhere', staffId: s.uid, tenantId: s.tid });
+      }
     }
     await revokeSession(db(), token);
   }
   redirect('/login?m=signed-out-ok');
+}
+
+/** Pick the club to work in (people in several clubs). Only clubs this login belongs to. */
+export async function chooseClub(form: FormData) {
+  const token = await sessionToken();
+  const s = token ? await readSession(db(), token) : null;
+  if (!s || !token) redirect('/login?m=signed-out');
+  if (s.partner) redirect('/partner');
+  const tid = String(form.get('tenantId') ?? '');
+  const club = (await myClubs(db(), s.uid)).find((c) => c.tenant_id === tid);
+  if (!club) redirect('/choose');
+  await setSessionClub(db(), token, club.tenant_id, null);
+  await db()`select app_staff_last_club(${s.uid}, ${club.tenant_id})`;
+  await logAuth(db(), { kind: 'club.opened', staffId: s.uid, tenantId: club.tenant_id });
+  redirect('/');
 }
