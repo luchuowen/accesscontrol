@@ -24,14 +24,14 @@ const PLAN_HUES = [
 const pct = (a: number, b: number) => (b ? Math.round(((a - b) / b) * 100) : null);
 const hourLabel = (h: number) => `${String(h).padStart(2, '0')}:00`;
 
-function Spark({ values, dark }: { values: number[]; dark?: boolean }) {
+function Spark({ values }: { values: number[] }) {
   const max = Math.max(1, ...values);
   return (
     <div className="mt-3 flex h-8 items-end gap-[3px]" aria-hidden="true">
       {values.map((v, i) => (
         <i
           key={`s${i}`}
-          className={`flex-1 rounded-t-[2px] ${i === values.length - 1 ? (dark ? 'bg-[#34D399]' : 'bg-brand-500') : dark ? 'bg-white/20' : 'bg-slate-300'}`}
+          className={`flex-1 rounded-t-[2px] ${i === values.length - 1 ? 'bg-brand-500' : 'bg-slate-300'}`}
           style={{ height: `${Math.max(6, (v / max) * 100)}%` }}
         />
       ))}
@@ -150,22 +150,46 @@ export default async function Dashboard({
       )}
 
       <div className={`grid gap-3.5 sm:grid-cols-2 ${full ? 'xl:grid-cols-4' : 'xl:grid-cols-2'}`}>
-        <section className="rounded-2xl bg-[linear-gradient(135deg,#0B1629_0%,#11284A_60%,#0E3A33_100%)] p-[18px] text-white">
-          <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400">In the club now</div>
-          <div className="mt-1.5 flex items-baseline gap-2.5">
-            <span className="text-[34px] font-semibold tabular-nums tracking-tight">{d.live.inside}</span>
-            <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold tracking-[0.08em] text-[#34D399]">
-              <span className="relative flex h-2 w-2">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#34D399] opacity-60 motion-reduce:animate-none" />
-                <span className="relative inline-flex h-2 w-2 rounded-full bg-[#34D399]" />
+        <section className="rounded-2xl border border-[#DDF3EA] bg-[linear-gradient(160deg,#F0FDF8_0%,#FFFFFF_62%)] p-[18px]">
+          <div className="flex items-center justify-between">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-500">In the club now</div>
+            <span className="inline-flex items-center gap-1.5 text-[10.5px] font-bold tracking-[0.08em] text-[#047857]">
+              <span className="relative flex h-[7px] w-[7px]">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#10B981] opacity-60 motion-reduce:animate-none" />
+                <span className="relative inline-flex h-[7px] w-[7px] rounded-full bg-[#10B981]" />
               </span>
               LIVE
             </span>
           </div>
-          <div className="mt-1 text-xs text-[#A3B3C9]">
-            {d.live.busiestHour !== null ? `Peak ${hourLabel(d.live.busiestHour)}` : 'Last 90 min'}
+          <div className="mt-2.5 flex items-baseline gap-2.5">
+            <span className="text-[34px] font-semibold leading-none tabular-nums tracking-tight">{d.live.inside}</span>
+            {d.live.busiestHour !== null ? (
+              <span className="rounded-full border border-[#CDEFE0] bg-white px-2 py-0.5 text-[11px] font-semibold text-[#047857]">
+                Peak {hourLabel(d.live.busiestHour)}
+              </span>
+            ) : (
+              <span className="text-xs text-ink-500">in the last 90 min</span>
+            )}
           </div>
-          <Spark values={d.live.todayByHour.slice(5, 23)} dark />
+          <div className="mt-3.5 flex h-[34px] items-end gap-[3px]" aria-hidden="true">
+            {d.live.todayByHour.slice(5, 23).map((v, i) => {
+              const h = i + 5;
+              const top = Math.max(1, ...d.live.todayByHour.slice(5, 23));
+              const past = h <= hour;
+              return (
+                <i
+                  key={`h${h}`}
+                  className={`flex-1 rounded-t-[3px] rounded-b-[1px] ${h === hour ? 'bg-[#10B981]' : h === d.live.busiestHour ? 'bg-[#9ADBC0]' : 'bg-[#D7EEE5]'} ${past ? '' : 'opacity-45'}`}
+                  style={{ height: `${past ? Math.max(9, (v / top) * 100) : 9}%` }}
+                />
+              );
+            })}
+          </div>
+          <div className="mt-1 flex justify-between text-[10px] text-slate-400">
+            <span>5am</span>
+            <span>Noon</span>
+            <span>10pm</span>
+          </div>
         </section>
         {full && (
           <Card>
