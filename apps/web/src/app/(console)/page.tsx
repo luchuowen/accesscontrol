@@ -14,6 +14,13 @@ import { RemindAll } from './_dash/remind-all';
  * renewal rate with trends; money in by channel; the renewals picture; and three short lists to act on.
  */
 const PERIODS = [7, 30, 90] as const;
+/** Top plans, design A "one colour per plan": indigo, sky, violet, amber (no green, so it stays apart from Money in). */
+const PLAN_HUES = [
+  { dot: '#4F46E5', bar: 'linear-gradient(90deg,#818CF8,#4F46E5)' },
+  { dot: '#0284C7', bar: 'linear-gradient(90deg,#38BDF8,#0284C7)' },
+  { dot: '#9333EA', bar: 'linear-gradient(90deg,#C084FC,#9333EA)' },
+  { dot: '#D97706', bar: 'linear-gradient(90deg,#FBBF24,#D97706)' },
+] as const;
 const pct = (a: number, b: number) => (b ? Math.round(((a - b) / b) * 100) : null);
 const hourLabel = (h: number) => `${String(h).padStart(2, '0')}:00`;
 
@@ -250,20 +257,24 @@ export default async function Dashboard({
               </div>
               <div className="mt-3.5 flex flex-col gap-3">
                 {d.plans.length === 0 && <p className="text-sm text-ink-500">No payments yet.</p>}
-                {d.plans.map((pl) => {
+                {d.plans.map((pl, i) => {
+                  const hue = PLAN_HUES[i % PLAN_HUES.length] as (typeof PLAN_HUES)[number];
                   const share = d.revenue.now ? Math.round((pl.kes / d.revenue.now) * 100) : 0;
                   return (
                     <div key={pl.name}>
                       <div className="mb-1.5 flex items-baseline justify-between gap-3 text-[13px]">
-                        <b className="min-w-0 truncate font-semibold">{pl.name}</b>
+                        <b className="flex min-w-0 items-center gap-2 font-semibold">
+                          <i className="h-[9px] w-[9px] shrink-0 rounded-[3px]" style={{ background: hue.dot }} />
+                          <span className="truncate">{pl.name}</span>
+                        </b>
                         <span className="shrink-0 text-xs tabular-nums text-ink-500">
                           {kes(pl.kes)} · {share}%
                         </span>
                       </div>
                       <div className="h-2 overflow-hidden rounded-full bg-slate-100">
                         <i
-                          className="block h-full rounded-full bg-[linear-gradient(90deg,#3B5A85,#0B1629)]"
-                          style={{ width: `${Math.max(share, 2)}%` }}
+                          className="block h-full rounded-full"
+                          style={{ width: `${Math.max(share, 2)}%`, background: hue.bar }}
                         />
                       </div>
                     </div>
