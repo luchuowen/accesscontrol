@@ -1,6 +1,5 @@
 import { withTenant } from '@lango/db';
 import { can } from '@lango/server';
-import { Upload } from 'lucide-react';
 import Link from 'next/link';
 import { AddMember } from '@/components/add-member';
 import { Notice } from '@/components/notice';
@@ -12,6 +11,7 @@ import { db } from '@/server/db';
 import { RemindAll } from '../_dash/remind-all';
 import { DayPasses } from './day-passes';
 import { MemberFilters } from './filters';
+import { ImportMembers } from './import/import-modal';
 import { MemberGroups } from './table';
 
 /**
@@ -67,14 +67,7 @@ export default async function Members({ searchParams }: { searchParams: Promise<
         actions={
           <div className="flex flex-wrap gap-2">
             {can(s, 'payments.record') && <WalkIn prices={walkins} variant="outline" />}
-            {can(s, 'members.edit') && (
-              <Link
-                href="/members/import"
-                className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-[#E5E8EE] bg-white px-3.5 text-sm font-semibold text-ink-900 hover:bg-slate-50"
-              >
-                <Upload size={15} /> Import
-              </Link>
-            )}
+            {can(s, 'members.edit') && <ImportMembers />}
             {can(s, 'members.edit') && <AddMember club={club} nextNo={nextNo} variant="primary" />}
           </div>
         }
@@ -155,11 +148,8 @@ export default async function Members({ searchParams }: { searchParams: Promise<
               <div className="rounded-2xl border border-[#E7EBF3] bg-white px-5 py-12 text-center text-sm text-ink-500">
                 {c.all === 0 ? (
                   <>
-                    No members yet.{' '}
-                    <Link href="/members/import" className="font-semibold text-[#047857] hover:underline">
-                      Import them
-                    </Link>{' '}
-                    or add the first one.
+                    No members yet. {can(s, 'members.edit') ? <ImportMembers variant="link" /> : 'Import them'} or add
+                    the first one.
                   </>
                 ) : (
                   'No members match. Try another name, number or phone.'

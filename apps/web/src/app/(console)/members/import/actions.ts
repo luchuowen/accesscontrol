@@ -1,56 +1,63 @@
 'use server';
 import { withTenant } from '@lango/db';
-import { can, importMembers, rebuildAccessState, STAFF_GROUP } from '@lango/server';
+import { can, importMembers, planImport, rebuildAccessState, STAFF_GROUP } from '@lango/server';
 import { DateTime } from 'luxon';
 import { revalidatePath } from 'next/cache';
-import { redirect } from 'next/navigation';
-import readXlsxFile from 'read-excel-file/node';
+import readXlsxFile, { readSheetNames } from 'read-excel-file/node';
+import { z } from 'zod';
 import { requireSession } from '@/lib/session';
 import { db } from '@/server/db';
+import { checkDrafts, type Draft, type Known, kePhone, MAX_ROWS, POOL, W26_MAX } from './rules';
 
 /**
- * Importing members, the three ways a club starts (2 Oct 2026):
+ * Importing members (import modal, 2 Oct 2026):
  *  - from the door system: one click, everyone already in AxTraxNG, keeping today's access;
- *  - from Excel (or CSV): clubs on paper or spreadsheets; anyone already paid keeps their access until their date;
- *  - one at a time: the Add member form.
+ *  - from Excel (or CSV), the NAVAC CRM way: read the file into staged rows, show them for checking and fixing,
+ *    then import in batches with progress and a summary. Anyone already paid keeps their access until their date.
  */
 
-const W26_MAX = 65535;
-const POOL = [11001, 11999] as const;
-
-/** Door system: import every member group (staff groups left out), keeping current access + 14 days' grace. */
-export async function importFromDoors() {
-  const s = await requireSession();
-  if (!can(s, 'members.edit')) redirect('/members/import?n=forbidden');
-  const site = await withTenant(db(), s.tid, async (tx) => {
-    const [row] = await tx<{ id: string; groups: { id: number; name: string }[] | null }[]>`
-      select si.id, i.data->'groups' as groups from sites si left join site_inventory i on i.site_id = si.id
+async function doorSite(tid: string) {
+  return withTenant(db(), tid, async (tx) => {
+    const [row] = await tx<{ id: string; groups: { id: number; name: string }[] | null; timezone: string }[]>`
+      select si.id, i.data->'groups' as groups, tn.timezone from sites si
+      join tenants tn on tn.id = si.tenant_id left join site_inventory i on i.site_id = si.id
       order by si.created_at limit 1`;
     return row;
   });
-  if (!site?.groups) redirect('/members/import?n=no-doors');
+}
+
+export type DoorsPreview = { create: number; withAccess: number; existing: number } | null;
+
+/** What a door-system import would do, shown before the owner confirms. Null until the door PC is connected. */
+export async function doorsPreview(): Promise<DoorsPreview> {
+  const s = await requireSession();
+  if (!can(s, 'members.edit')) return null;
+  const site = await doorSite(s.tid);
+  if (!site?.groups) return null;
+  const ids = site.groups.filter((g) => !STAFF_GROUP.test(g.name)).map((g) => g.id);
+  return withTenant(db(), s.tid, async (tx) => {
+    const plan = await planImport(tx, site.id, site.timezone, 14, ids);
+    return {
+      create: plan.create.length,
+      withAccess: plan.create.filter((c) => c.until).length,
+      existing: plan.existing,
+    };
+  });
+}
+
+export type DoorsState = { error?: string; done?: { created: number; withAccess: number; existing: number } };
+
+/** Door system: import every member group (staff groups left out), keeping current access + 14 days' grace. */
+export async function importFromDoors(_prev: DoorsState, _form: FormData): Promise<DoorsState> {
+  const s = await requireSession();
+  if (!can(s, 'members.edit')) return { error: 'Your role can’t add members.' };
+  const site = await doorSite(s.tid);
+  if (!site?.groups) return { error: 'Connect the door PC first (Doors & access).' };
   const groupIds = site.groups.filter((g) => !STAFF_GROUP.test(g.name)).map((g) => g.id);
   const r = await importMembers(db(), s.tid, { siteId: site.id, graceDays: 14, groupIds, actor: s.uid });
   revalidatePath('/members');
-  redirect(`/members/import?doors=${r.created}&withAccess=${r.withAccess}&existing=${r.existing}`);
+  return { done: { created: r.created, withAccess: r.withAccess, existing: r.existing } };
 }
-
-export type ExcelRow = {
-  line: number;
-  first: string;
-  last: string;
-  phone: string | null;
-  no: number | null;
-  until: string | null;
-  service: string | null;
-  problem: string | null;
-};
-export type ExcelState = {
-  error?: string;
-  rows?: ExcelRow[];
-  ready?: number;
-  done?: { created: number; withAccess: number };
-};
 
 const norm = (h: unknown) =>
   String(h ?? '')
@@ -64,10 +71,6 @@ const COLS: Record<string, string[]> = {
   no: ['membernumber', 'memberno', 'number', 'no', 'cardnumber', 'card', 'id', 'memberid'],
   until: ['paiduntil', 'expiry', 'expires', 'expirydate', 'enddate', 'validuntil', 'until', 'renewaldate'],
   service: ['service', 'plan', 'package', 'membership', 'membershiptype'],
-};
-const kePhone = (raw: string) => {
-  const d = raw.replace(/\D/g, '').replace(/^254/, '').replace(/^0/, '');
-  return /^[17]\d{8}$/.test(d) ? `+254${d}` : null;
 };
 function parseDate(v: unknown, tz: string): DateTime | null {
   if (v instanceof Date)
@@ -109,24 +112,54 @@ function parseCsv(text: string): string[][] {
   return rows.filter((r) => r.some((x) => x.trim()));
 }
 
-/** Read the file, check every row, and either show the preview or (on confirm) create the members. */
-export async function importExcel(_prev: ExcelState, form: FormData): Promise<ExcelState> {
+async function clubFacts(tid: string) {
+  return withTenant(db(), tid, async (tx) => {
+    const [[t], services, members] = await Promise.all([
+      tx<{ timezone: string }[]>`select timezone from tenants where id = ${tid}`,
+      tx<{ id: string; name: string; zone_keys: string[] }[]>`
+        select id, name, zone_keys from services where active order by created_at`,
+      tx<{ member_no: number; phone: string | null }[]>`select member_no, phone from members`,
+    ]);
+    const tz = t?.timezone ?? 'Africa/Nairobi';
+    const known: Known = {
+      services: services.map((x) => x.name),
+      phones: members.flatMap((m) => (m.phone ? [m.phone] : [])),
+      numbers: members.map((m) => m.member_no),
+    };
+    return { tz, services, known, today: DateTime.now().setZone(tz).toISODate() ?? '' };
+  });
+}
+
+export type ReadState = { error?: string; rows?: Draft[]; known?: Known; today?: string; file?: string };
+
+/** Step 1: read the file into staged rows for the preview. Nothing is written. */
+export async function readImportFile(form: FormData): Promise<ReadState> {
   const s = await requireSession();
   if (!can(s, 'members.edit')) return { error: 'Your role can’t add members.' };
   const file = form.get('file');
   if (!(file instanceof File) || file.size === 0) return { error: 'Choose an Excel or CSV file.' };
   if (file.size > 5_000_000) return { error: 'That file is too large (5 MB at most).' };
+  if (!/\.(xlsx|csv)$/i.test(file.name)) return { error: 'Use an .xlsx or .csv file.' };
   const buf = Buffer.from(await file.arrayBuffer());
   let grid: unknown[][];
   try {
-    grid =
-      /\.csv$/i.test(file.name) || file.type === 'text/csv' ? parseCsv(buf.toString('utf8')) : await readXlsxFile(buf);
+    if (/\.csv$/i.test(file.name)) grid = parseCsv(buf.toString('utf8').replace(/^﻿/, ''));
+    else {
+      // Our template opens on a "How to use" sheet; read the Members sheet when there is one.
+      const sheets = await readSheetNames(buf).catch(() => [] as string[]);
+      const sheet = sheets.find((n) => /member/i.test(n)) ?? sheets[0];
+      grid = sheet ? await readXlsxFile(buf, { sheet }) : await readXlsxFile(buf);
+    }
   } catch {
     return { error: 'We couldn’t read that file. Save it as .xlsx or .csv and try again.' };
   }
-  if (grid.length < 2) return { error: 'The file has no member rows under the headings.' };
-  if (grid.length > 3001) return { error: 'Up to 3,000 members per file. Split it and import in parts.' };
-  const head = (grid[0] ?? []).map(norm);
+  const isName = (c: unknown) => [...(COLS.first ?? []), ...(COLS.full ?? [])].includes(norm(c));
+  const h0 = grid.findIndex((r) => r.some(isName));
+  if (h0 < 0) return { error: 'Add a “First Name” (or “Name”) column heading in the first row.' };
+  const body = grid.slice(h0 + 1).filter((r) => r.some((c) => String(c ?? '').trim()));
+  if (!body.length) return { error: 'The file has no member rows under the headings.' };
+  if (body.length > MAX_ROWS) return { error: 'Up to 3,000 members per file. Split it and import in parts.' };
+  const head = (grid[h0] ?? []).map(norm);
   const at = (k: string) => head.findIndex((h) => COLS[k]?.includes(h));
   const idx = {
     first: at('first'),
@@ -137,102 +170,113 @@ export async function importExcel(_prev: ExcelState, form: FormData): Promise<Ex
     until: at('until'),
     service: at('service'),
   };
-  if (idx.first < 0 && idx.full < 0)
-    return { error: 'Add a “First Name” (or “Name”) column heading in the first row.' };
-
-  return withTenant(db(), s.tid, async (tx) => {
-    const [t] = await tx<{ timezone: string }[]>`select timezone from tenants where id = ${s.tid}`;
-    const tz = t?.timezone ?? 'Africa/Nairobi';
-    const now = DateTime.now().setZone(tz);
-    const services = await tx<
-      { id: string; name: string; zone_keys: string[] }[]
-    >`select id, name, zone_keys from services where active`;
-    const taken = new Set((await tx<{ member_no: number }[]>`select member_no from members`).map((m) => m.member_no));
-    const phones = new Set(
-      (await tx<{ phone: string }[]>`select phone from members where phone is not null`).map((m) => m.phone),
-    );
-    const cell = (r: unknown[], i: number) => (i >= 0 ? String(r[i] ?? '').trim() : '');
-    const rows: ExcelRow[] = [];
-    for (let i = 1; i < grid.length; i++) {
-      const r = grid[i] ?? [];
-      let first = cell(r, idx.first);
-      let last = cell(r, idx.last);
-      if (!first && idx.full >= 0) {
-        const parts = cell(r, idx.full).split(/\s+/).filter(Boolean);
-        first = parts[0] ?? '';
-        last = parts.slice(1).join(' ');
-      }
-      const rawPhone = cell(r, idx.phone);
-      const phone = rawPhone ? kePhone(rawPhone) : null;
-      const noRaw = cell(r, idx.no).replace(/\D/g, '');
-      let no: number | null = noRaw ? Number(noRaw) : null;
-      const untilD = idx.until >= 0 ? parseDate(r[idx.until], tz) : null;
-      const svcName = cell(r, idx.service);
-      const svc = svcName
-        ? services.find((x) => x.name.toLowerCase() === svcName.toLowerCase())
-        : services.length === 1
-          ? services[0]
-          : undefined;
-      let problem: string | null = null;
-      if (!first && !last) problem = 'No name: skipped';
-      else if (phone && phones.has(phone)) problem = 'Already a member with this mobile: skipped';
-      else {
-        const notes: string[] = [];
-        if (rawPhone && !phone) notes.push('mobile not recognised, left blank');
-        if (no !== null && (no < 1 || no > W26_MAX || (no >= POOL[0] && no <= POOL[1]) || taken.has(no))) {
-          notes.push(`number ${no} unavailable, a new one is given`);
-          no = null;
-        }
-        if (idx.until >= 0 && cell(r, idx.until) && !untilD)
-          notes.push('paid-until date not understood: no access yet');
-        if (untilD && untilD > now && !svc)
-          notes.push(svcName ? `no service called “${svcName}”: no access yet` : 'no service given: no access yet');
-        problem = notes.length ? notes.join('; ') : null;
-      }
-      if (no !== null) taken.add(no);
-      if (phone && !problem?.endsWith('skipped')) phones.add(phone);
-      rows.push({
-        line: i + 1,
-        first: first.slice(0, 80),
-        last: (last || '—').slice(0, 80),
-        phone,
-        no,
-        until: untilD && untilD > now && svc ? untilD.toISO() : null,
-        service: untilD && untilD > now && svc ? svc.name : null,
-        problem,
-      });
+  const club = await clubFacts(s.tid);
+  const names = club.known.services;
+  const cell = (r: unknown[], i: number) => (i >= 0 ? String(r[i] ?? '').trim() : '');
+  const rows: Draft[] = body.map((r, i) => {
+    let first = cell(r, idx.first);
+    let last = cell(r, idx.last);
+    if (!first && idx.full >= 0) {
+      const parts = cell(r, idx.full).split(/\s+/).filter(Boolean);
+      first = parts[0] ?? '';
+      last = parts.slice(1).join(' ');
     }
-    const ok = rows.filter((r) => !r.problem?.endsWith('skipped'));
-    if (form.get('confirm') !== '1') return { rows, ready: ok.length };
+    const rawUntil = idx.until >= 0 ? r[idx.until] : null;
+    const until = parseDate(rawUntil, club.tz);
+    const svcName = cell(r, idx.service);
+    const service = svcName
+      ? (names.find((x) => x.toLowerCase() === svcName.toLowerCase()) ?? svcName)
+      : names.length === 1 && until
+        ? (names[0] as string)
+        : '';
+    const rawPhone = cell(r, idx.phone);
+    return {
+      key: i,
+      line: h0 + i + 2,
+      first: first.slice(0, 80),
+      last: last.slice(0, 80),
+      phone: (rawPhone ? (kePhone(rawPhone) ?? rawPhone) : '').slice(0, 40),
+      no: cell(r, idx.no).replace(/\D/g, '').slice(0, 10),
+      until: until?.toISODate() ?? '',
+      badDate: !until && String(rawUntil ?? '').trim() ? String(rawUntil).trim().slice(0, 30) : undefined,
+      service: service.slice(0, 80),
+    };
+  });
+  return { rows, known: club.known, today: club.today, file: file.name.slice(0, 120) };
+}
 
-    // Create: numbers from the file where free, otherwise the next free number from 21001.
+const DraftZ = z.object({
+  key: z.number(),
+  line: z.number(),
+  first: z.string().max(80),
+  last: z.string().max(80),
+  phone: z.string().max(40),
+  no: z.string().max(10),
+  until: z.string().regex(/^(\d{4}-\d{2}-\d{2})?$/),
+  badDate: z.string().max(40).optional(),
+  service: z.string().max(80),
+});
+
+export type ImportResult = { error?: string; created: number; withAccess: number; skipped: number };
+
+/**
+ * Step 2: import a batch of staged rows (the modal sends 100 at a time to show progress). Every row is checked
+ * again here against the club as it is now; anything flagged is skipped, nothing is trusted from the browser.
+ */
+export async function importDrafts(input: unknown, file: string): Promise<ImportResult> {
+  const none = { created: 0, withAccess: 0, skipped: 0 };
+  const s = await requireSession();
+  if (!can(s, 'members.edit')) return { error: 'Your role can’t add members.', ...none };
+  const parsed = z.array(DraftZ).max(200).safeParse(input);
+  if (!parsed.success) return { error: 'Those rows couldn’t be read. Try again.', ...none };
+  const rows = parsed.data;
+  const club = await clubFacts(s.tid);
+  const checks = checkDrafts(rows, club.known, club.today);
+  return withTenant(db(), s.tid, async (tx) => {
+    const now = DateTime.now().setZone(club.tz);
+    const taken = new Set(club.known.numbers);
     let next = Math.max(21000, ...[...taken].filter((n) => n > POOL[1] && n <= W26_MAX)) + 1;
+    let created = 0;
     let withAccess = 0;
-    for (const r of ok) {
-      let no = r.no;
-      if (no === null) {
+    let skipped = 0;
+    for (const [i, r] of rows.entries()) {
+      const c = checks[i];
+      if (!c || c.skip) {
+        skipped++;
+        continue;
+      }
+      // A number the check didn't flag is free; otherwise the next free number from 21001.
+      let no = r.no && !c.notes.some((n) => n.startsWith('Number')) ? Number(r.no) : null;
+      if (no === null || taken.has(no)) {
         while (taken.has(next)) next++;
         no = next++;
-        taken.add(no);
       }
+      taken.add(no);
       const [m] = await tx<{ id: string }[]>`
         insert into members (tenant_id, member_no, first_name, last_name, phone)
-        values (${s.tid}, ${no}, ${r.first || '—'}, ${r.last}, ${r.phone}) on conflict (tenant_id, member_no) do nothing returning id`;
-      if (!m) continue;
+        values (${s.tid}, ${no}, ${r.first.trim() || '—'}, ${r.last.trim() || '—'}, ${kePhone(r.phone)})
+        on conflict (tenant_id, member_no) do nothing returning id`;
+      if (!m) {
+        skipped++;
+        continue;
+      }
+      created++;
       await tx`insert into credentials (tenant_id, member_id, card_code) values (${s.tid}, ${m.id}, ${no})
                on conflict (tenant_id, site_code, card_code) do nothing`;
-      const svc = r.service ? services.find((x) => x.name === r.service) : undefined;
-      if (svc && r.until) {
+      const svc = club.services.find((x) => x.name.toLowerCase() === r.service.toLowerCase());
+      if (svc && r.until > club.today) {
+        const ends = DateTime.fromISO(r.until, { zone: club.tz }).endOf('day').toJSDate();
         withAccess++;
-        for (const z of svc.zone_keys)
+        for (const zone of svc.zone_keys)
           await tx`insert into entitlements (tenant_id, member_id, zone_key, starts_at, ends_at, source, service_id)
-                   values (${s.tid}, ${m.id}, ${z}, ${now.toJSDate()}, ${new Date(r.until)}, 'import', ${svc.id})`;
+                   values (${s.tid}, ${m.id}, ${zone}, ${now.toJSDate()}, ${ends}, 'import', ${svc.id})`;
       }
       await rebuildAccessState(tx, s.tid, m.id);
     }
-    await tx`insert into audit_log (tenant_id, actor, action, entity, data)
-             values (${s.tid}, ${s.uid}, 'members.imported', 'excel', ${tx.json({ file: file.name, created: ok.length, withAccess } as never)})`;
+    if (created)
+      await tx`insert into audit_log (tenant_id, actor, action, entity, data)
+               values (${s.tid}, ${s.uid}, 'members.imported', 'excel', ${tx.json({ file: file.slice(0, 120), created, withAccess } as never)})`;
     revalidatePath('/members');
-    return { done: { created: ok.length, withAccess } };
+    return { created, withAccess, skipped };
   });
 }
