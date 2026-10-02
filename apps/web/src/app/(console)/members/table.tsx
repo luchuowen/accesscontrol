@@ -114,6 +114,13 @@ export function MemberGroups({ rows, canPay, q }: { rows: Row[]; canPay: boolean
   };
   return (
     <>
+      <div className="mb-1.5 hidden grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1.1fr)_minmax(0,0.8fr)_140px] gap-4 px-[17px] text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-500 md:grid">
+        <span>Member</span>
+        <span>Phone</span>
+        <span>Services</span>
+        <span>Last visit</span>
+        <span className="text-right">Time left</span>
+      </div>
       {GROUPS.map((g) => {
         const list = rows.filter((r) => g.has.includes(r.status));
         if (!list.length) return null;
@@ -138,7 +145,7 @@ export function MemberGroups({ rows, canPay, q }: { rows: Row[]; canPay: boolean
                     <button
                       type="button"
                       onClick={() => setOpen(r.id)}
-                      className={`grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-4 px-4 py-3 text-left transition hover:bg-slate-50 md:grid-cols-[minmax(0,1.5fr)_minmax(0,1.2fr)_minmax(0,0.9fr)_150px] ${open === r.id ? 'bg-slate-50 shadow-[inset_3px_0_0_#0c1220]' : ''}`}
+                      className={`grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-4 px-4 py-3 text-left transition hover:bg-slate-50 md:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1.1fr)_minmax(0,0.8fr)_140px] ${open === r.id ? 'bg-slate-50 shadow-[inset_3px_0_0_#0c1220]' : ''}`}
                     >
                       <span className="flex min-w-0 items-center gap-3">
                         <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-slate-100 text-[12px] font-semibold text-ink-700">
@@ -154,9 +161,13 @@ export function MemberGroups({ rows, canPay, q }: { rows: Row[]; canPay: boolean
                             )}
                           </b>
                           <span className="block truncate text-[12px] tabular-nums text-ink-500">
-                            #{mark(String(r.no))} · {mark(phoneLabel(r.phone))}
+                            #{mark(String(r.no))}
+                            <span className="md:hidden"> · {mark(phoneLabel(r.phone))}</span>
                           </span>
                         </span>
+                      </span>
+                      <span className="hidden whitespace-nowrap text-[13px] tabular-nums text-ink-700 md:block">
+                        {r.phone ? mark(phoneLabel(r.phone)) : <span className="text-ink-500">—</span>}
                       </span>
                       <span className="hidden truncate text-[13px] text-ink-900 md:block">
                         {shown.length ? shown.join(' + ') : <span className="text-ink-500">No service yet</span>}
