@@ -7,6 +7,7 @@ import {
   DoorOpen,
   Layers,
   LayoutDashboard,
+  LogOut,
   MessageSquare,
   Plug,
   SlidersHorizontal,
@@ -112,8 +113,24 @@ export function Nav({
           ))}
         </nav>
         <div className="mt-auto rounded-xl bg-white/5 p-3">
-          <div className="truncate text-sm text-white">{user}</div>
-          <div className="text-[11px] text-ink-500">{partner ? `Partner · acting as ${roleLabel}` : roleLabel}</div>
+          <div className="flex items-center gap-2">
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-sm text-white">{user}</div>
+              <div className="truncate text-[11px] text-ink-500">
+                {partner ? `Partner · acting as ${roleLabel}` : roleLabel}
+              </div>
+            </div>
+            <form action="/logout" method="post">
+              <button
+                type="submit"
+                aria-label="Sign out"
+                title="Sign out"
+                className="grid h-8 w-8 place-items-center rounded-lg text-ink-300 transition hover:bg-rose-500/15 hover:text-rose-400"
+              >
+                <LogOut size={16} />
+              </button>
+            </form>
+          </div>
           {switchClubs && (
             <Link href="/choose" className="mt-3 flex items-center gap-2 text-xs text-ink-300 hover:text-white">
               <ArrowLeftRight size={14} /> Switch club
