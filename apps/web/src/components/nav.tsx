@@ -18,7 +18,7 @@ import { LangoMark } from '@/components/logo';
 
 /** Each page and the permissions that open it (any one is enough). Pages a role cannot use are not shown. */
 const ITEMS = [
-  { href: '/', label: 'Overview', icon: LayoutDashboard, any: [] },
+  { href: '/', label: 'Dashboard', icon: LayoutDashboard, any: [] },
   { href: '/members', label: 'Members', icon: Users, any: ['members.view'] },
   {
     href: '/payments',
