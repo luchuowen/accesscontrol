@@ -181,7 +181,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
             <div className="flex flex-wrap items-baseline justify-between gap-2">
               <Label>Money in · last {days} days</Label>
               <span className="font-mono text-[11.5px] text-slate-500">
-                M-Pesa {d.revenue.mpesa.toLocaleString('en-KE')} · cash {d.revenue.cash.toLocaleString('en-KE')}
+                MPESA {d.revenue.mpesa.toLocaleString('en-KE')} · CASH {d.revenue.cash.toLocaleString('en-KE')}
               </span>
             </div>
             <div
@@ -198,10 +198,10 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
             </div>
             <div className="mt-2.5 flex gap-4 text-xs text-ink-500">
               <span className="inline-flex items-center gap-1.5">
-                <i className="h-2.5 w-2.5 rounded-sm bg-brand-500" /> M-Pesa through TaifaPay
+                <i className="h-2.5 w-2.5 rounded-sm bg-brand-500" /> MPESA
               </span>
               <span className="inline-flex items-center gap-1.5">
-                <i className="h-2.5 w-2.5 rounded-sm bg-ink-950" /> Cash at the desk
+                <i className="h-2.5 w-2.5 rounded-sm bg-ink-950" /> CASH
               </span>
             </div>
           </Card>
