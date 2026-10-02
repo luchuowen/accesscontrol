@@ -12,5 +12,8 @@ const r = await seed({
   ownerPassword: need('SEED_OWNER_PASSWORD'),
   ...(process.env.SEED_SLUG ? { slug: process.env.SEED_SLUG } : {}),
   ...(process.env.SEED_NAME ? { name: process.env.SEED_NAME } : {}),
+  ...(process.env.SEED_OWNER_NAME ? { ownerName: process.env.SEED_OWNER_NAME } : {}),
+  ...(process.env.SEED_ADMIN_EMAIL ? { adminEmail: process.env.SEED_ADMIN_EMAIL } : {}),
+  ...(process.env.SEED_ADMIN_NAME ? { adminName: process.env.SEED_ADMIN_NAME } : {}),
 });
 console.log(JSON.stringify(r));

@@ -17,6 +17,10 @@ export interface SeedOptions {
   name?: string;
   ownerEmail: string;
   ownerPassword: string;
+  ownerName?: string;
+  /** also create a NAVAC admin login (same password) for the partner console */
+  adminEmail?: string;
+  adminName?: string;
   readers?: Record<string, number[]>; // zone → AxTraxNG reader IDs (fake defaults 11..14)
   historyDays?: number;
 }
@@ -103,8 +107,16 @@ export async function seed(o: SeedOptions) {
     for (const [kind, name, price, unit, count, zones] of products)
       await owner`insert into products (tenant_id, kind, name, price_kes, duration_unit, duration_count, zone_keys)
                   values (${tenantId}, ${kind}, ${name}, ${price}, ${unit}, ${count}, ${zones})`;
-    await owner`insert into staff_users (tenant_id, email, name, role, password_hash)
-                values (${tenantId}, ${o.ownerEmail.toLowerCase()}, 'Club Owner', 'owner', ${await hashPassword(o.ownerPassword)})`;
+    // The club's owner (one login, one club) and, optionally, a NAVAC admin login for the partner console.
+    const [own] = await owner`insert into staff_users (tenant_id, email, name, role, password_hash, accepted_at)
+                values (${tenantId}, ${o.ownerEmail.toLowerCase()}, ${o.ownerName ?? 'Club Owner'}, 'club',
+                        ${await hashPassword(o.ownerPassword)}, now()) returning id`;
+    await owner`insert into club_memberships (tenant_id, staff_id, role) values (${tenantId}, ${own?.id}, 'owner')`;
+    if (o.adminEmail)
+      await owner`insert into staff_users (email, name, role, password_hash, accepted_at)
+                  values (${o.adminEmail.toLowerCase()}, ${o.adminName ?? 'NAVAC Admin'}, 'partner_admin',
+                          ${await hashPassword(o.ownerPassword)}, now())
+                  on conflict (email) do nothing`;
 
     // Members + payment history (deterministic pseudo-random so demos are repeatable).
     let rnd = 42;
