@@ -1,7 +1,7 @@
 import { can } from '@lango/server';
-import { Plus } from 'lucide-react';
 import Link from 'next/link';
-import { ownerDashboard } from '@/lib/data';
+import { AddMember } from '@/components/add-member';
+import { nextMemberNo, ownerDashboard } from '@/lib/data';
 import { ago, kes } from '@/lib/format';
 import { requireSession } from '@/lib/session';
 import { LiveRefresh, RefreshButton } from './_dash/live-refresh';
@@ -45,7 +45,7 @@ export default async function Dashboard({
   const s = await requireSession();
   const { p, v, denied } = await searchParams;
   const days = PERIODS.find((x) => String(x) === p) ?? 30;
-  const d = await ownerDashboard(s.tid, days);
+  const [d, nextNo] = await Promise.all([ownerDashboard(s.tid, days), nextMemberNo(s.tid)]);
   const weekly = days > 7 && v !== 'd';
   const full = can(s, 'reports.all');
   const change = pct(d.revenue.now, d.revenue.prev);
@@ -103,14 +103,7 @@ export default async function Dashboard({
           <p className="mt-1 text-[13px] text-[#A3B3C9]">{today}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {can(s, 'members.edit') && (
-            <Link
-              href="/members?new=1"
-              className="inline-flex h-9 items-center gap-1.5 rounded-[10px] bg-white px-3.5 text-[13px] font-semibold text-ink-950 hover:bg-slate-100"
-            >
-              <Plus size={15} /> Member
-            </Link>
-          )}
+          {can(s, 'members.edit') && <AddMember club={d.tenantName} nextNo={nextNo} />}
           {full && (
             <nav
               className="flex gap-0.5 rounded-[10px] border border-white/20 bg-white/[0.08] p-[3px] text-xs"

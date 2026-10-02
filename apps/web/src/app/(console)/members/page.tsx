@@ -1,51 +1,31 @@
 import { can } from '@lango/server';
-import { Plus, Search } from 'lucide-react';
+import { Search } from 'lucide-react';
 import Link from 'next/link';
+import { AddMember } from '@/components/add-member';
 import { Notice } from '@/components/notice';
-import { SubmitButton } from '@/components/submit-button';
 import { Badge, PageHeader } from '@/components/ui';
-import { members } from '@/lib/data';
+import { members, nextMemberNo } from '@/lib/data';
 import { date, daysLeft } from '@/lib/format';
 import { requirePerm } from '@/lib/session';
-import { createMember } from '../actions';
+import { db } from '@/server/db';
 
-export default async function Members({
-  searchParams,
-}: {
-  searchParams: Promise<{ q?: string; new?: string; n?: string }>;
-}) {
+export default async function Members({ searchParams }: { searchParams: Promise<{ q?: string; n?: string }> }) {
   const s = await requirePerm('members.view');
-  const { q = '', new: showNew, n } = await searchParams;
-  const rows = await members(s.tid, q);
+  const { q = '', n } = await searchParams;
+  const [rows, nextNo, [t]] = await Promise.all([
+    members(s.tid, q),
+    nextMemberNo(s.tid),
+    db()<{ name: string }[]>`select name from tenants where id = ${s.tid}`,
+  ]);
+  const club = t?.name ?? '';
   return (
     <>
       <PageHeader
         title="Members"
         subtitle="Every member keeps one permanent number — it is their card code and their M-Pesa account number."
-        actions={
-          can(s, 'members.edit') && (
-            <Link href="/members?new=1" className="btn-primary">
-              <Plus size={16} /> New member
-            </Link>
-          )
-        }
+        actions={can(s, 'members.edit') && <AddMember club={club} nextNo={nextNo} variant="primary" />}
       />
       <Notice code={n} />
-      {showNew && can(s, 'members.edit') && (
-        <form action={createMember} className="card mb-6 grid gap-4 p-6 md:grid-cols-5">
-          <input name="firstName" required placeholder="First name" className="input" />
-          <input name="lastName" required placeholder="Last name" className="input" />
-          <input name="phone" placeholder="Phone (07…)" className="input" />
-          <input name="memberNo" type="number" min={1} max={65535} placeholder="Member no. (auto)" className="input" />
-          <SubmitButton pendingText="Creating…" className="btn-primary">
-            Create &amp; enrol
-          </SubmitButton>
-          <p className="text-xs text-ink-500 md:col-span-5">
-            The member is created in the access system straight away, with no access until a plan is paid. Present their
-            card or wristband at any reader to link it.
-          </p>
-        </form>
-      )}
       <form className="relative mb-4 max-w-sm">
         <Search size={16} className="absolute left-3.5 top-3 text-ink-300" />
         <input name="q" defaultValue={q} placeholder="Search name, number or phone" className="input pl-10" />

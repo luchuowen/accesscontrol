@@ -479,3 +479,12 @@ export async function consoleAlerts(tenantId: string) {
     };
   });
 }
+
+/** The member number the next new member gets when none is typed (same rule as createMember). */
+export async function nextMemberNo(tenantId: string) {
+  return T(tenantId, async (tx) => {
+    const [n] = await tx<{ next: number }[]>`
+      select coalesce(max(member_no), 21000) + 1 as next from members where member_no between 21001 and 65535`;
+    return n?.next ?? 21001;
+  });
+}

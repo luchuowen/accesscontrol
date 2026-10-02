@@ -1,4 +1,5 @@
 const MESSAGES: Record<string, { tone: 'ok' | 'warn' | 'err'; text: string }> = {
+  added: { tone: 'ok', text: 'Member added. Send an M-Pesa prompt or record a payment to open their access.' },
   paid: { tone: 'ok', text: 'Payment recorded. The doors update within seconds.' },
   duplicate: { tone: 'warn', text: 'That payment was already recorded, so nothing was charged twice.' },
   unmatched: {

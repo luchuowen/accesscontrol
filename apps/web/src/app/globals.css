@@ -42,6 +42,7 @@
     #0b1629;
 }
 @keyframes auth-fade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes pop { from { opacity: .6; transform: translateY(8px) scale(.98); } to { opacity: 1; transform: none; } }
 .auth-fade { animation: auth-fade 0.45s ease-out; }
 @media (prefers-reduced-motion: reduce) { .auth-fade { animation: none; } }
 @utility auth-label { @apply mb-1.5 flex items-center justify-between text-xs font-medium text-slate-700; }

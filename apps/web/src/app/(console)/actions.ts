@@ -28,24 +28,41 @@ const id = (form: FormData, k: string) => {
   return UUID.test(v) ? v : null;
 };
 
-export async function createMember(form: FormData) {
-  const s = await requireSession();
-  if (!can(s, 'members.edit')) redirect('/members?new=1&n=forbidden');
+type NewMember = { first: string; last: string; phone: string | null; wanted: number | null };
+type MemberError = 'forbidden' | 'names' | 'number' | 'taken' | 'phone';
+
+/** Kenyan mobile in +2547…/+2541… form, or null when blank; 'bad' when it is not a mobile number. */
+function kePhone(raw: string): string | null | 'bad' {
+  const d = raw.replace(/\D/g, '');
+  if (!d) return null;
+  const local = d.replace(/^254/, '').replace(/^0/, '');
+  return /^[17]\d{8}$/.test(local) ? `+254${local}` : 'bad';
+}
+
+function readMember(form: FormData): NewMember | MemberError {
   const first = String(form.get('firstName') ?? '')
     .trim()
     .slice(0, 80);
   const last = String(form.get('lastName') ?? '')
     .trim()
     .slice(0, 80);
-  const phone = String(form.get('phone') ?? '').replace(/\s+/g, '') || null;
+  const phone = kePhone(String(form.get('phone') ?? ''));
   const rawNo = String(form.get('memberNo') ?? '').trim();
   const wanted = rawNo ? Number(rawNo) : null;
-  if (!first || !last) redirect('/members?new=1&n=names');
-  if (wanted !== null && !(Number.isInteger(wanted) && wanted >= 1 && wanted <= W26_MAX))
-    redirect('/members?new=1&n=number');
-  let mid: string;
+  if (!first || !last) return 'names';
+  if (phone === 'bad') return 'phone';
+  if (wanted !== null && !(Number.isInteger(wanted) && wanted >= 1 && wanted <= W26_MAX)) return 'number';
+  return { first, last, phone, wanted };
+}
+
+/** Creates the member, their default card and access state, and queues the welcome SMS. */
+async function insertMember(
+  s: Awaited<ReturnType<typeof requireSession>>,
+  m: NewMember,
+): Promise<string | MemberError> {
+  const { first, last, phone, wanted } = m;
   try {
-    mid = await withTenant(db(), s.tid, async (tx) => {
+    return await withTenant(db(), s.tid, async (tx) => {
       const [n] = await tx<{ next: number }[]>`
         select coalesce(max(member_no), 21000) + 1 as next from members where member_no between 21001 and ${W26_MAX}`;
       const memberNo = wanted ?? n?.next ?? 21001;
@@ -72,11 +89,30 @@ export async function createMember(form: FormData) {
       return newId;
     });
   } catch (e) {
-    if (uniqueViolation(e)) redirect('/members?new=1&n=taken');
-    if ((e as { code?: string })?.code === 'FULL') redirect('/members?new=1&n=number');
+    if (uniqueViolation(e)) return 'taken';
+    if ((e as { code?: string })?.code === 'FULL') return 'number';
     throw e;
   }
-  redirect(`/members/${mid}`);
+}
+
+const MEMBER_ERRORS: Record<MemberError, string> = {
+  forbidden: 'Your role can’t add members.',
+  names: 'Enter a first and last name.',
+  phone: 'Enter a Kenyan mobile number, like 712 345 678.',
+  number: 'Member number must be between 1 and 65535.',
+  taken: 'That member number is already in use.',
+};
+
+/** The Add member modal: returns an error to show in the form, or opens the new member. */
+export async function addMember(_prev: { error?: string }, form: FormData): Promise<{ error?: string }> {
+  const s = await requireSession();
+  if (!can(s, 'members.edit')) return { error: MEMBER_ERRORS.forbidden };
+  const m = readMember(form);
+  if (typeof m === 'string') return { error: MEMBER_ERRORS[m] };
+  const r = await insertMember(s, m);
+  if (r in MEMBER_ERRORS) return { error: MEMBER_ERRORS[r as MemberError] };
+  revalidatePath('/');
+  redirect(`/members/${r}?n=added`);
 }
 
 /** Cash / card-at-desk payment. Goes through the same matching + period rules as M-Pesa; audited. */
