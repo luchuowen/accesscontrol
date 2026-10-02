@@ -1,9 +1,10 @@
 'use client';
-import { CircleHelp, CircleUserRound, LogOut, Search } from 'lucide-react';
-import Link from 'next/link';
+import { CircleUserRound, LogOut, Search } from 'lucide-react';
 import { usePathname } from 'next/navigation';
-import { type ReactNode, useEffect, useRef, useState } from 'react';
+import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
+import { AccountCard, Avatar, type Theme, ThemeWatcher } from '@/components/account-card';
 import { HealthBell } from '@/components/health-drawer';
+import { HelpGuide } from '@/components/help-guide';
 import { pageFor } from '@/components/nav';
 import type { HealthArea } from '@/lib/alerts';
 
@@ -51,12 +52,20 @@ export function TopBar({
   roleLabel,
   health,
   canSearch,
+  perms,
+  avatar,
+  theme,
 }: {
   user: string;
   roleLabel: string;
   health: HealthArea[];
   canSearch: boolean;
+  perms: string[];
+  avatar: string | null;
+  theme: Theme;
 }) {
+  const [account, setAccount] = useState(false);
+  const closeAccount = useCallback(() => setAccount(false), []);
   const path = usePathname();
   const page = pageFor(path);
   const [searching, setSearching] = useState(false);
@@ -96,29 +105,30 @@ export function TopBar({
           </button>
         ))}
       <HealthBell areas={health} />
-      <Menu label="Help" button={<CircleHelp size={19} />}>
-        <div className="px-2.5 py-2">
-          <div className="font-semibold text-ink-900">Need help?</div>
-          <div className="mt-0.5 text-ink-500">
-            Email <span className="select-all text-ink-900">support@navac.co.ke</span>
-          </div>
-        </div>
-      </Menu>
+      <HelpGuide perms={perms} />
       <Menu
         label="Your profile"
         button={
-          <span className="grid h-9 w-9 place-items-center rounded-full bg-slate-100 text-xs font-semibold text-ink-700">
-            {initials || <CircleUserRound size={18} />}
-          </span>
+          avatar ? (
+            <Avatar name={user} src={avatar} size={34} />
+          ) : (
+            <span className="grid h-9 w-9 place-items-center rounded-full bg-slate-100 text-xs font-semibold text-ink-700">
+              {initials || <CircleUserRound size={18} />}
+            </span>
+          )
         }
       >
         <div className="border-b border-slate-100 px-2.5 pb-2 pt-1.5">
           <div className="truncate font-semibold text-ink-900">{user}</div>
           <div className="text-xs text-ink-500">{roleLabel}</div>
         </div>
-        <Link href="/account" className="mt-1 flex items-center gap-2.5 rounded-lg px-2.5 py-2 hover:bg-slate-50">
+        <button
+          type="button"
+          onClick={() => setAccount(true)}
+          className="mt-1 flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left hover:bg-slate-50"
+        >
           <CircleUserRound size={16} className="text-ink-500" /> Your account
-        </Link>
+        </button>
         <form action="/logout" method="post">
           <button
             type="submit"
@@ -128,6 +138,8 @@ export function TopBar({
           </button>
         </form>
       </Menu>
+      <AccountCard open={account} onClose={closeAccount} name={user} avatar={avatar} theme={theme} />
+      <ThemeWatcher theme={theme} />
     </header>
   );
 }

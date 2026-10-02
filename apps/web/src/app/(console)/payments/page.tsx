@@ -1,7 +1,9 @@
 import { can } from '@lango/server';
 import { AlertCircle } from 'lucide-react';
+import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { Notice } from '@/components/notice';
+import { Pager } from '@/components/pager';
 import { SubmitButton } from '@/components/submit-button';
 import { PageHeader } from '@/components/ui';
 import { paymentsBoard, products, unmatchedPayments } from '@/lib/data';
@@ -16,16 +18,24 @@ import { ExportMenu, LedgerFilters, LedgerTable, PayFor } from './ledger';
  * not matched to a member, so nobody got access yet); one searchable, filterable list with a details panel; Record
  * cash / Send M-Pesa prompt; export to Excel, CSV or PDF. Front desk sees today only.
  */
-type Params = { n?: string; p?: string; q?: string; m?: string; s?: string };
+type Params = { n?: string; p?: string; q?: string; m?: string; s?: string; pg?: string };
+const PER = 20;
 
 export default async function Payments({ searchParams }: { searchParams: Promise<Params> }) {
   const s = await requireSession();
   if (!canAny(s, 'payments.record', 'payments.assign', 'reports.all')) redirect('/?denied=1');
   const sp = await searchParams;
   const full = can(s, 'reports.all');
+  const page = Math.max(1, Math.floor(Number(sp.pg)) || 1);
+  const pageHref = (n: number) => {
+    const u = new URLSearchParams();
+    for (const k of ['p', 'q', 'm', 's'] as const) if (sp[k]) u.set(k, sp[k] as string);
+    if (n > 1) u.set('pg', String(n));
+    return `/payments${u.size ? `?${u}` : ''}`;
+  };
   const days = full ? Math.min(366, Math.max(1, Number(sp.p) || 30)) : 0;
   const [b, queue, plans] = await Promise.all([
-    paymentsBoard(s.tid, { days, q: sp.q, method: sp.m, status: sp.s }),
+    paymentsBoard(s.tid, { days, q: sp.q, method: sp.m, status: sp.s, limit: PER, offset: (page - 1) * PER }),
     unmatchedPayments(s.tid),
     products(s.tid),
   ]);
@@ -126,11 +136,17 @@ export default async function Payments({ searchParams }: { searchParams: Promise
             }))}
           />
         ) : (
-          <p className="px-5 py-12 text-center text-sm text-ink-500">No payments match.</p>
+          <p className="px-5 py-12 text-center text-sm text-ink-500">
+            {page > 1 && b.count === 0 ? (
+              <Link href={pageHref(1)} className="font-semibold text-ink-900 underline">
+                Back to the first page
+              </Link>
+            ) : (
+              'No payments match.'
+            )}
+          </p>
         )}
-        <div className="border-t border-[#EEF1F6] px-4 py-3 text-[12.5px] text-ink-500">
-          {b.rows.length} payment{b.rows.length === 1 ? '' : 's'} shown
-        </div>
+        <Pager page={page} per={PER} total={b.count} noun="payments" href={pageHref} />
       </section>
 
       {queue.length > 0 && (

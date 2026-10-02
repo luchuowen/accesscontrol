@@ -82,3 +82,30 @@ export async function endSession(form: FormData) {
              where id = ${/^[0-9a-f-]{36}$/.test(id) ? id : null} and staff_id = ${s.uid} and revoked_at is null`;
   back('ended');
 }
+
+export type ProfileState = { error?: string; saved?: number };
+
+/**
+ * Your account card: display name, photo and appearance, for yourself only. Name and look are not security
+ * settings, so no password is asked (sign-in details stay on the Password & devices page).
+ */
+export async function saveProfile(_prev: ProfileState, form: FormData): Promise<ProfileState> {
+  const s = await requireSignedIn();
+  const name = String(form.get('name') ?? '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const theme = String(form.get('theme') ?? 'system');
+  const photo = String(form.get('avatar') ?? 'keep');
+  if (name.length < 2) return { error: 'Enter your name (at least 2 letters).' };
+  if (name.length > 80) return { error: 'Keep your name under 80 characters.' };
+  if (!['light', 'dark', 'system'].includes(theme)) return { error: 'Pick light, dark or system.' };
+  let avatar: string | null = null; // keep
+  if (photo === 'remove') avatar = '';
+  else if (photo !== 'keep') {
+    if (!/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(photo) || photo.length > 90_000)
+      return { error: 'That photo could not be used. Try a JPG or PNG.' };
+    avatar = photo;
+  }
+  await db()`select app_staff_set_profile(${s.uid}, ${name}, ${theme}, ${avatar})`;
+  return { saved: Date.now() };
+}

@@ -58,6 +58,7 @@ export function LedgerFilters({ full }: { full: boolean }) {
     const u = new URLSearchParams(sp.toString());
     for (const [k, v] of Object.entries(patch)) v ? u.set(k, v) : u.delete(k);
     u.delete('n');
+    u.delete('pg');
     start(() => router.replace(u.toString() ? `${path}?${u}` : path, { scroll: false }));
   };
   useEffect(() => {

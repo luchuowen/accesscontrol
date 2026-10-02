@@ -284,7 +284,7 @@ export interface PaymentRow {
  */
 export async function paymentsBoard(
   tenantId: string,
-  o: { days: number; q?: string; method?: string; status?: string; limit?: number },
+  o: { days: number; q?: string; method?: string; status?: string; limit?: number; offset?: number },
 ) {
   return T(tenantId, async (tx) => {
     const [t] = await tx<{ timezone: string }[]>`select timezone from tenants where id = ${tenantId}`;
@@ -300,8 +300,8 @@ export async function paymentsBoard(
     const method = o.method === 'mpesa' || o.method === 'cash' ? o.method : '';
     const status = o.status === 'applied' || o.status === 'unmatched' ? o.status : '';
     const [rows, [cur], [prev], [held]] = await Promise.all([
-      tx<PaymentRow[]>`
-        select p.id, p.paid_at, p.amount_kes, p.status, p.channel, p.provider, p.provider_txn_id, p.account_ref, p.phone,
+      tx<(PaymentRow & { full_count: number })[]>`
+        select count(*) over ()::int as full_count, p.id, p.paid_at, p.amount_kes, p.status, p.channel, p.provider, p.provider_txn_id, p.account_ref, p.phone,
                p.member_id, m.member_no, m.first_name || ' ' || m.last_name as member,
                coalesce((select string_agg(l.label, ' + ' order by l.created_at) from payment_lines l where l.payment_id = p.id), pr.name) as product,
                st.name as recorded_by
@@ -313,7 +313,7 @@ export async function paymentsBoard(
           and (${q} = '' or lower(coalesce(m.first_name || ' ' || m.last_name, '')) like ${like}
                or m.member_no::text like ${like} or lower(p.provider_txn_id) like ${like} or coalesce(p.account_ref, '') like ${like}
                or (${digits} <> '' and regexp_replace(coalesce(p.phone, ''), '\\D', '', 'g') like ${`%${digits}%`}))
-        order by p.paid_at desc limit ${o.limit ?? 300}`,
+        order by p.paid_at desc limit ${o.limit ?? 20} offset ${o.offset ?? 0}`,
       tx<{ total: number; mpesa: number; cash: number; n: number }[]>`
         select coalesce(sum(amount_kes), 0)::int as total, coalesce(sum(amount_kes) filter (where channel <> 'cash'), 0)::int as mpesa,
                coalesce(sum(amount_kes) filter (where channel = 'cash'), 0)::int as cash, count(*)::int as n
@@ -326,6 +326,7 @@ export async function paymentsBoard(
     ]);
     return {
       rows,
+      count: rows[0]?.full_count ?? 0,
       totals: cur ?? { total: 0, mpesa: 0, cash: 0, n: 0 },
       previous: prev?.total ?? 0,
       held: held ?? { n: 0, kes: 0 },

@@ -3,6 +3,7 @@ import { can } from '@lango/server';
 import Link from 'next/link';
 import { AddMember } from '@/components/add-member';
 import { Notice } from '@/components/notice';
+import { Pager } from '@/components/pager';
 import { PageHeader } from '@/components/ui';
 import { WalkIn } from '@/components/walk-in';
 import { membersBoard, nextMemberNo, walkinPrices } from '@/lib/data';
@@ -55,7 +56,6 @@ export default async function Members({ searchParams }: { searchParams: Promise<
     { key: 'lapsed', label: 'Lapsed', n: c.lapsed, dot: 'bg-rose-400' },
     { key: 'never', label: 'Never paid', n: c.never, dot: 'bg-slate-300' },
   ];
-  const pages = Math.max(1, Math.ceil(board.total / 50));
 
   return (
     <>
@@ -155,33 +155,14 @@ export default async function Members({ searchParams }: { searchParams: Promise<
                 }))}
               />
             )}
-            <div className="flex items-center justify-between px-1 py-2 text-[13px] text-ink-500">
-              <span>
-                Showing {board.rows.length} of {board.total}
-              </span>
-              {pages > 1 && (
-                <span className="flex gap-1.5">
-                  {page > 1 && (
-                    <Link
-                      href={href({ page: String(page - 1) })}
-                      className="rounded-lg border border-[#E5E8EE] px-3 py-1.5 hover:bg-slate-50"
-                    >
-                      Previous
-                    </Link>
-                  )}
-                  <span className="px-2 py-1.5">
-                    Page {page} of {pages}
-                  </span>
-                  {page < pages && (
-                    <Link
-                      href={href({ page: String(page + 1) })}
-                      className="rounded-lg border border-[#E5E8EE] px-3 py-1.5 hover:bg-slate-50"
-                    >
-                      Next
-                    </Link>
-                  )}
-                </span>
-              )}
+            <div className="mt-3 overflow-hidden rounded-2xl border border-[#E7EBF3] bg-white">
+              <Pager
+                page={page}
+                per={50}
+                total={board.total}
+                noun="members"
+                href={(n) => href({ page: n > 1 ? String(n) : undefined })}
+              />
             </div>
           </div>
         </>
