@@ -1,4 +1,4 @@
-import type { Sql } from '@lango/db';
+import { type Sql, withTenant } from '@lango/db';
 import {
   checkLink,
   type InviteContext,
@@ -62,6 +62,43 @@ export async function roleDefaults(sql: Sql): Promise<Record<string, string[]>> 
   return out;
 }
 
+/** This club's rights per role (platform defaults with the owner's changes) and which ones were changed. */
+export async function clubRoleDefaults(sql: Sql, tenantId: string) {
+  const rows = await withTenant(
+    sql,
+    tenantId,
+    (tx) => tx<{ role: string; perm: string; is_default: boolean }[]>`select * from app_club_role_perms(${tenantId})`,
+  );
+  const base = await roleDefaults(sql);
+  const perms: Record<string, string[]> = {};
+  for (const r of rows) (perms[r.role] ??= []).push(r.perm);
+  // Changed = differs from the platform default (added or removed).
+  const changed: Record<string, string[]> = {};
+  for (const role of Object.keys(base)) {
+    const now = new Set(perms[role] ?? []);
+    const def = new Set(base[role] ?? []);
+    changed[role] = [...new Set([...now, ...def])].filter((p) => now.has(p) !== def.has(p));
+  }
+  return { perms, base, changed };
+}
+
+/** Owner only: give a role a right in this club, or take it away. */
+export async function setRolePerm(sql: Sql, w: Who, role: string, perm: string, on: boolean) {
+  await sql`select app_set_role_perm(${w.actorId}, ${w.tenantId}, ${role}, ${perm}, ${on})`;
+  await logAuth(sql, {
+    kind: 'role.tuned',
+    tenantId: w.tenantId,
+    actor: w.actorId,
+    ip: w.ip,
+    data: { role, perm, on },
+  });
+}
+
+export async function resetRolePerms(sql: Sql, w: Who, role: string) {
+  await sql`select app_reset_role_perms(${w.actorId}, ${w.tenantId}, ${role})`;
+  await logAuth(sql, { kind: 'role.reset', tenantId: w.tenantId, actor: w.actorId, ip: w.ip, data: { role } });
+}
+
 export interface ClubOption {
   tenant_id: string;
   name: string;
@@ -85,7 +122,7 @@ export interface TeamRow {
   last_seen: Date | null;
   suspended_at: Date | null;
 }
-/** Team members besides the owner (invited or active), and the allowance (5 for now; per plan later). */
+/** Everyone in the club, the owner included (invited or active), and the allowance (5 for now; per plan later). */
 export const clubSeats = async (sql: Sql, tenantId: string) =>
   (await sql<{ used: number; cap: number }[]>`select * from app_club_seats(${tenantId})`)[0] ?? { used: 0, cap: 5 };
 

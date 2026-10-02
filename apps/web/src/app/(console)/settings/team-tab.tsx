@@ -1,5 +1,5 @@
-import { CLUB_ROLES, clubSeats, clubTeam, PERMISSIONS, roleDefaults, roleLabel } from '@lango/server';
-import { Crown, ShieldCheck, UsersRound } from 'lucide-react';
+import { CLUB_ROLES, clubRoleDefaults, clubSeats, clubTeam, PERMISSIONS, roleLabel } from '@lango/server';
+import { Crown, UsersRound } from 'lucide-react';
 import { SubmitButton } from '@/components/submit-button';
 import { Badge } from '@/components/ui';
 import { ago, dateTime } from '@/lib/format';
@@ -7,6 +7,7 @@ import { requirePerm } from '@/lib/session';
 import { db } from '@/server/db';
 import { Banner, SectionHead } from './bits';
 import { InviteForm } from './invite-form';
+import { RoleMatrix } from './role-matrix';
 import { remove, resend, setPerms, setRole, suspend } from './team-actions';
 
 const MSG: Record<string, [tone: 'green' | 'amber' | 'red', text: string]> = {
@@ -30,12 +31,14 @@ const MSG: Record<string, [tone: 'green' | 'amber' | 'red', text: string]> = {
 export async function TeamTab({ m }: { m?: string }) {
   const s = await requirePerm('team.manage');
   const msg = m ? MSG[m] : undefined;
-  const [team, defaults, seats] = await Promise.all([
+  const [team, roles0, seats] = await Promise.all([
     clubTeam(db(), s.tid),
-    roleDefaults(db()),
+    clubRoleDefaults(db(), s.tid),
     clubSeats(db(), s.tid),
   ]);
   const iAmOwner = s.role === 'owner';
+  const defaults = roles0.perms;
+  const roleBase = roles0.base;
   const roles = CLUB_ROLES.filter((r) => r.key !== 'admin' || iAmOwner);
   const editable = (t: (typeof team)[number]) =>
     t.id !== s.uid && t.role !== 'owner' && (t.role !== 'admin' || iAmOwner);
@@ -206,42 +209,13 @@ export async function TeamTab({ m }: { m?: string }) {
           >
             Sign-ins and changes are in System audit <span className="text-emerald-700">Open →</span>
           </a>
-          <section className="rounded-2xl border border-[#E7EBF3] p-5">
-            <div className="flex items-center gap-2 font-medium">
-              <ShieldCheck size={16} className="text-brand-600" /> What each role can do
-            </div>
-            <div className="mt-3 overflow-x-auto">
-              <table className="w-full min-w-[560px] text-xs">
-                <thead>
-                  <tr className="text-ink-500">
-                    <th className="py-1 pr-2 text-left font-medium" />
-                    {['owner', ...CLUB_ROLES.map((r) => r.key)].map((r) => (
-                      <th key={r} className="px-1 py-1 font-medium">
-                        {roleLabel(r)}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {PERMISSIONS.map((p) => (
-                    <tr key={p.key} className="border-t border-ink-100">
-                      <td className="py-2 pr-3 text-ink-700">{p.label}</td>
-                      {['owner', ...CLUB_ROLES.map((r) => r.key)].map((r) => (
-                        <td key={r} className="px-1 text-center">
-                          {(defaults[r] ?? []).includes(p.key) ? (
-                            <span className="text-emerald-600">●</span>
-                          ) : (
-                            <span className="text-ink-100">●</span>
-                          )}
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <p className="mt-2 text-[11px] text-ink-500">Front desk sees today’s figures only.</p>
-          </section>
+          <RoleMatrix
+            roles={CLUB_ROLES.map((r) => ({ key: r.key, label: r.label }))}
+            perms={PERMISSIONS.map((p) => ({ key: p.key, label: p.label }))}
+            have={defaults}
+            base={roleBase}
+            editable={iAmOwner}
+          />
         </div>
 
         <div className="min-w-0 space-y-6">
@@ -251,7 +225,7 @@ export async function TeamTab({ m }: { m?: string }) {
               They get an email (and an SMS if you add a mobile) to set their own password.
             </p>
             <div className="mb-3 flex items-center justify-between rounded-lg bg-ink-50 px-3 py-2 text-xs">
-              <span className="text-ink-500">Team members besides the owner</span>
+              <span className="text-ink-500">Team members</span>
               <span className="font-semibold tabular-nums">
                 {seats.used} of {seats.cap}
               </span>

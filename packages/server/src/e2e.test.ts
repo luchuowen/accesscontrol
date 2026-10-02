@@ -50,7 +50,9 @@ import {
   myClubs,
   offerOwnership,
   removeMember,
+  resetRolePerms,
   setPermissions,
+  setRolePerm,
   suspendMember,
 } from './team.js';
 
@@ -1019,6 +1021,18 @@ describe('walking skeleton: pay → door', () => {
     await suspendMember(app, who, mgr, false);
     expect((await perms(mgr, tenantId))?.role).toBe('reception');
 
+    // The owner tunes a role for this club: front desk may also assign unmatched payments, and may not edit members.
+    const ownerWho = { actorId: ownerId, actorName: 'Owner', tenantId };
+    await expect(setRolePerm(app, who, 'reception', 'payments.assign', true)).rejects.toThrow(/only the owner/);
+    await setRolePerm(app, ownerWho, 'reception', 'payments.assign', true);
+    await setRolePerm(app, ownerWho, 'reception', 'members.view', false);
+    expect((await perms(mgr, tenantId))?.perms).toContain('payments.assign');
+    expect((await perms(mgr, tenantId))?.perms).not.toContain('members.view');
+    expect(await perms(mgr, otherTenant)).toBeNull();
+    await expect(setRolePerm(app, ownerWho, 'reception', 'club.own', true)).rejects.toThrow(/unknown permission/);
+    await resetRolePerms(app, ownerWho, 'reception');
+    expect((await perms(mgr, tenantId))?.perms).not.toContain('payments.assign');
+
     // Removal: signed out of the club at once; history stays; they can no longer work anywhere.
     await removeMember(app, who, mgr);
     expect(await readSession(app, sm.token)).toBeNull();
@@ -1042,8 +1056,8 @@ describe('walking skeleton: pay → door', () => {
       ),
     ).rejects.toThrow(/another club/);
     expect((await myClubs(app, adm)).map((c) => c.role)).toEqual(['admin']);
-    // Team allowance: 5 members besides the owner; the 6th invitation is refused.
-    for (let i = 0; i < 5; i++) await join(otherOwnerId, `seat${i}@um.test`, 'reception', otherTenant);
+    // Five seats including the owner: four more fit.
+    for (let i = 0; i < 4; i++) await join(otherOwnerId, `seat${i}@um.test`, 'reception', otherTenant);
     await expect(join(otherOwnerId, 'seat5@um.test', 'reception', otherTenant)).rejects.toThrow(/team limit/);
 
     // Ownership: offered by the owner to an admin, confirmed by the admin; the old owner stays as admin.

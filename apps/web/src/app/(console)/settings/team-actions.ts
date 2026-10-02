@@ -11,8 +11,10 @@ import {
   PERMISSIONS,
   removeMember,
   resendInvite,
+  resetRolePerms,
   roleLabel,
   setPermissions,
+  setRolePerm,
   staffById,
   suspendMember,
   teamError,
@@ -167,4 +169,25 @@ export async function takeClub(form: FormData) {
   const me = await staffById(db(), s.uid);
   const ok = me ? await acceptOwnership(db(), token, me.id, clientIp(await headers())) : false;
   redirect(ok ? '/settings?tab=team&m=owner-now' : `/transfer/${encodeURIComponent(token)}?e=1`);
+}
+
+/** Owner only: switch one right on or off for a role in this club (no page reload; the table updates in place). */
+export async function toggleRolePerm(role: string, perm: string, on: boolean): Promise<{ error?: string }> {
+  const { s, who } = await manager();
+  if (s.role !== 'owner') return { error: 'Only the owner can change what a role can do.' };
+  try {
+    await setRolePerm(db(), who, role, perm, on);
+  } catch {
+    return { error: 'That right can’t be changed.' };
+  }
+  revalidatePath('/settings');
+  return {};
+}
+
+export async function resetRole(role: string): Promise<{ error?: string }> {
+  const { s, who } = await manager();
+  if (s.role !== 'owner') return { error: 'Only the owner can change what a role can do.' };
+  await resetRolePerms(db(), who, role);
+  revalidatePath('/settings');
+  return {};
 }
