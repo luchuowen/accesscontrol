@@ -57,7 +57,7 @@ export function MoneyIn({ daily, days, weekly }: { daily: Day[]; days: number; w
   const { max, step } = scale(Math.max(0, ...bars.map((b) => b.mpesa + b.cash)));
   const ticks = Array.from({ length: Math.round(max / step) + 1 }, (_, i) => i * step).reverse();
   const every = weekly ? (bars.length > 7 ? 2 : 1) : Math.ceil(bars.length / 6);
-  const view = (w: boolean) => `/?p=${days}&v=${w ? 'w' : 'd'}`;
+  const view = (w: boolean) => `/?p=${days}${w ? '&v=w' : ''}`;
 
   return (
     <>

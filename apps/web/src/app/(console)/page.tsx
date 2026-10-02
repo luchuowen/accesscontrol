@@ -46,7 +46,7 @@ export default async function Dashboard({
   const { p, v, denied } = await searchParams;
   const days = PERIODS.find((x) => String(x) === p) ?? 30;
   const [d, nextNo] = await Promise.all([ownerDashboard(s.tid, days), nextMemberNo(s.tid)]);
-  const weekly = days > 7 && v !== 'd';
+  const weekly = days > 7 && v === 'w';
   const full = can(s, 'reports.all');
   const change = pct(d.revenue.now, d.revenue.prev);
   const rate = d.renewals.ended ? Math.round((d.renewals.renewed / d.renewals.ended) * 100) : null;
@@ -112,7 +112,7 @@ export default async function Dashboard({
               {PERIODS.map((x) => (
                 <Link
                   key={x}
-                  href={`/?p=${x}${v === 'd' ? '&v=d' : ''}`}
+                  href={`/?p=${x}${v === 'w' ? '&v=w' : ''}`}
                   aria-current={x === days ? 'page' : undefined}
                   className={`rounded-[7px] px-2.5 py-1.5 ${x === days ? 'bg-white font-semibold text-ink-950' : 'text-[#C7D2E1] hover:text-white'}`}
                 >
