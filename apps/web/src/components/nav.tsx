@@ -62,7 +62,9 @@ export function Nav({
       </nav>
       <div className="mt-auto rounded-xl bg-white/5 p-3">
         <div className="text-sm text-white">{user}</div>
-        <div className="text-[11px] capitalize text-ink-500">{partner ? 'Partner · acting as owner' : role}</div>
+        <div className={`text-[11px] text-ink-500 ${partner ? '' : 'capitalize'}`}>
+          {partner ? 'Partner · acting as owner' : role}
+        </div>
         {partner && (
           <Link href="/partner" className="mt-3 flex items-center gap-2 text-xs text-ink-300 hover:text-white">
             <ArrowLeftRight size={14} /> All clubs
