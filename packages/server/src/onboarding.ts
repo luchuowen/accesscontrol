@@ -33,23 +33,23 @@ export async function onboardingChecklist(sql: Sql, tenantId: string): Promise<C
     return [
       {
         key: 'taifapay',
-        label: 'TaifaPay account connected',
+        label: 'Payment Gateway account connected',
         done: !!taifa,
-        hint: 'Merchant keys verified with TaifaPay',
+        hint: 'Merchant keys verified with the Payment Gateway',
         href: '/settings',
       },
       {
         key: 'channels',
         label: 'How members pay is set',
         done: !!(ch.paybill || ch.till || ch.linksOnly),
-        hint: 'Paybill or till linked on TaifaPay, or payment links only',
+        hint: 'Paybill or till linked on the Payment Gateway, or payment links only',
         href: '/settings',
       },
       {
         key: 'settlement',
         label: 'Bank settlement confirmed',
         done: !!ch.settlementConfirmed,
-        hint: 'TaifaPay pays the club’s bank account',
+        hint: 'The Payment Gateway pays the club’s bank account',
         href: '/settings',
       },
       {
@@ -76,7 +76,7 @@ export async function onboardingChecklist(sql: Sql, tenantId: string): Promise<C
       },
       {
         key: 'first-payment',
-        label: 'First payment through TaifaPay',
+        label: 'First payment through the Payment Gateway',
         done: (pay?.n ?? 0) > 0,
         hint: 'A real KES 10 test is enough',
         href: '/payments',

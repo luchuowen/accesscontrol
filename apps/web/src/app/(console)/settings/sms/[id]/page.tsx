@@ -7,7 +7,7 @@ import { requireSession } from '@/lib/session';
 import { db } from '@/server/db';
 import { PrintButton } from '../print-button';
 
-/** Invoice for an SMS credit purchase; it becomes a receipt once TaifaPay confirms the M-Pesa payment. */
+/** Invoice for an SMS credit purchase; it becomes a receipt once Payment Gateway confirms the M-Pesa payment. */
 export default async function SmsDocument({ params }: { params: Promise<{ id: string }> }) {
   const s = await requireSession();
   const { id } = await params;
@@ -129,7 +129,7 @@ export default async function SmsDocument({ params }: { params: Promise<{ id: st
               </div>
               {t.provider_ref && (
                 <div>
-                  TaifaPay reference <span className="font-mono">{t.provider_ref}</span>
+                  Payment Gateway reference <span className="font-mono">{t.provider_ref}</span>
                 </div>
               )}
               <div>

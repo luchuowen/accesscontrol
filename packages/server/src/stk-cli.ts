@@ -10,7 +10,7 @@ const sql = connect(process.env.DATABASE_URL as string, 1);
 const [t] = await sql<{ id: string }[]>`select id from tenants where slug = ${slug ?? ''}`;
 if (!t) throw new Error('unknown tenant');
 const client = await tenantTaifa(sql, t.id);
-if (!client) throw new Error('TaifaPay not configured');
+if (!client) throw new Error('Payment Gateway not configured');
 const intent = await withTenant(sql, t.id, async (tx) => {
   const [m] = await tx<{ id: string }[]>`select id from members where member_no = ${Number(memberNo)}`;
   const ps = await tx<{ id: string; name: string; price_kes: number }[]>`

@@ -25,7 +25,7 @@ export default async function Payments({ searchParams }: { searchParams: Promise
   const applied = rows.filter((r) => r.status === 'applied');
   const unmatched = rows.filter((r) => r.status === 'unmatched');
   const sum = (xs: readonly { amount_kes: number }[]) => xs.reduce((a, b) => a + b.amount_kes, 0);
-  // Everything except cash goes through TaifaPay (M-Pesa prompt, paybill/till, card, bank) and carries the convenience fee.
+  // Everything except cash goes through the Payment Gateway (M-Pesa prompt, paybill/till, card, bank) and carries the convenience fee.
   const viaTaifa = applied.filter((r) => r.channel !== 'cash');
   const cash = applied.filter((r) => r.channel === 'cash');
   return (
@@ -41,7 +41,7 @@ export default async function Payments({ searchParams }: { searchParams: Promise
       />
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <Stat label={full ? 'Applied (last 200)' : 'Applied today'} value={kes(sum(applied))} />
-        <Stat label="Through TaifaPay" value={kes(sum(viaTaifa))} hint="M-Pesa, paybill, card, bank" />
+        <Stat label="Through Payment Gateway" value={kes(sum(viaTaifa))} hint="M-Pesa, paybill, card, bank" />
         <Stat label="Cash at the desk" value={kes(sum(cash))} hint="recorded by staff, audited" />
         <Stat
           label="Unmatched"
@@ -134,7 +134,7 @@ export default async function Payments({ searchParams }: { searchParams: Promise
                   {p.channel === 'cash'
                     ? `Cash · ${p.recorded_by ?? 'staff'}`
                     : p.provider === 'taifapay' || p.provider === 'seed'
-                      ? `TaifaPay · ${p.channel === 'mpesa' ? 'M-Pesa' : p.channel}`
+                      ? `Payment Gateway · ${p.channel === 'mpesa' ? 'M-Pesa' : p.channel}`
                       : p.provider.replace('desk-', 'desk · ')}
                 </td>
                 <td className="max-w-[140px] truncate px-5 py-2.5 font-mono text-[11px] text-ink-500">

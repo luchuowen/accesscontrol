@@ -81,10 +81,10 @@ export default async function Settings({
   );
   const checklist = await onboardingChecklist(db(), s.tid);
   const msg: Record<string, [string, string]> = {
-    ok: ['green', 'TaifaPay connected — the keys were verified and stored encrypted.'],
-    rejected: ['red', 'TaifaPay rejected those keys. Check the environment (sandbox / live) and try again.'],
+    ok: ['green', 'Payment Gateway connected — the keys were verified and stored encrypted.'],
+    rejected: ['red', 'The Payment Gateway rejected those keys. Check the environment (sandbox / live) and try again.'],
     missing: ['amber', 'Enter both the client ID and the client secret.'],
-    unreachable: ['amber', 'TaifaPay did not answer in time, so nothing was saved. Try again in a minute.'],
+    unreachable: ['amber', 'The Payment Gateway did not answer in time, so nothing was saved. Try again in a minute.'],
     forbidden: ['red', 'You don’t have permission to change this.'],
   };
   const other: Record<string, [string, string]> = {
@@ -109,7 +109,7 @@ export default async function Settings({
     <>
       <PageHeader
         title="Settings"
-        subtitle="Payment keys, how members pay, and SMS credit. Every payment runs through TaifaPay and settles to the club's bank."
+        subtitle="Payment keys, how members pay, and SMS credit. Every payment runs through the Payment Gateway and settles to the club's bank."
       />
       <div className="mb-6">
         <Checklist items={checklist} />
@@ -128,7 +128,7 @@ export default async function Settings({
               <CreditCard size={18} />
             </div>
             <div className="flex-1">
-              <div className="font-medium">TaifaPay · M-Pesa &amp; cards</div>
+              <div className="font-medium">Payment Gateway · M-Pesa &amp; cards</div>
               <div className="text-xs text-ink-500">STK prompts, payment links, automatic confirmation</div>
             </div>
             {tp ? (
@@ -154,7 +154,9 @@ export default async function Settings({
                   name="clientId"
                   type="password"
                   placeholder={
-                    tp ? `••••${tp.clientId.slice(-4)} · stored, enter to replace` : 'From TaifaPay › API Integration'
+                    tp
+                      ? `••••${tp.clientId.slice(-4)} · stored, enter to replace`
+                      : 'From Payment Gateway › API Integration'
                   }
                   className="input mt-1.5"
                   autoComplete="off"
@@ -179,7 +181,7 @@ export default async function Settings({
                   <CopyField value={webhook} label="Deposit webhook URL" />
                 </div>
               </div>
-              <SubmitButton pendingText="Checking the keys with TaifaPay…" className="btn-primary w-full">
+              <SubmitButton pendingText="Checking the keys with the Payment Gateway…" className="btn-primary w-full">
                 Verify &amp; save
               </SubmitButton>
             </form>
@@ -194,7 +196,7 @@ export default async function Settings({
             </div>
             <div className="flex-1">
               <div className="font-medium">How members pay</div>
-              <div className="text-xs text-ink-500">The club’s own paybill or till, linked on TaifaPay</div>
+              <div className="text-xs text-ink-500">The club’s own paybill or till, linked on the Payment Gateway</div>
             </div>
             {channels.paybill || channels.till || channels.linksOnly ? (
               <Badge tone="green">set</Badge>
@@ -252,12 +254,12 @@ export default async function Settings({
                     defaultChecked={!!channels.settlementConfirmed}
                     className="h-4 w-4 accent-ink-900"
                   />
-                  TaifaPay confirmed settlement to this account
+                  Payment Gateway confirmed settlement to this account
                 </label>
               </div>
               <p className="text-xs text-ink-500">
-                Members pay to this number with their <b>member number</b> as the account. TaifaPay records the payment,
-                and the doors update within a minute.
+                Members pay to this number with their <b>member number</b> as the account. The Payment Gateway records
+                the payment, and the doors update within a minute.
               </p>
               <SubmitButton pendingText="Saving…" className="btn-ghost w-full">
                 Save payment channels

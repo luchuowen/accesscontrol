@@ -35,9 +35,9 @@ const MSG: Record<string, [string, string]> = {
   'sms-unreachable': ['amber', 'Source Code did not answer in time; nothing was saved.'],
   'sms-missing': ['amber', 'Paste the API key from Source Code › Developers/API › Show API Key.'],
   'sms-price': ['red', 'Cost and price must be positive amounts.'],
-  'taifa-ok': ['green', 'NAVAC TaifaPay connected. Clubs can now buy SMS credit by M-Pesa.'],
-  'taifa-rejected': ['red', 'TaifaPay rejected those keys.'],
-  'taifa-unreachable': ['amber', 'TaifaPay did not answer in time; nothing was saved.'],
+  'taifa-ok': ['green', 'NAVAC Payment Gateway connected. Clubs can now buy SMS credit by M-Pesa.'],
+  'taifa-rejected': ['red', 'The Payment Gateway rejected those keys.'],
+  'taifa-unreachable': ['amber', 'The Payment Gateway did not answer in time; nothing was saved.'],
   'taifa-missing': ['amber', 'Enter both the client ID and the client secret.'],
   'billing-ok': ['green', 'Billing details saved. Every SMS invoice and receipt shows them.'],
   'billing-name': ['red', 'Enter the business name.'],
@@ -323,8 +323,8 @@ export default async function PlatformSettings({ searchParams }: { searchParams:
               title="SMS payments"
               desc={
                 <>
-                  Clubs pay for SMS credit into NAVAC’s TaifaPay merchant. Each payment shows as “Lango SMS ‹club›” with
-                  the invoice number (LSMS-…) as the account reference.
+                  Clubs pay for SMS credit into NAVAC’s Payment Gateway merchant. Each payment shows as “Lango SMS
+                  ‹club›” with the invoice number (LSMS-…) as the account reference.
                 </>
               }
               badge={
@@ -348,7 +348,9 @@ export default async function PlatformSettings({ searchParams }: { searchParams:
                     type="password"
                     autoComplete="off"
                     placeholder={
-                      taifa?.clientId ? `••••${taifa.clientId.slice(-4)} stored` : 'TaifaPay › Merchant › Integrations'
+                      taifa?.clientId
+                        ? `••••${taifa.clientId.slice(-4)} stored`
+                        : 'Payment Gateway › Merchant › Integrations'
                     }
                     className={input}
                   />
@@ -369,7 +371,7 @@ export default async function PlatformSettings({ searchParams }: { searchParams:
                   Use a credential made for Lango. Leave the merchant’s webhook as it is: Lango checks its payments
                   every minute.
                 </span>
-                <SubmitButton pendingText="Checking the keys with TaifaPay…" className="btn-primary ml-auto">
+                <SubmitButton pendingText="Checking the keys with the Payment Gateway…" className="btn-primary ml-auto">
                   Verify &amp; save
                 </SubmitButton>
               </div>

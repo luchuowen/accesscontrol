@@ -39,16 +39,16 @@ export class TaifaPay {
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
     if (r.status === 400 || r.status === 401 || r.status === 403)
-      throw new TaifaAuthError(`TaifaPay auth failed: HTTP ${r.status}`);
-    if (!r.ok) throw new Error(`TaifaPay auth endpoint error: HTTP ${r.status}`);
+      throw new TaifaAuthError(`Payment Gateway auth failed: HTTP ${r.status}`);
+    if (!r.ok) throw new Error(`Payment Gateway auth endpoint error: HTTP ${r.status}`);
     const text = await r.text();
     let j: { access_token?: string; expires_in?: string | number };
     try {
       j = JSON.parse(text);
     } catch {
-      throw new Error('TaifaPay auth endpoint did not return JSON (wrong API address?)');
+      throw new Error('Payment Gateway auth endpoint did not return JSON (wrong API address?)');
     }
-    if (!j.access_token) throw new TaifaAuthError('TaifaPay auth returned no access token');
+    if (!j.access_token) throw new TaifaAuthError('Payment Gateway auth returned no access token');
     tokens.set(k, { token: j.access_token, exp: Date.now() + (Number(j.expires_in) || 300) * 1000 });
     return j.access_token;
   }
@@ -66,7 +66,7 @@ export class TaifaPay {
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
     const text = await r.text();
-    if (!r.ok) throw new Error(`TaifaPay ${method} ${path}: HTTP ${r.status} ${text.slice(0, 200)}`);
+    if (!r.ok) throw new Error(`Payment Gateway ${method} ${path}: HTTP ${r.status} ${text.slice(0, 200)}`);
     return (text ? JSON.parse(text) : {}) as T;
   }
 
@@ -289,7 +289,7 @@ export async function handleTaifaWebhook(
   const txId = String(evt.data?.transactionId ?? evt.data?.id ?? '');
   if (!txId || !/^[\w-]{6,80}$/.test(txId)) return new Response('missing transactionId', { status: 400 });
   const client = verifyClient ?? (await tenantTaifa(sql, t.id));
-  if (!client) return new Response('tenant has no TaifaPay credentials', { status: 409 });
+  if (!client) return new Response('tenant has no Payment Gateway credentials', { status: 409 });
   const r = await settleTaifaTransaction(sql, t, txId, client, evt);
   return new Response(JSON.stringify(r.body), { status: r.status, headers: { 'Content-Type': 'application/json' } });
 }

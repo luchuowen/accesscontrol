@@ -12,7 +12,10 @@ const MESSAGES: Record<string, { tone: 'ok' | 'warn' | 'err'; text: string }> = 
   card: { tone: 'err', text: 'Card numbers are 1 to 65535 (the number printed on the card or tag).' },
   'prompt-sent': { tone: 'ok', text: 'M-Pesa prompt sent. Access opens automatically once the member approves.' },
   'prompt-failed': { tone: 'err', text: 'M-Pesa could not be reached just now. Try again in a minute.' },
-  'no-taifapay': { tone: 'warn', text: 'Connect the club’s TaifaPay account in Settings to send M-Pesa prompts.' },
+  'no-taifapay': {
+    tone: 'warn',
+    text: 'Connect the club’s Payment Gateway account in Settings to send M-Pesa prompts.',
+  },
   phone: { tone: 'err', text: 'Enter a Kenyan mobile number, e.g. 0712 345 678.' },
   reason: { tone: 'err', text: 'Give a short reason for complimentary access.' },
   forbidden: { tone: 'err', text: 'Your role cannot do that. Ask a manager.' },

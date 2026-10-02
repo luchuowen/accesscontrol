@@ -64,7 +64,7 @@ export default async function PartnerHome({ searchParams }: { searchParams: Prom
     <>
       <PageHeader
         title="Clubs"
-        subtitle="Every club on Lango, how far its setup has come, and what flowed through TaifaPay in the last 30 days."
+        subtitle="Every club on Lango, how far its setup has come, and what flowed through the Payment Gateway in the last 30 days."
         actions={
           s.kind === 'partner_admin' && (
             <Link href="/partner/new" className="btn-primary">
@@ -82,7 +82,7 @@ export default async function PartnerHome({ searchParams }: { searchParams: Prom
       )}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <Stat label="Clubs" value={rows.length} />
-        <Stat label="Through TaifaPay · 30 days" value={kes(taifa)} hint="fee-earning volume" />
+        <Stat label="Through Payment Gateway · 30 days" value={kes(taifa)} hint="fee-earning volume" />
         <Stat label="Cash · 30 days" value={kes(cash)} hint="recorded at the desk" />
         <Stat label="Active members" value={rows.reduce((a, r) => a + r.active_members, 0)} />
       </div>
@@ -90,11 +90,13 @@ export default async function PartnerHome({ searchParams }: { searchParams: Prom
         <table className="w-full text-sm">
           <thead className="bg-ink-50/60 text-left">
             <tr>
-              {['Club', 'Owner', 'Setup', 'Payments', 'Doors', 'Members', 'TaifaPay · 30 d', 'Cash · 30 d'].map((h) => (
-                <th key={h} className="label px-5 py-3 font-medium">
-                  {h}
-                </th>
-              ))}
+              {['Club', 'Owner', 'Setup', 'Payments', 'Doors', 'Members', 'Payment Gateway · 30 d', 'Cash · 30 d'].map(
+                (h) => (
+                  <th key={h} className="label px-5 py-3 font-medium">
+                    {h}
+                  </th>
+                ),
+              )}
             </tr>
           </thead>
           <tbody className="divide-y divide-ink-100">
@@ -185,7 +187,7 @@ export default async function PartnerHome({ searchParams }: { searchParams: Prom
                   </td>
                   <td className="px-5 py-3 text-xs">
                     {r.taifapay_env ? (
-                      <Badge tone="green">TaifaPay {r.taifapay_env}</Badge>
+                      <Badge tone="green">Payment Gateway {r.taifapay_env}</Badge>
                     ) : (
                       <Badge tone="amber">not connected</Badge>
                     )}
