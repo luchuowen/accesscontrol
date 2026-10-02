@@ -15,7 +15,7 @@ export default function Forgot() {
       <form action={forgot} className="mt-8 grid gap-[18px]">
         <div>
           <label htmlFor="email" className="auth-label">
-            Your email
+            Your Email
           </label>
           <input
             id="email"

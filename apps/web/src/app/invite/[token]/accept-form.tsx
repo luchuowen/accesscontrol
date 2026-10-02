@@ -23,19 +23,19 @@ export function AcceptForm({
       <form action={action} className="mt-7 grid gap-4">
         <input type="hidden" name="token" value={token} />
         <div>
-          <span className="auth-label">Email</span>
+          <span className="auth-label">Your Email</span>
           <input
             value={email}
             readOnly
             autoComplete="username"
             className="auth-input bg-slate-50 text-slate-500"
-            aria-label="Email"
+            aria-label="Your Email"
           />
         </div>
         <div className="grid gap-4 sm:grid-cols-2">
           <div>
             <label htmlFor="name" className="auth-label">
-              Name
+              Your Name
             </label>
             <input
               id="name"
@@ -50,7 +50,7 @@ export function AcceptForm({
           </div>
           <div>
             <label htmlFor="phone" className="auth-label">
-              Mobile
+              Mobile Number
             </label>
             <input
               id="phone"
@@ -74,7 +74,7 @@ export function AcceptForm({
         </div>
         <div>
           <label htmlFor="confirm" className="auth-label">
-            Confirm password
+            Confirm Password
           </label>
           <PasswordField name="confirm" autoComplete="new-password" minLength={10} placeholder="Re-enter password" />
         </div>

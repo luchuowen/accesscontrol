@@ -105,7 +105,7 @@ export default async function MemberPortal({
           <form action={memberStart} className="mt-8 grid gap-[18px]">
             <div>
               <label htmlFor="club" className="auth-label">
-                Club code
+                Club Code
               </label>
               <input
                 id="club"
@@ -119,7 +119,7 @@ export default async function MemberPortal({
             </div>
             <div>
               <label htmlFor="memberNo" className="auth-label">
-                Member number
+                Member Number
               </label>
               <input
                 id="memberNo"
@@ -143,7 +143,7 @@ export default async function MemberPortal({
             <Hidden />
             <div>
               <label htmlFor="phone" className="auth-label">
-                Phone number
+                Phone Number
               </label>
               <input
                 id="phone"

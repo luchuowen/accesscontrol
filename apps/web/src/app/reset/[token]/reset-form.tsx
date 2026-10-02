@@ -15,7 +15,7 @@ export function ResetForm({ token, email }: { token: string; email: string }) {
         <input type="hidden" name="email" value={email} autoComplete="username" />
         <div>
           <label htmlFor="password" className="auth-label">
-            New password
+            New Password
           </label>
           <PasswordField name="password" autoComplete="new-password" minLength={10} placeholder="Enter new password" />
           <p className="mt-1.5 text-xs text-slate-500">
@@ -24,7 +24,7 @@ export function ResetForm({ token, email }: { token: string; email: string }) {
         </div>
         <div>
           <label htmlFor="confirm" className="auth-label">
-            Confirm password
+            Confirm Password
           </label>
           <PasswordField
             name="confirm"
