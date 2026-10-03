@@ -10,7 +10,15 @@ const ROLES = {
   navac_admin: { label: 'NAVAC admin', hint: 'Everything, including platform settings and prices' },
 } as const;
 
-export function AddPartnerForm({ platform, company }: { platform: boolean; company: string }) {
+export function AddPartnerForm({
+  platform,
+  company,
+  companies = [],
+}: {
+  platform: boolean;
+  company: string;
+  companies?: string[];
+}) {
   const [state, action] = useActionState<AddPartnerState, FormData>(addPartner, {});
   const keys = (platform ? Object.keys(ROLES) : ['partner_admin', 'partner_tech']) as (keyof typeof ROLES)[];
   const [role, setRole] = useState<keyof typeof ROLES>(platform ? 'partner_admin' : 'partner_tech');
@@ -59,7 +67,21 @@ export function AddPartnerForm({ platform, company }: { platform: boolean; compa
         ))}
       </fieldset>
       {needsCompany ? (
-        <input name="company" required placeholder="Enter company name, e.g. Trisol" className="input" />
+        <>
+          <input
+            name="company"
+            required
+            list="partner-companies"
+            defaultValue={companies.length === 1 ? companies[0] : ''}
+            placeholder="Choose a company or type a new one"
+            className="input"
+          />
+          <datalist id="partner-companies">
+            {companies.map((c) => (
+              <option key={c} value={c} />
+            ))}
+          </datalist>
+        </>
       ) : (
         !platform && <p className="text-xs text-ink-500">They join {company}.</p>
       )}

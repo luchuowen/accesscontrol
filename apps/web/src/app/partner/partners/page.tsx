@@ -129,7 +129,13 @@ export default async function People({ searchParams }: { searchParams: Promise<{
           <div className="text-xs text-ink-500">
             They get an email to set their own password. The link works for 7 days.
           </div>
-          <AddPartnerForm platform={platform} company={me?.partner_id ? company : 'NAVAC Global'} />
+          <AddPartnerForm
+            platform={platform}
+            company={me?.partner_id ? company : 'NAVAC Global'}
+            companies={[
+              ...new Set(people.map((p) => p.partner).filter((c): c is string => !!c && c !== 'NAVAC Global')),
+            ]}
+          />
         </section>
       </div>
     </>
