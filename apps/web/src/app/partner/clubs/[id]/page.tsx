@@ -1,5 +1,12 @@
 import { withTenant } from '@lango/db';
-import { billingState, clubPlan, onboardingChecklist, platformEmailConfig, platformSmsConfig } from '@lango/server';
+import {
+  billingState,
+  CYCLE_LABEL,
+  clubPlan,
+  onboardingChecklist,
+  platformEmailConfig,
+  platformSmsConfig,
+} from '@lango/server';
 import {
   ArrowLeft,
   CheckCircle2,
@@ -60,6 +67,7 @@ const NOTE: Record<string, [ok: boolean, text: string]> = {
   'plan-ok': [true, 'Plan saved. The club sees it under Settings › Billing.'],
   'plan-fee': [false, 'The fee is at least KES 10, or leave it empty while the price is agreed.'],
   'plan-phone': [false, 'Enter a Kenyan mobile number, or leave it empty.'],
+  'plan-setup': [false, 'The setup fee is at least KES 10, or leave it empty.'],
 };
 
 type Tab = 'overview' | 'pay' | 'billing' | 'doors' | 'comms';
@@ -128,7 +136,10 @@ export default async function PartnerClub({
   const card = 'rounded-2xl border border-[#E4E8EF] bg-white';
   return (
     <>
-      <Link href="/partner" className="inline-flex items-center gap-1.5 text-[13px] text-ink-500 hover:text-ink-900">
+      <Link
+        href="/partner/clubs"
+        className="inline-flex items-center gap-1.5 text-[13px] text-ink-500 hover:text-ink-900"
+      >
         <ArrowLeft size={15} /> Clubs
       </Link>
       <div className="mt-3 flex flex-wrap items-start gap-4">
@@ -156,7 +167,7 @@ export default async function PartnerClub({
       <div className="mt-5 inline-flex rounded-xl bg-[#EEF1F6] p-1">
         {tabLink('overview', 'Overview', LayoutGrid)}
         {tabLink('pay', 'Payments', CreditCard)}
-        {tabLink('billing', 'Billing', ReceiptText)}
+        {admin && tabLink('billing', 'Billing', ReceiptText)}
         {installer && tabLink('doors', 'Doors', DoorOpen)}
         {tabLink('comms', 'Communications', MessageSquare)}
       </div>
@@ -234,7 +245,7 @@ export default async function PartnerClub({
         )}
         {tab === 'doors' && installer && <Doors tenantId={id} />}
         {tab === 'pay' && <Payments tenantId={id} uid={s.uid} />}
-        {tab === 'billing' && <Billing tenantId={id} uid={s.uid} />}
+        {tab === 'billing' && admin && <Billing tenantId={id} uid={s.uid} />}
         {tab === 'comms' && <Comms tenantId={id} uid={s.uid} admin={admin} slug={club.slug} />}
       </div>
     </>
@@ -368,9 +379,9 @@ async function Billing({ tenantId, uid }: { tenantId: string; uid: string }) {
       db(),
       tenantId,
       (tx) => tx<
-        { id: string; invoice_no: string; created_at: Date; period_to: Date; amount_kes: number; status: string }[]
+        { id: string; invoice_no: string; created_at: Date; kind: string; amount_kes: number; status: string }[]
       >`
-        select id, invoice_no, created_at, period_to, amount_kes, status from subscription_invoices order by created_at desc limit 8`,
+        select id, invoice_no, created_at, kind, amount_kes, status from subscription_invoices order by created_at desc limit 8`,
     ),
   ]);
   const navac = !!plat?.ok;
@@ -422,6 +433,18 @@ async function Billing({ tenantId, uid }: { tenantId: string; uid: string }) {
               />
             </label>
             <label>
+              <span className={lbl}>Setup fee, once (KES)</span>
+              <input
+                name="setupFee"
+                inputMode="numeric"
+                defaultValue={plan?.setup_fee_kes ?? ''}
+                placeholder={plan?.setup_paid ? 'Paid' : 'Empty if none'}
+                disabled={plan?.setup_paid}
+                className="input py-2"
+              />
+              {plan?.setup_paid && <input type="hidden" name="setupFee" value={plan.setup_fee_kes ?? ''} />}
+            </label>
+            <label>
               <span className={lbl}>Paid until</span>
               <input name="paidUntil" type="date" defaultValue={plan?.paid_until ?? ''} className="input py-2" />
             </label>
@@ -456,6 +479,18 @@ async function Billing({ tenantId, uid }: { tenantId: string; uid: string }) {
               <dd>{plan?.plan_name ?? '—'}</dd>
             </div>
             <div className="flex justify-between">
+              <dt className="text-ink-500">Fee</dt>
+              <dd>{plan?.fee_kes ? `${kes(plan.fee_kes)} · ${CYCLE_LABEL[plan.cycle]}` : 'Being agreed'}</dd>
+            </div>
+            <div className="flex justify-between">
+              <dt className="text-ink-500">Setup fee</dt>
+              <dd>
+                {plan?.setup_fee_kes
+                  ? `${kes(plan.setup_fee_kes)} · ${plan.setup_paid ? 'paid' : 'not paid yet'}`
+                  : '—'}
+              </dd>
+            </div>
+            <div className="flex justify-between">
               <dt className="text-ink-500">Paid until</dt>
               <dd>{plan?.paid_until ?? '—'}</dd>
             </div>
@@ -469,7 +504,10 @@ async function Billing({ tenantId, uid }: { tenantId: string; uid: string }) {
           {invoices.map((i) => (
             <li key={i.id} className="flex items-center gap-3 py-2.5">
               <span className="font-mono text-[12px] text-ink-500">{i.invoice_no}</span>
-              <span className="flex-1 text-ink-500">{dateTime(i.created_at)}</span>
+              <span className="flex-1 text-ink-500">
+                {dateTime(i.created_at)}
+                {i.kind === 'setup' ? ' · setup fee' : ''}
+              </span>
               <b className="tabular-nums">{kes(i.amount_kes)}</b>
               <span
                 className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${i.status === 'paid' ? 'bg-emerald-50 text-emerald-700' : i.status === 'pending' ? 'bg-slate-100 text-ink-500' : 'bg-rose-50 text-rose-700'}`}

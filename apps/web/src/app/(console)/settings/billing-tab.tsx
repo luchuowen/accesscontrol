@@ -21,6 +21,7 @@ const NOTES: Record<string, Note> = {
   'no-plan': ['amber', 'NAVAC has not set up your plan yet.'],
   cycles: ['red', 'Choose how long to pay for.'],
   forbidden: ['red', 'You don’t have permission to pay for the club.'],
+  paid: ['green', 'Your setup fee is already paid.'],
 };
 const fmt = (d: string | Date | null) =>
   d ? (typeof d === 'string' ? DateTime.fromISO(d) : DateTime.fromJSDate(d)).toFormat('d LLL yyyy') : '—';
@@ -38,12 +39,13 @@ export async function BillingTab({ s, b }: { s: Session; b?: string }) {
           id: string;
           invoice_no: string;
           created_at: Date;
-          period_from: Date;
-          period_to: Date;
+          period_from: Date | null;
+          period_to: Date | null;
           amount_kes: number;
           status: string;
+          kind: string;
         }[]
-      >`select id, invoice_no, created_at, period_from, period_to, amount_kes, status from subscription_invoices
+      >`select id, invoice_no, created_at, period_from, period_to, amount_kes, status, kind from subscription_invoices
         order by created_at desc limit 12`,
     ),
     db()<{ phone: string | null }[]>`select phone from app_staff_get(${s.uid})`,
@@ -143,6 +145,32 @@ export async function BillingTab({ s, b }: { s: Session; b?: string }) {
         </div>
       </div>
 
+      {payer && plan?.setup_fee_kes != null && !plan.setup_paid && (
+        <form
+          action={payPlan}
+          className="mt-4 flex flex-wrap items-center gap-3 rounded-2xl border border-amber-200 bg-amber-50/60 p-4"
+        >
+          <input type="hidden" name="kind" value="setup" />
+          <input type="hidden" name="cycles" value="1" />
+          <div className="min-w-0 flex-1">
+            <div className="text-[13.5px] font-semibold text-ink-900">Setup fee · {kes(plan.setup_fee_kes)}</div>
+            <div className="text-[12.5px] text-ink-500">Paid once, to NAVAC Global, for setting up your club.</div>
+          </div>
+          <input
+            name="phone"
+            inputMode="tel"
+            required
+            defaultValue={plan.billing_phone ?? me?.phone ?? ''}
+            placeholder="M-Pesa phone"
+            aria-label="M-Pesa phone for the setup fee"
+            className="input w-44 py-2"
+          />
+          <SubmitButton pendingText="Sending prompt…" className="btn-primary py-2">
+            <Wallet size={15} /> Pay setup fee
+          </SubmitButton>
+        </form>
+      )}
+
       <Group title="Plan">
         <Row icon={RefreshCw} label="Billing cycle">
           {plan ? CYCLE_LABEL[plan.cycle] : '—'}
@@ -164,7 +192,11 @@ export async function BillingTab({ s, b }: { s: Session; b?: string }) {
           <div key={i.id} className="flex flex-wrap items-center gap-3 px-4 py-3 text-[13px]">
             <span className="w-24 shrink-0 font-mono text-[12px] text-ink-500">{i.invoice_no}</span>
             <span className="min-w-0 flex-1">
-              {fmt(i.period_from)} – {fmt(i.period_to)}
+              {i.kind === 'setup'
+                ? 'Setup fee'
+                : i.period_from && i.period_to
+                  ? `${fmt(i.period_from)} – ${fmt(i.period_to)}`
+                  : 'Subscription'}
               <span className="block text-[12px] text-ink-500">{fmt(i.created_at)}</span>
             </span>
             <b className="tabular-nums">{kes(i.amount_kes)}</b>

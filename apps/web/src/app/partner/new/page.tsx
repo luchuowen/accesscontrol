@@ -11,7 +11,10 @@ export default async function NewClub() {
   const base = (process.env.PUBLIC_URL ?? '').replace(/\/$/, '');
   return (
     <>
-      <Link href="/partner" className="mb-6 inline-flex items-center gap-1.5 text-sm text-ink-500 hover:text-ink-900">
+      <Link
+        href="/partner/clubs"
+        className="mb-6 inline-flex items-center gap-1.5 text-sm text-ink-500 hover:text-ink-900"
+      >
         <ArrowLeft size={15} /> Clubs
       </Link>
       <PageHeader

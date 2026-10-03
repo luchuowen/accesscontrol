@@ -675,7 +675,7 @@ describe('walking skeleton: pay → door', () => {
   it('Lango subscription: NAVAC sets the plan, the owner pays by M-Pesa, paid-until moves on once', async () => {
     const [pa] = await owner`select id from staff_users where email = 'sms-admin@navac.test'`;
     // Price not agreed yet: nothing to pay.
-    await owner`select app_platform_set_plan(${pa?.id}, ${tenantId}, 'Lango Club', ${null}, 'monthly', ${null}, '', '')`;
+    await owner`select app_platform_set_plan(${pa?.id}, ${tenantId}, 'Lango Club', ${null}, 'monthly', ${null}, '', '', ${null})`;
     expect(billingState(await clubPlan(app, tenantId))).toBe('unpriced');
     expect(await startSubscriptionPayment(app, tenantId, { cycles: 1, phone: '0726049097', actor: 'test' })).toEqual({
       ok: false,
@@ -683,10 +683,10 @@ describe('walking skeleton: pay → door', () => {
     });
     // Only NAVAC can set a plan.
     await expect(
-      app`select app_platform_set_plan(${tenantId}, ${tenantId}, 'x', 100, 'monthly', ${null}, '', '')`,
+      app`select app_platform_set_plan(${tenantId}, ${tenantId}, 'x', 100, 'monthly', ${null}, '', '', ${null})`,
     ).rejects.toThrow(/platform/);
     const paidUntil = DateTime.now().plus({ days: 3 }).toISODate();
-    await owner`select app_platform_set_plan(${pa?.id}, ${tenantId}, 'Lango Club', 5000, 'monthly', ${paidUntil}, '', '')`;
+    await owner`select app_platform_set_plan(${pa?.id}, ${tenantId}, 'Lango Club', 5000, 'monthly', ${paidUntil}, '', '', ${null})`;
     expect(billingState(await clubPlan(app, tenantId))).toBe('due');
     // A pending payment for 3 months, as startSubscriptionPayment records it, confirmed by the gateway.
     let status = 'PENDING';
@@ -1180,6 +1180,60 @@ describe('walking skeleton: pay → door', () => {
     expect(mails.slice(before).map((m) => m.subject)).toEqual(['Failed sign-ins on your Lango account']);
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
+  });
+  it('partner shares: setup fee and subscriptions earn the partner its agreed share once; only NAVAC and that partner see it', async () => {
+    const [pa] = await owner`select id from staff_users where email = 'sms-admin@navac.test'`;
+    const [t] = await owner`select partner_id from tenants where id = ${tenantId}`;
+    const partner = t?.partner_id as string;
+    expect(partner).toBeTruthy();
+    const [boss] = await owner`insert into staff_users (email, name, role, password_hash, partner_id)
+      values ('boss@um.test', 'Boss', 'partner_admin', 'x', ${partner}) returning id`;
+    const [tech] = await owner`select id from staff_users where email = 'tech@um.test'`;
+    // Only NAVAC sets a partner's terms and a club's setup fee.
+    await expect(
+      app`select app_platform_set_terms(${boss?.id}, ${partner}, 30, 20, ${null}, 14, 5, 'mpesa', '0712345678', 'a1')`,
+    ).rejects.toThrow(/platform/);
+    await app`select app_platform_set_terms(${pa?.id}, ${partner}, 30, 20, ${null}, 14, 5, 'mpesa', '0712345678', 'a1')`;
+    await app`select app_platform_set_plan(${pa?.id}, ${tenantId}, 'Lango Club', 4500, 'monthly', ${null}, '', '', 50000)`;
+    expect(await clubPlan(app, tenantId)).toMatchObject({ setup_fee_kes: 50000, setup_paid: false });
+    // The owner pays the setup fee and a month; the gateway confirms both.
+    const fakeFetch = (async (u: string) =>
+      new Response(
+        JSON.stringify(
+          String(u).endsWith('/auth/token')
+            ? { access_token: 't', expires_in: '3599' }
+            : String(u).includes('TP-SET-1')
+              ? { transaction: { id: 'TP-SET-1', status: 'COMPLETED', amount: 50000 } }
+              : { transaction: { id: 'TP-SUB-9', status: 'COMPLETED', amount: 4500 } },
+        ),
+      )) as typeof fetch;
+    const client = new TaifaPay({ env: 'live', clientId: 'navac', clientSecret: 's' }, fakeFetch);
+    await owner`insert into subscription_invoices (tenant_id, kind, plan_name, cycles, amount_kes, phone, created_by, provider_ref, created_at)
+      values (${tenantId}, 'setup', 'Lango setup', 1, 50000, '254726049097', 'test', 'TP-SET-1', now() - interval '2 minutes')`;
+    await owner`insert into subscription_invoices (tenant_id, kind, plan_name, cycles, amount_kes, phone, created_by, provider_ref, created_at)
+      values (${tenantId}, 'subscription', 'Lango Club', 1, 4500, '254726049097', 'test', 'TP-SUB-9', now() - interval '2 minutes')`;
+    expect(await reconcileSubscriptions(app, () => {}, client)).toBe(2);
+    expect(await reconcileSubscriptions(app, () => {}, client)).toBe(0);
+    const mine = await app`select kind, amount_kes, base_kes from app_partner_earnings(${boss?.id}) order by kind`;
+    expect(mine).toEqual([
+      { kind: 'setup', amount_kes: 15000, base_kes: 50000 },
+      { kind: 'subscription', amount_kes: 900, base_kes: 4500 },
+    ]);
+    expect((await clubPlan(app, tenantId))?.setup_paid).toBe(true);
+    expect(
+      await startSubscriptionPayment(app, tenantId, { cycles: 1, phone: '0726049097', actor: 't', kind: 'setup' }),
+    ).toEqual({ ok: false, reason: 'paid' });
+    // Technicians see no money; the app cannot read NAVAC's books directly; NAVAC-only figures stay NAVAC's.
+    expect(await app`select * from app_partner_earnings(${tech?.id})`).toHaveLength(0);
+    expect(await app`select * from app_partner_club_billing(${tech?.id})`).toHaveLength(0);
+    await expect(app`select * from partner_earnings`).rejects.toThrow(/permission/);
+    await expect(
+      app`select * from app_platform_revenue(${boss?.id}, now() - interval '1 day', now() + interval '1 minute')`,
+    ).rejects.toThrow(/platform/);
+    const [rev] =
+      await app`select * from app_platform_revenue(${pa?.id}, now() - interval '1 day', now() + interval '1 minute')`;
+    expect([Number(rev?.setup_kes), Number(rev?.shares_kes)]).toEqual([50000, 15900]);
+    expect((await app`select * from app_partner_terms(${boss?.id})`).map((r) => r.partner_id)).toEqual([partner]);
   });
   it('services: equal prices are fine, a paybill renews what the member usually buys, the rest is held', async () => {
     const [gym] = await owner`select id, service_id from products where name = 'Gym · 1 month'`;

@@ -23,8 +23,9 @@ export default async function SubscriptionDocument({ params }: { params: Promise
           invoice_no: string;
           plan_name: string;
           cycles: number;
-          period_from: Date;
-          period_to: Date;
+          period_from: Date | null;
+          period_to: Date | null;
+          kind: string;
           created_at: Date;
           paid_at: Date | null;
           amount_kes: number;
@@ -96,10 +97,11 @@ export default async function SubscriptionDocument({ params }: { params: Promise
           <tbody>
             <tr className="border-b border-ink-100">
               <td className="py-3">
-                {t.plan_name} subscription{t.cycles > 1 ? ` × ${t.cycles}` : ''}
+                {t.kind === 'setup' ? 'Lango setup fee (one time)' : `${t.plan_name} subscription`}
+                {t.kind !== 'setup' && t.cycles > 1 ? ` × ${t.cycles}` : ''}
               </td>
               <td className="py-3 text-right">
-                {d(t.period_from)} – {d(t.period_to)}
+                {t.period_from && t.period_to ? `${d(t.period_from)} – ${d(t.period_to)}` : '—'}
               </td>
               <td className="py-3 text-right tabular-nums">{kes(t.amount_kes)}</td>
             </tr>

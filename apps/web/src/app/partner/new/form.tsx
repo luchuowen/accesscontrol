@@ -54,7 +54,7 @@ export function NewClubForm({ consoleUrl }: { consoleUrl: string }) {
             </div>
           </div>
         </div>
-        <Link href="/partner" className="btn-primary mt-6 w-full">
+        <Link href="/partner/clubs" className="btn-primary mt-6 w-full">
           Back to clubs
         </Link>
       </div>

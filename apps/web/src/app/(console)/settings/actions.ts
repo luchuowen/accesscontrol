@@ -105,6 +105,7 @@ export async function payPlan(form: FormData) {
     cycles: Number(form.get('cycles') ?? 1),
     phone: String(form.get('phone') ?? ''),
     actor: s.uid,
+    kind: form.get('kind') === 'setup' ? 'setup' : 'subscription',
   });
   revalidatePath('/settings');
   redirect(`/settings?tab=billing&b=${r.ok ? 'sent' : r.reason}`);

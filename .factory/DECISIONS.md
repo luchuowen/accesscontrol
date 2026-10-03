@@ -63,3 +63,8 @@
   webhook is left alone, the 60 s poller settles Lango top-ups). Each purchase has an invoice number LSMS-NNNNN used
   as the M-Pesa account reference, description "Lango SMS ‹club›"; clubs see the invoice, then receipt (M-Pesa code),
   under Settings › SMS purchases. NAVAC's billing details are set in the SaaS console.
+- Partner money (0029): NAVAC sets each partner's terms (setup %, subscription %, months, hold days, WHT %, payout
+  details) and each club's setup fee. A paid setup/subscription invoice records the partner's share once
+  (`app_record_earning`, rate locked on the day). partner_terms/earnings/payouts are unreadable to the app role;
+  `app_money_scope` decides: NAVAC admins all, partner admins their own, technicians/support no money. Member payment
+  volume and SMS margin only via `app_platform_revenue` (NAVAC). Payout runs (approve, send, statements) are next.

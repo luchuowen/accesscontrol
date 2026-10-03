@@ -472,7 +472,7 @@ export async function assignTechClubs(form: FormData) {
   backPartners('assigned');
 }
 
-const backClubs = (m: string): never => redirect(`/partner?m=${m}`);
+const backClubs = (m: string): never => redirect(`/partner/clubs?m=${m}`);
 
 /** Invite the owner of a club that has none (or whose owner was removed). */
 export async function inviteOwner(form: FormData) {
@@ -540,9 +540,9 @@ export async function resendOwnerInvite(form: FormData) {
 async function partnerClub(form: FormData, kinds: string[]) {
   const s = await requirePartner();
   const tenantId = String(form.get('tenantId') ?? '');
-  if (!UUID.test(tenantId) || !kinds.includes(s.kind)) redirect('/partner?m=denied');
+  if (!UUID.test(tenantId) || !kinds.includes(s.kind)) redirect('/partner/clubs?m=denied');
   const [c] = await db()<{ id: string }[]>`select id from app_partner_clubs(${s.uid}) where id = ${tenantId}`;
-  if (!c) redirect('/partner?m=denied');
+  if (!c) redirect('/partner/clubs?m=denied');
   return { s, tenantId };
 }
 const toClub = (tenantId: string, tab: string, n: string): never =>
@@ -633,7 +633,7 @@ export async function partnerSaveEmail(form: FormData) {
 export async function navacSaveGateway(form: FormData) {
   const s = await platformOnly();
   const tenantId = String(form.get('tenantId') ?? '');
-  if (!UUID.test(tenantId)) redirect('/partner?m=denied');
+  if (!UUID.test(tenantId)) redirect('/partner/clubs?m=denied');
   const env = String(form.get('env')) === 'sandbox' ? 'sandbox' : 'live';
   let clientId = String(form.get('clientId') ?? '').trim();
   let clientSecret = String(form.get('clientSecret') ?? '').trim();
@@ -678,7 +678,7 @@ export async function navacSaveGateway(form: FormData) {
 export async function navacSaveChannels(form: FormData) {
   const s = await platformOnly();
   const tenantId = String(form.get('tenantId') ?? '');
-  if (!UUID.test(tenantId)) redirect('/partner?m=denied');
+  if (!UUID.test(tenantId)) redirect('/partner/clubs?m=denied');
   const code = /^\d{5,7}$/;
   const paybill = String(form.get('paybill') ?? '').replace(/\s/g, '');
   const till = String(form.get('till') ?? '').replace(/\s/g, '');
@@ -707,13 +707,16 @@ export async function navacSaveChannels(form: FormData) {
 export async function navacSavePlan(form: FormData) {
   const s = await platformOnly();
   const tenantId = String(form.get('tenantId') ?? '');
-  if (!UUID.test(tenantId)) redirect('/partner?m=denied');
+  if (!UUID.test(tenantId)) redirect('/partner/clubs?m=denied');
   const feeRaw = String(form.get('fee') ?? '').replace(/[^\d]/g, '');
   const fee = feeRaw ? Number(feeRaw) : null;
   if (fee !== null && fee < 10) toClub(tenantId, 'billing', 'plan-fee');
   const cycle = ['monthly', 'quarterly', 'yearly'].includes(String(form.get('cycle')))
     ? String(form.get('cycle'))
     : 'monthly';
+  const setupRaw = String(form.get('setupFee') ?? '').replace(/[^\d]/g, '');
+  const setup = setupRaw ? Number(setupRaw) : null;
+  if (setup !== null && setup < 10) toClub(tenantId, 'billing', 'plan-setup');
   const until = String(form.get('paidUntil') ?? '');
   const phoneRaw = String(form.get('phone') ?? '').trim();
   const phone = phoneRaw ? msisdn(phoneRaw) : '';
@@ -723,7 +726,47 @@ export async function navacSavePlan(form: FormData) {
              ${String(form.get('email') ?? '')
                .trim()
                .toLowerCase()
-               .slice(0, 120)})`;
+               .slice(0, 120)}, ${setup})`;
   revalidatePath(`/partner/clubs/${tenantId}`);
   toClub(tenantId, 'billing', 'plan-ok');
+}
+
+/** NAVAC only: a partner company's terms (its share of setup fees and subscriptions, hold, tax, how it is paid). */
+export async function navacSaveTerms(form: FormData) {
+  const s = await platformOnly();
+  const partnerId = String(form.get('partnerId') ?? '');
+  if (!UUID.test(partnerId)) redirect('/partner/terms?m=denied');
+  const pct = (k: string) => {
+    const v = String(form.get(k) ?? '').trim();
+    if (v === '') return null;
+    const n = Number(v);
+    return Number.isFinite(n) && n >= 0 && n <= 100 ? Math.round(n * 100) / 100 : Number.NaN;
+  };
+  const int = (k: string, lo: number, hi: number) => {
+    const v = String(form.get(k) ?? '').trim();
+    if (v === '') return null;
+    const n = Number(v);
+    return Number.isInteger(n) && n >= lo && n <= hi ? n : Number.NaN;
+  };
+  const setup = pct('setupPct');
+  const sub = pct('subPct');
+  const wht = pct('whtPct');
+  const months = int('months', 1, 120);
+  const hold = int('holdDays', 0, 90);
+  if ([setup, sub, wht, months, hold].some((v) => Number.isNaN(v)) || (wht ?? 0) > 30)
+    redirect(`/partner/terms?m=invalid&p=${partnerId}`);
+  const method = ['mpesa', 'paybill', 'till', 'bank'].includes(String(form.get('method')))
+    ? String(form.get('method'))
+    : '';
+  const to = String(form.get('payoutTo') ?? '')
+    .trim()
+    .slice(0, 120);
+  const pin = String(form.get('kraPin') ?? '')
+    .trim()
+    .slice(0, 20);
+  if (pin && !/^[A-Za-z]\d{9}[A-Za-z]$/.test(pin)) redirect(`/partner/terms?m=pin&p=${partnerId}`);
+  await db()`select app_platform_set_terms(${s.uid}, ${partnerId}, ${setup}, ${sub}, ${months}, ${hold ?? 14},
+             ${wht ?? 0}, ${method}, ${to}, ${pin})`;
+  revalidatePath('/partner');
+  redirect('/partner/terms?m=saved');
 }
