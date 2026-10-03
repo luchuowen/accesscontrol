@@ -24,6 +24,7 @@ import {
 import { headers } from 'next/headers';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
+import { LiveRefresh } from '@/app/(console)/_dash/live-refresh';
 import { Checklist } from '@/components/checklist';
 import { CopyField } from '@/components/copy-field';
 import { SubmitButton } from '@/components/submit-button';
@@ -104,6 +105,9 @@ export default async function PartnerClub({
     from app_partner_clubs(${s.uid}) c join app_partner_stats(${s.uid}) st on st.tenant_id = c.id
     where c.id = ${id}`;
   if (!club) notFound();
+  const [platformRow] = await db()<{ ok: boolean }[]>`select app_is_platform(${s.uid}) as ok`;
+  // Member payment volume is NAVAC's business; partners see the club's members and money to sort only.
+  const platform = !!platformRow?.ok;
   const tab: Tab = ['doors', 'comms', 'pay', 'billing'].includes(sp.tab ?? '') ? (sp.tab as Tab) : 'overview';
   const installer = s.kind === 'partner_admin' || s.kind === 'partner_tech';
   const admin = s.kind === 'partner_admin';
@@ -184,8 +188,23 @@ export default async function PartnerClub({
             <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
               {[
                 ['Active members', `${club.active_members}`, `of ${club.members} on record`],
-                ['Payment Gateway · 30 d', kes(Number(club.via_taifapay)), 'fee-earning volume'],
-                ['Cash · 30 d', kes(Number(club.cash)), 'recorded at the desk'],
+                ...(platform
+                  ? [
+                      ['Payment Gateway · 30 d', kes(Number(club.via_taifapay)), 'fee-earning volume'],
+                      ['Cash · 30 d', kes(Number(club.cash)), 'recorded at the desk'],
+                    ]
+                  : [
+                      [
+                        'Door PC',
+                        club.bridge_seen
+                          ? Date.now() - club.bridge_seen.getTime() < 10 * 60_000
+                            ? 'Online'
+                            : 'Offline'
+                          : 'Not installed',
+                        club.bridge_seen ? `seen ${ago(club.bridge_seen)}` : 'pair it under Doors',
+                      ],
+                      ['Members on record', `${club.members}`, 'imported or added'],
+                    ]),
                 [
                   'To sort',
                   `${club.unmatched}`,
@@ -256,8 +275,14 @@ async function Doors({ tenantId }: { tenantId: string }) {
   const d = await doorsBoard(tenantId);
   const host = (await headers()).get('host');
   const base = (process.env.PUBLIC_URL ?? `https://${host}`).replace(/\/$/, '');
+  // While a door PC is being installed (or has not read AxTraxNG yet), the page checks again every 5 seconds.
+  const waiting = d.sites.some((st) => {
+    const b = d.bridges.find((x) => x.site_id === st.id);
+    return !b?.last_seen_at || !(d.readers[st.id] ?? []).length;
+  });
   return (
     <div className="space-y-4">
+      {waiting && <LiveRefresh seconds={5} />}
       {d.sites.map((st) => {
         const b = d.bridges.find((x) => x.site_id === st.id);
         const known = d.readers[st.id] ?? [];

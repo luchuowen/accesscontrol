@@ -473,12 +473,17 @@ export async function unmatchedPayments(tenantId: string) {
         phone: string | null;
         provider_txn_id: string;
         reason: string | null;
+        member_no: number | null;
+        member: string | null;
       }[]
     >`
     select p.id, p.paid_at, p.amount_kes, p.account_ref, p.phone, p.provider_txn_id,
            (select a.data->>'reason' from audit_log a where a.action = 'payment.unmatched' and a.entity = p.id::text
-             order by a.at desc limit 1) as reason
-    from payments p where p.status = 'unmatched' order by p.paid_at desc limit 100`,
+             order by a.at desc limit 1) as reason,
+           m.member_no, m.first_name || ' ' || m.last_name as member
+    from payments p
+    left join members m on m.member_no::text = regexp_replace(coalesce(p.account_ref, ''), '\\D', '', 'g')
+    where p.status = 'unmatched' order by p.paid_at desc limit 100`,
   );
 }
 

@@ -105,7 +105,14 @@ type InvUser = InventoryRequest['users'][number];
 export interface ImportPlan {
   receivedAt: Date | null;
   total: number;
-  create: { user: InvUser; zones: string[]; until: string | null; cards: InvUser['cards'] }[];
+  create: {
+    user: InvUser;
+    zones: string[];
+    until: string | null;
+    /** access that already ended in the door system (kept as history, so the member shows as lapsed) */
+    ended?: { zones: string[]; from: string; to: string } | null;
+    cards: InvUser['cards'];
+  }[];
   existing: number;
   skipped: { number: number; reason: string }[];
 }
@@ -159,10 +166,18 @@ export async function planImport(
     const zoneKeys = zones.filter((z) => z.reader_ids.some((r) => readers.has(r))).map((z) => z.key);
     // Today's access is carried over: an enforced end date in the future is kept; no end date gets the grace period.
     let until: DateTime | null = null;
+    let ended: { zones: string[]; from: string; to: string } | null = null;
     if (zoneKeys.length) {
       if (u.datesEnforced && u.validUntil) {
         const end = DateTime.fromISO(u.validUntil, { zone: tz });
+        const start = u.validFrom ? DateTime.fromISO(u.validFrom, { zone: tz }) : null;
         if (end.isValid && end > now) until = end;
+        else if (end.isValid)
+          ended = {
+            zones: zoneKeys,
+            from: (start?.isValid && start < end ? start : end.minus({ days: 1 })).toISO() ?? '',
+            to: end.toISO() ?? '',
+          };
       } else if (!u.datesEnforced) until = graceUntil;
     }
     const cards = u.cards.filter((c) => {
@@ -171,7 +186,7 @@ export async function planImport(
       cardsTaken.add(k);
       return true;
     });
-    plan.create.push({ user: u, zones: until ? zoneKeys : [], until: until?.toISO() ?? null, cards });
+    plan.create.push({ user: u, zones: until ? zoneKeys : [], until: until?.toISO() ?? null, ended, cards });
   }
   return plan;
 }
@@ -204,6 +219,11 @@ export async function importMembers(
         for (const z of c.zones)
           await tx`insert into entitlements (tenant_id, member_id, zone_key, starts_at, ends_at, source)
                    values (${tenantId}, ${m.id}, ${z}, ${now}, ${new Date(c.until)}, 'import')`;
+      } else if (c.ended) {
+        // Already ended in the door system: kept as history (no access), so the club sees them as lapsed.
+        for (const z of c.ended.zones)
+          await tx`insert into entitlements (tenant_id, member_id, zone_key, starts_at, ends_at, source)
+                   values (${tenantId}, ${m.id}, ${z}, ${new Date(c.ended.from)}, ${new Date(c.ended.to)}, 'import')`;
       }
       await rebuildAccessState(tx, tenantId, m.id);
     }

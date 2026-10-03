@@ -14,7 +14,7 @@ const MESSAGES: Record<string, { tone: 'ok' | 'warn' | 'err'; text: string }> = 
   'prompt-failed': { tone: 'err', text: 'M-Pesa could not be reached just now. Try again in a minute.' },
   'no-taifapay': {
     tone: 'warn',
-    text: 'Connect the club’s Payment Gateway account in Settings to send M-Pesa prompts.',
+    text: 'M-Pesa prompts start once NAVAC connects your Payment Gateway account. You can record cash meanwhile.',
   },
   phone: { tone: 'err', text: 'Enter a Kenyan mobile number, e.g. 0712 345 678.' },
   reason: { tone: 'err', text: 'Give a short reason for complimentary access.' },

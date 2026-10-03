@@ -6,7 +6,13 @@ import { CopyField } from '@/components/copy-field';
 import { SubmitButton } from '@/components/submit-button';
 import { type CreateClubState, createClub } from '../actions';
 
-export function NewClubForm({ consoleUrl }: { consoleUrl: string }) {
+export function NewClubForm({
+  consoleUrl,
+  partners = [],
+}: {
+  consoleUrl: string;
+  partners?: { id: string; name: string }[];
+}) {
   const [state, action] = useActionState<CreateClubState, FormData>(createClub, {});
   if (state.done) {
     const d = state.done;
@@ -97,6 +103,22 @@ export function NewClubForm({ consoleUrl }: { consoleUrl: string }) {
           We text them a heads-up so the invitation email isn’t missed. Their sign-in codes go here.
         </span>
       </label>
+      {partners.length > 0 && (
+        <label className="block">
+          <span className="label">Partner</span>
+          <select name="partnerId" defaultValue="" className="input mt-1.5">
+            <option value="">NAVAC (no partner)</option>
+            {partners.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+          <span className="mt-1 block text-xs text-ink-500">
+            Who sells and installs it. Their shares of the setup fee and subscription follow the club.
+          </span>
+        </label>
+      )}
       <label className="block">
         <span className="label">Time zone</span>
         <select name="timezone" defaultValue="Africa/Nairobi" className="input mt-1.5">

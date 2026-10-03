@@ -73,7 +73,9 @@ export default async function PartnerHome({ searchParams }: { searchParams: Prom
   const setting = d.clubs.filter((c) => c.stage === 'setup');
   const priced = d.clubs.filter((c) => c.feeKes != null && c.billing);
   const paying = priced.filter((c) => c.billing === 'active' || c.billing === 'due');
-  const overdue = priced.filter((c) => c.billing === 'overdue');
+  // A club that has never paid its subscription is waiting for its first payment, not overdue.
+  const overdue = priced.filter((c) => c.billing === 'overdue' && c.paidUntil);
+  const firstDue = priced.filter((c) => !c.paidUntil);
   const recurring = paying.reduce((a, c) => a + c.monthlyShare, 0);
   const atRisk = overdue.reduce((a, c) => a + c.monthlyShare, 0);
   const change = d.earned.prev ? Math.round(((d.earned.now - d.earned.prev) / d.earned.prev) * 100) : null;
@@ -105,6 +107,16 @@ export default async function PartnerHome({ searchParams }: { searchParams: Prom
           icon: ReceiptText,
           text: 'Subscription overdue',
           sub: `${c.name} · ended ${DateTime.fromISO(c.paidUntil ?? '').toFormat('d LLL')}`,
+          cta: 'View',
+          href: `/partner/clubs/${c.id}?tab=billing`,
+        }))
+      : []),
+    ...(d.money
+      ? firstDue.map((c) => ({
+          tone: 'amber' as const,
+          icon: ReceiptText,
+          text: 'First subscription not paid',
+          sub: `${c.name} · ${kes(c.feeKes ?? 0)}`,
           cta: 'View',
           href: `/partner/clubs/${c.id}?tab=billing`,
         }))

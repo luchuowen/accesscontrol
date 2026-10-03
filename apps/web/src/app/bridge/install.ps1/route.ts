@@ -8,7 +8,7 @@ export const dynamic = 'force-dynamic';
  * GET /bridge/install.ps1 — the Site Bridge installer for an AxTraxNG server PC. Run in an elevated PowerShell:
  *   irm https://<lango>/bridge/install.ps1 | iex
  * It asks for the club's pairing code and the AxTraxNG operator login on the PC itself; the AxTraxNG password never
- * leaves the site. Re-running it upgrades the bridge in place and keeps its pairing and journal.
+ * leaves the site. Re-running it upgrades the bridge in place and keeps its pairing and journal, unless a new pairing code is given (moving the PC to another club).
  */
 export function GET(req: Request) {
   const bundle = join(process.cwd(), 'public', 'bridge', 'lango-bridge.mjs');
@@ -31,7 +31,7 @@ Write-Host ''; Write-Host '  Lango Site Bridge' -ForegroundColor Green; Write-Ho
 New-Item -ItemType Directory -Force $app, $data | Out-Null
 $paired = Test-Path "$data\bridge.json"
 $code = ''
-if ($paired) { Write-Host '  Already paired: upgrading in place.' } else { $code = (Read-Host '  Pairing code (club console > Doors & access)').Trim().ToUpper() }
+if ($paired) { $code = (Read-Host '  Already connected. To move this PC to another club, enter its pairing code (or press Enter to keep it)').Trim().ToUpper() } else { $code = (Read-Host '  Pairing code (club console > Doors & access)').Trim().ToUpper() }
 $axUrl = Read-Host '  AxTraxNG REST address [http://localhost:8080]'; if (-not $axUrl) { $axUrl = 'http://localhost:8080' }
 $axUser = Read-Host '  AxTraxNG operator [Administrator]'; if (-not $axUser) { $axUser = 'Administrator' }
 $sec = Read-Host '  AxTraxNG operator password' -AsSecureString
@@ -53,6 +53,8 @@ Get-Process node -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "$
 Start-Sleep 2
 Move-Item "$app\lango-bridge.mjs.new" "$app\lango-bridge.mjs" -Force
 Remove-Item "$data\bridge.lock" -ErrorAction SilentlyContinue
+# Moving to another club: forget the old pairing and its journal, so the new club starts clean.
+if ($paired -and $code) { Remove-Item "$data\bridge.json", "$data\journal.json" -ErrorAction SilentlyContinue }
 # Site settings (incl. the AxTraxNG login) live in a JSON file only SYSTEM and Administrators can read.
 $site = [ordered]@{ AXTRAX_URL = $axUrl; AXTRAX_USER = $axUser; AXTRAX_PASSWORD = $axPass }
 if ($code) { $site.LANGO_PAIR_CODE = $code }

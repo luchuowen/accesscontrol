@@ -104,7 +104,8 @@ export default async function Payments({ searchParams }: { searchParams: Promise
               {queue.length} payment{queue.length === 1 ? '' : 's'} need{queue.length === 1 ? 's' : ''} you (
               {kes(queue.reduce((a, q) => a + q.amount_kes, 0))}).
             </b>{' '}
-            The account number didn’t match a member, so nobody got access for {queue.length === 1 ? 'it' : 'them'} yet.
+            Lango couldn’t tell who or what {queue.length === 1 ? 'it was' : 'they were'} for, so no access was given
+            yet.
           </span>
           <span className="ml-auto shrink-0 rounded-[9px] bg-white px-3 py-1.5 text-[12.5px] font-semibold ring-1 ring-amber-200">
             Sort them
@@ -166,6 +167,12 @@ export default async function Payments({ searchParams }: { searchParams: Promise
                 <li key={q.id} className="grid gap-3 px-4 py-3.5 lg:grid-cols-[1fr_auto] lg:items-center">
                   <div className="text-[13px]">
                     <b className="tabular-nums">{kes(q.amount_kes)}</b>
+                    {q.member && (
+                      <b>
+                        {' '}
+                        · {q.member} (#{q.member_no})
+                      </b>
+                    )}
                     <span className="text-ink-500">
                       {' '}
                       · {dateTime(q.paid_at)} · typed “{q.account_ref ?? ''}”{q.phone ? ` · ${q.phone}` : ''}
@@ -180,6 +187,7 @@ export default async function Payments({ searchParams }: { searchParams: Promise
                           name="memberNo"
                           inputMode="numeric"
                           required
+                          defaultValue={q.member_no ?? ''}
                           placeholder="Member no."
                           aria-label="Member number"
                           className="input w-32 py-2"

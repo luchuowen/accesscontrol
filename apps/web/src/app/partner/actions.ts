@@ -101,6 +101,9 @@ export async function createClub(_prev: CreateClubState, form: FormData): Promis
                              ${await hashPassword(randomBytes(32).toString('base64url'))}, ${pairCode},
                              ${randomBytes(32).toString('hex')}) as id`;
     tenantId = row?.id as string;
+    // NAVAC chooses which partner sells and installs the club; a partner's own clubs are theirs already.
+    const partnerId = String(form.get('partnerId') ?? '');
+    if (UUID.test(partnerId)) await db()`select app_platform_set_club_partner(${s.uid}, ${tenantId}, ${partnerId})`;
   } catch (e) {
     console.error('create club failed', (e as Error).message);
     return { error: 'The club could not be created. Try again, or use a different club code.' };

@@ -4,6 +4,7 @@ import { can } from '@lango/server';
 import { ArrowLeft, CheckCircle2, Clock, CreditCard, ShieldAlert } from 'lucide-react';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
+import { LiveRefresh } from '@/app/(console)/_dash/live-refresh';
 import { Notice } from '@/components/notice';
 import { SubmitButton } from '@/components/submit-button';
 import { Badge, Empty } from '@/components/ui';
@@ -12,6 +13,8 @@ import { date, dateTime, daysLeft, kes } from '@/lib/format';
 import { requirePerm } from '@/lib/session';
 import { db } from '@/server/db';
 import { grantOverride, linkCard, recordDeskPayment, requestMpesa } from '../../actions';
+
+const nbDay = (d: Date) => d.toLocaleDateString('en-GB', { timeZone: 'Africa/Nairobi' });
 
 export default async function MemberPage({
   params,
@@ -33,6 +36,11 @@ export default async function MemberPage({
   const synced = d.sync.every((x) => x.applied_version === x.version);
   const failed = d.sync.find((x) => x.error);
   const zones = [...new Set(plans.flatMap((p) => p.zone_keys))];
+  const zoneNames = new Map(
+    (await withTenant(db(), s.tid, (tx) => tx<{ key: string; name: string }[]>`select key, name from zones`)).map(
+      (z) => [z.key, z.name],
+    ),
+  );
   const [ch] = await withTenant(
     db(),
     s.tid,
@@ -43,6 +51,8 @@ export default async function MemberPage({
   const payTo = ch?.paybill ? `Paybill ${ch.paybill}` : ch?.till ? `Till ${ch.till}` : null;
   return (
     <>
+      {/* After an M-Pesa prompt, and while the doors catch up, the page updates itself. */}
+      {(n === 'prompt-sent' || !synced) && <LiveRefresh seconds={5} />}
       <Link href="/members" className="mb-6 inline-flex items-center gap-1.5 text-sm text-ink-500 hover:text-ink-900">
         <ArrowLeft size={15} /> Members
       </Link>
@@ -66,14 +76,20 @@ export default async function MemberPage({
             >
               <div className="label">{current.length ? 'Access active' : 'No access'}</div>
               <div className="mt-1 text-lg font-semibold">{until ? date(until) : '—'}</div>
-              {left !== null && left >= 0 && <div className="text-xs text-ink-500">{left} days left</div>}
+              {left !== null && left >= 0 && (
+                <div className="text-xs text-ink-500">
+                  {left <= 1 && until && nbDay(until) === nbDay(new Date())
+                    ? 'Ends tonight'
+                    : `${left} day${left === 1 ? '' : 's'} left`}
+                </div>
+              )}
             </div>
           </div>
           <div className="mt-6 flex flex-wrap gap-2">
             {current.length ? (
               [...new Set(current.map((e) => e.zone_key))].map((z) => (
                 <Badge key={z} tone="green">
-                  <CheckCircle2 size={12} /> {z}
+                  <CheckCircle2 size={12} /> {zoneNames.get(z) ?? z}
                 </Badge>
               ))
             ) : (
@@ -195,7 +211,8 @@ export default async function MemberPage({
                   <li key={c.id} className="flex justify-between">
                     <span className="capitalize">{c.kind}</span>
                     <span className="font-mono text-ink-500">
-                      {c.site_code}:{String(c.card_code)}
+                      {c.site_code ? `${c.site_code}:` : ''}
+                      {String(c.card_code)}
                     </span>
                   </li>
                 ))}
@@ -225,7 +242,9 @@ export default async function MemberPage({
               <div className="mt-4 grid grid-cols-2 gap-2">
                 <select name="zone" className="input">
                   {zones.map((z) => (
-                    <option key={z}>{z}</option>
+                    <option key={z} value={z}>
+                      {zoneNames.get(z) ?? z}
+                    </option>
                   ))}
                 </select>
                 <input name="days" type="number" min={1} max={31} defaultValue={1} className="input" />

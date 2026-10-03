@@ -34,7 +34,8 @@ export default async function Members({ searchParams }: { searchParams: Promise<
     withTenant(
       db(),
       s.tid,
-      (tx) => tx<{ n: number }[]>`select count(*)::int as n from members where member_no between 11001 and 11999`,
+      (tx) => tx<{ n: number }[]>`select count(*)::int as n from day_passes
+        where status = 'active' and created_at > date_trunc('day', now() at time zone 'Africa/Nairobi') at time zone 'Africa/Nairobi'`,
     ),
   ]);
   const club = t?.name ?? '';
@@ -155,15 +156,17 @@ export default async function Members({ searchParams }: { searchParams: Promise<
                 }))}
               />
             )}
-            <div className="mt-3 overflow-hidden rounded-2xl border border-[#E7EBF3] bg-white">
-              <Pager
-                page={page}
-                per={50}
-                total={board.total}
-                noun="members"
-                href={(n) => href({ page: n > 1 ? String(n) : undefined })}
-              />
-            </div>
+            {board.total > 0 && (
+              <div className="mt-3 overflow-hidden rounded-2xl border border-[#E7EBF3] bg-white">
+                <Pager
+                  page={page}
+                  per={50}
+                  total={board.total}
+                  noun="members"
+                  href={(n) => href({ page: n > 1 ? String(n) : undefined })}
+                />
+              </div>
+            )}
           </div>
         </>
       )}

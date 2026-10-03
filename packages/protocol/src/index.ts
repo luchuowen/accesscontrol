@@ -6,7 +6,7 @@ export const LocalTime = z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}
 export const Credential = z.object({
   siteCode: z.number().int().min(0).max(65535),
   cardCode: z.number().int().positive(),
-  cardType: z.number().int().positive().default(1),
+  cardType: z.number().int().min(0).default(1), // AxTraxNG reports 0 for some card formats
 });
 
 export const Segment = z.object({ from: LocalTime, until: LocalTime, zones: z.array(z.string().min(1)).min(1) });
