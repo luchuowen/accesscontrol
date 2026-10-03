@@ -32,10 +32,16 @@ New-Item -ItemType Directory -Force $app, $data | Out-Null
 $paired = Test-Path "$data\bridge.json"
 $code = ''
 if ($paired) { $code = (Read-Host '  Already connected. To move this PC to another club, enter its pairing code (or press Enter to keep it)').Trim().ToUpper() } else { $code = (Read-Host '  Pairing code (club console > Doors & access)').Trim().ToUpper() }
-$axUrl = Read-Host '  AxTraxNG REST address [http://localhost:8080]'; if (-not $axUrl) { $axUrl = 'http://localhost:8080' }
-$axUser = Read-Host '  AxTraxNG operator [Administrator]'; if (-not $axUser) { $axUser = 'Administrator' }
-$sec = Read-Host '  AxTraxNG operator password' -AsSecureString
+# On a PC that already runs the bridge, the saved AxTraxNG login is offered: press Enter to keep it.
+$old = $null; try { $old = Get-Content "$data\site.json" -Raw -ErrorAction Stop | ConvertFrom-Json } catch {}
+$defUrl = if ($old -and $old.AXTRAX_URL) { $old.AXTRAX_URL } else { 'http://localhost:8080' }
+$defUser = if ($old -and $old.AXTRAX_USER) { $old.AXTRAX_USER } else { 'Administrator' }
+$axUrl = Read-Host "  AxTraxNG REST address [$defUrl]"; if (-not $axUrl) { $axUrl = $defUrl }
+$axUser = Read-Host "  AxTraxNG operator [$defUser]"; if (-not $axUser) { $axUser = $defUser }
+$hint = if ($old -and $old.AXTRAX_PASSWORD) { ' (Enter keeps the saved one)' } else { '' }
+$sec = Read-Host "  AxTraxNG operator password$hint" -AsSecureString
 $axPass = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($sec))
+if (-not $axPass -and $old -and $old.AXTRAX_PASSWORD) { $axPass = $old.AXTRAX_PASSWORD }
 Write-Host '  Checking the AxTraxNG login...'
 try { $null = Invoke-RestMethod -UseBasicParsing -Method Post -Uri "$axUrl/token" -ContentType 'application/x-www-form-urlencoded' -Body @{ grant_type = 'password'; username = $axUser; password = $axPass } }
 catch { throw "Could not sign in to the AxTraxNG REST API at $axUrl. Check the REST service is running and the operator login. ($($_.Exception.Message))" }
