@@ -246,7 +246,7 @@ export function PayFor({ kind }: { kind: 'cash' | 'pay' }) {
   );
 }
 
-export function LedgerTable({ rows }: { rows: LedgerRow[] }) {
+export function LedgerTable({ rows, canSort = false }: { rows: LedgerRow[]; canSort?: boolean }) {
   const [open, setOpen] = useState<LedgerRow | null>(null);
   useEffect(() => {
     const k = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(null);
@@ -274,7 +274,15 @@ export function LedgerTable({ rows }: { rows: LedgerRow[] }) {
               <tr
                 key={r.id}
                 onClick={() => setOpen(r)}
-                className={`cursor-pointer transition hover:bg-slate-50 ${open?.id === r.id ? 'bg-slate-50 shadow-[inset_3px_0_0_#0c1220]' : ''}`}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    setOpen(r);
+                  }
+                }}
+                tabIndex={0}
+                aria-label="Open payment details"
+                className={`cursor-pointer outline-none focus-visible:bg-slate-50 transition hover:bg-slate-50 ${open?.id === r.id ? 'bg-slate-50 shadow-[inset_3px_0_0_#0c1220]' : ''}`}
               >
                 <td className="whitespace-nowrap px-4 py-3 text-ink-500">{when(r.at)}</td>
                 <td className="px-4 py-3">
@@ -356,7 +364,7 @@ export function LedgerTable({ rows }: { rows: LedgerRow[] }) {
                 Open member
               </Link>
             )}
-            {open.status !== 'applied' && (
+            {canSort && open.status !== 'applied' && (
               <Link href="#sort" onClick={() => setOpen(null)} className="btn-primary justify-center">
                 Sort this payment
               </Link>

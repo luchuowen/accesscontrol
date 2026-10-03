@@ -118,6 +118,7 @@ export default async function Payments({ searchParams }: { searchParams: Promise
         </div>
         {b.rows.length ? (
           <LedgerTable
+            canSort={canAssign}
             rows={b.rows.map((r) => ({
               id: r.id,
               at: r.paid_at.toISOString(),
@@ -201,8 +202,7 @@ export default async function Payments({ searchParams }: { searchParams: Promise
                       </form>
                     ) : (
                       <span className="text-[12px] text-ink-500">
-                        No price is {kes(q.amount_kes)}: refund it from the Payment Gateway, or add that price under
-                        Services.
+                        No price is {kes(q.amount_kes)}: ask NAVAC to refund it, or add that price under Services.
                       </span>
                     ))}
                 </li>

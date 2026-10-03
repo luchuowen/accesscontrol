@@ -19,11 +19,19 @@ export function applyTheme(t: Theme) {
 export function ThemeWatcher({ theme }: { theme: Theme }) {
   useEffect(() => {
     applyTheme(theme);
-    if (theme !== 'system') return;
+    // Leaving the console (club chooser, sign-in pages) goes back to light.
+    const reset = () => {
+      document.documentElement.dataset.mode = 'light';
+      delete document.documentElement.dataset.theme;
+    };
+    if (theme !== 'system') return reset;
     const m = window.matchMedia('(prefers-color-scheme: dark)');
     const on = () => applyTheme('system');
     m.addEventListener('change', on);
-    return () => m.removeEventListener('change', on);
+    return () => {
+      m.removeEventListener('change', on);
+      reset();
+    };
   }, [theme]);
   return null;
 }

@@ -99,7 +99,7 @@ export default async function Dashboard({
       text: units <= 0 ? 'SMS credit is out' : 'SMS credit low',
       sub: units <= 0 ? '0 left · reminders paused' : `${units} left`,
       cta: 'Top up',
-      href: can(s, 'sms.buy') ? '/settings' : undefined,
+      href: can(s, 'sms.buy') ? '/settings?tab=sms' : undefined,
     },
   ].filter(Boolean) as Issue[];
   const now = new Date();

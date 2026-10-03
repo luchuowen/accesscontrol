@@ -26,7 +26,13 @@ export async function POST(req: Request, { params }: Ctx) {
   const c = await channel((await params).token);
   if (!c?.secret) return new Response('not found', { status: 404 });
   const raw = await req.text();
-  const sec = JSON.parse(decrypt(c.secret)) as WhatsAppSecret;
+  let sec: WhatsAppSecret;
+  try {
+    sec = JSON.parse(decrypt(c.secret)) as WhatsAppSecret;
+  } catch {
+    console.error('whatsapp webhook: stored secret unreadable for', c.tenant_id);
+    return new Response('not configured', { status: 404 });
+  }
   if (!verifyMeta(sec.appSecret, raw, req.headers.get('x-hub-signature-256')))
     return new Response('bad signature', { status: 401 });
   if (!c.enabled) return new Response('ok');

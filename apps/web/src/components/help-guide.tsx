@@ -1,6 +1,5 @@
 'use client';
 import {
-  ArrowLeft,
   ArrowRight,
   BarChart3,
   Check,
@@ -29,8 +28,8 @@ import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
 /**
- * Help, design A "Step by step" (approved 3 Oct 2026): a quick guide for each everyday task, one step at a time,
- * each step showing the button to press. Only guides the signed-in person's role can do are listed; it opens on
+ * Help, design A "Step by step" (approved 3 Oct 2026): a quick guide for each everyday task, all steps on one
+ * screen (no paging), each step showing where and the button to press. Only guides the signed-in person's role can do are listed; it opens on
  * the guide for the page they are on.
  */
 type Icon = typeof Rocket;
@@ -111,10 +110,9 @@ const GUIDES: Guide[] = [
         button: { icon: Check, label: 'Club setup' },
       },
       {
-        title: 'Connect payments',
-        text: 'Under Payments, add your Payment Gateway keys and the paybill or till members pay to.',
+        title: 'Check how members pay',
+        text: 'NAVAC connects your M-Pesa paybill or till during onboarding. Settings › Payments shows what is set up.',
         where: 'Settings › Payments',
-        button: { icon: CreditCard, label: 'Verify & save' },
       },
       {
         title: 'Add what you sell',
@@ -184,6 +182,7 @@ const GUIDES: Guide[] = [
         title: 'Pick the plan',
         text: 'Choose what they are paying for. The price comes from Services, so you never type it.',
         where: 'Member page',
+        button: { icon: Send, label: 'Send prompt to phone' },
       },
       {
         title: 'They enter their PIN',
@@ -416,31 +415,22 @@ export function HelpGuide({ perms }: { perms: string[] }) {
   const guides = GUIDES.filter((g) => !g.perm || perms.includes(g.perm));
   const [open, setOpen] = useState(false);
   const [key, setKey] = useState(guides[0]?.key ?? '');
-  const [step, setStep] = useState(0);
   const [copied, setCopied] = useState(false);
   const g = guides.find((x) => x.key === key) ?? guides[0];
   const show = () => {
     const here = guides.find((x) => x.page === PAGE_OF(path));
     setKey((here ?? guides[0])?.key ?? '');
-    setStep(0);
     setOpen(true);
   };
   useEffect(() => {
     if (!open) return;
-    const keys = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false);
-      if (e.key === 'ArrowRight') setStep((n) => Math.min(n + 1, (g?.steps.length ?? 1) - 1));
-      if (e.key === 'ArrowLeft') setStep((n) => Math.max(n - 1, 0));
-    };
+    const keys = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
     document.addEventListener('keydown', keys);
     return () => document.removeEventListener('keydown', keys);
-  }, [open, g]);
+  }, [open]);
   if (!g) return null;
   const t = TONE[g.tone];
-  const s = g.steps[step] as Step;
-  const last = step === g.steps.length - 1;
   const GI = g.icon;
-  const BI = s.button?.icon;
   return (
     <>
       <button
@@ -462,7 +452,7 @@ export function HelpGuide({ perms }: { perms: string[] }) {
           <div
             role="dialog"
             aria-label="Help"
-            className="relative grid max-h-[calc(100vh-32px)] w-[min(880px,100%)] overflow-hidden rounded-3xl bg-white shadow-[0_40px_80px_-30px_rgba(11,22,41,0.55)] md:grid-cols-[260px_1fr]"
+            className="relative grid h-[min(640px,calc(100vh-32px))] w-[min(880px,100%)] overflow-hidden rounded-3xl bg-white shadow-[0_40px_80px_-30px_rgba(11,22,41,0.55)] md:grid-cols-[260px_1fr]"
           >
             {/* guides */}
             <nav className="flex min-h-0 gap-1 overflow-x-auto border-b border-[#EEF1F6] bg-[#F7F8FA] p-3 md:flex-col md:overflow-y-auto md:border-b-0 md:border-r">
@@ -477,10 +467,7 @@ export function HelpGuide({ perms }: { perms: string[] }) {
                   <button
                     key={x.key}
                     type="button"
-                    onClick={() => {
-                      setKey(x.key);
-                      setStep(0);
-                    }}
+                    onClick={() => setKey(x.key)}
                     className={`flex shrink-0 items-center gap-2.5 rounded-xl px-2 py-2 text-left transition ${on ? 'bg-white shadow-[0_1px_3px_rgba(11,22,41,0.1)] ring-1 ring-[#E7EBF3]' : 'hover:bg-white/70'}`}
                   >
                     <span
@@ -499,11 +486,11 @@ export function HelpGuide({ perms }: { perms: string[] }) {
               })}
             </nav>
 
-            {/* steps */}
+            {/* all steps of the chosen guide, on one screen */}
             <section className="flex min-h-0 min-w-0 flex-col">
-              <header className={`relative overflow-hidden bg-gradient-to-br ${t.band} px-6 pb-5 pt-6 text-white`}>
+              <header className={`relative overflow-hidden bg-gradient-to-br ${t.band} px-6 py-5 text-white`}>
                 <GI
-                  size={120}
+                  size={110}
                   strokeWidth={1.2}
                   className="pointer-events-none absolute -right-5 -top-6 opacity-[0.12]"
                 />
@@ -526,68 +513,41 @@ export function HelpGuide({ perms }: { perms: string[] }) {
                     </p>
                   </div>
                 </div>
-                <div className="mt-5 flex gap-1.5">
-                  {g.steps.map((_, i) => (
-                    <button
-                      key={i}
-                      type="button"
-                      aria-label={`Step ${i + 1}`}
-                      onClick={() => setStep(i)}
-                      className={`h-1.5 flex-1 rounded-full transition ${i <= step ? 'bg-white' : 'bg-white/25'}`}
-                    />
-                  ))}
-                </div>
               </header>
 
-              <div key={`${g.key}${step}`} className="flex-1 overflow-y-auto px-6 py-6 animate-[slidein_.18s_ease-out]">
-                <div className="flex items-start gap-4">
-                  <span
-                    className={`grid h-10 w-10 shrink-0 place-items-center rounded-full text-[15px] font-bold ${t.soft}`}
-                  >
-                    {step + 1}
-                  </span>
-                  <div className="min-w-0">
-                    <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-500">
-                      Step {step + 1} of {g.steps.length}
-                    </div>
-                    <h3 className="mt-1 text-[19px] font-semibold leading-snug tracking-tight text-balance">
-                      {s.title}
-                    </h3>
-                    <p className="mt-2 max-w-[52ch] text-[14px] leading-relaxed text-ink-700">{s.text}</p>
-                  </div>
-                </div>
-                <div className="mt-6 rounded-2xl border border-[#E7EBF3] bg-[#FAFBFC] p-4">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-500">Where</div>
-                  <div className="mt-2 flex flex-wrap items-center gap-3">
-                    <span className="inline-flex items-center gap-1.5 text-[13.5px] font-medium text-ink-900">
-                      <i className={`h-2 w-2 rounded-full ${t.dot}`} /> {s.where}
-                    </span>
-                    {s.button && BI && (
-                      <>
-                        <ArrowRight size={14} className="text-ink-300" />
-                        <span className="inline-flex items-center gap-2 rounded-xl bg-ink-900 px-3.5 py-2 text-[13px] font-semibold text-white shadow-[0_4px_12px_-6px_rgba(11,22,41,0.6)]">
-                          <BI size={15} /> {s.button.label}
-                        </span>
-                      </>
-                    )}
-                  </div>
-                </div>
-                {last && (
-                  <div className="mt-4 flex items-center gap-3 rounded-2xl bg-emerald-50 px-4 py-3 text-[13px] text-emerald-900">
-                    <span className="grid h-7 w-7 place-items-center rounded-full bg-emerald-500 text-white">
-                      <Check size={15} strokeWidth={3} />
-                    </span>
-                    That’s it.
-                    <Link
-                      href={g.href}
-                      onClick={() => setOpen(false)}
-                      className="ml-auto font-semibold text-emerald-800 underline-offset-2 hover:underline"
-                    >
-                      Go to {g.page} →
-                    </Link>
-                  </div>
-                )}
-              </div>
+              <ol key={g.key} className="flex-1 overflow-y-auto px-6 py-5 animate-[slidein_.18s_ease-out]">
+                {g.steps.map((s, i) => {
+                  const BI = s.button?.icon;
+                  const end = i === g.steps.length - 1;
+                  return (
+                    <li key={s.title} className="relative flex gap-4 pb-5 last:pb-0">
+                      {!end && <span className="absolute bottom-0 left-[17px] top-10 w-px bg-[#E7EBF3]" />}
+                      <span
+                        className={`relative grid h-9 w-9 shrink-0 place-items-center rounded-full text-[14px] font-bold ${t.soft}`}
+                      >
+                        {i + 1}
+                      </span>
+                      <div className="min-w-0 flex-1 pt-1.5">
+                        <h3 className="text-[15px] font-semibold leading-snug tracking-tight">{s.title}</h3>
+                        <p className="mt-1 text-[13.5px] leading-relaxed text-ink-700">{s.text}</p>
+                        <div className="mt-2 flex flex-wrap items-center gap-2 text-[12.5px]">
+                          <span className="inline-flex items-center gap-1.5 rounded-full bg-[#F4F6F9] px-2.5 py-1 font-medium text-ink-700">
+                            <i className={`h-1.5 w-1.5 rounded-full ${t.dot}`} /> {s.where}
+                          </span>
+                          {s.button && BI && (
+                            <>
+                              <ArrowRight size={13} className="text-ink-300" />
+                              <span className="inline-flex items-center gap-1.5 rounded-lg bg-ink-900 px-2.5 py-1 font-semibold text-white">
+                                <BI size={13} /> {s.button.label}
+                              </span>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ol>
 
               <footer className="flex flex-wrap items-center gap-2 border-t border-[#EEF1F6] px-6 py-3.5">
                 <span className="mr-auto inline-flex items-center gap-1.5 text-[12px] text-ink-500">
@@ -605,23 +565,9 @@ export function HelpGuide({ perms }: { perms: string[] }) {
                     support@navac.co.ke {copied ? <Check size={12} /> : <Copy size={12} />}
                   </button>
                 </span>
-                <button
-                  type="button"
-                  disabled={step === 0}
-                  onClick={() => setStep(step - 1)}
-                  className="btn-ghost px-3.5 py-2 text-[13px] disabled:opacity-40"
-                >
-                  <ArrowLeft size={15} /> Back
-                </button>
-                {last ? (
-                  <button type="button" onClick={() => setOpen(false)} className="btn-primary px-4 py-2 text-[13px]">
-                    Done
-                  </button>
-                ) : (
-                  <button type="button" onClick={() => setStep(step + 1)} className="btn-primary px-4 py-2 text-[13px]">
-                    Next <ArrowRight size={15} />
-                  </button>
-                )}
+                <Link href={g.href} onClick={() => setOpen(false)} className="btn-primary px-4 py-2 text-[13px]">
+                  Go to {g.page} <ArrowRight size={15} />
+                </Link>
               </footer>
             </section>
           </div>

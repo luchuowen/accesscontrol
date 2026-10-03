@@ -52,7 +52,7 @@ export async function announce(_prev: AnnounceState, form: FormData): Promise<An
         r.reason === 'credit'
           ? `Not enough SMS credit: this needs ${r.need?.toLocaleString('en-KE')} SMS. Buy SMS in Settings first.`
           : r.reason === 'off'
-            ? 'SMS is off for this club. Switch it on below first.'
+            ? 'SMS is off for this club. Turn it on in Settings › Notifications first.'
             : 'No members with a phone number are in that group.',
     };
   revalidatePath('/communications');

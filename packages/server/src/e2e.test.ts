@@ -715,6 +715,25 @@ describe('walking skeleton: pay → door', () => {
     expect(billingState(plan)).toBe('active');
     const [r] = await owner`select status, receipt_ref from subscription_invoices where id = ${inv?.id}`;
     expect(r).toMatchObject({ status: 'paid', receipt_ref: 'TK12ABC3XY' });
+    // A second payment for the same period (asked for twice) buys the next period, never the same one again.
+    await owner`insert into subscription_invoices (tenant_id, plan_name, cycles, period_from, period_to,
+      amount_kes, phone, created_by, provider_ref, created_at)
+      values (${tenantId}, 'Lango Club', 3, ${from.toISODate()}, ${to}, 15000, '254726049097', 'test', 'TP-SUB-2',
+              now() - interval '2 minutes')`;
+    expect(await reconcileSubscriptions(app, () => {}, client)).toBe(1);
+    const next = DateTime.fromISO(to as string)
+      .plus({ days: 1 })
+      .plus({ months: 3 })
+      .minus({ days: 1 })
+      .toISODate();
+    expect((await clubPlan(app, tenantId))?.paid_until).toBe(next);
+    // A prompt nobody paid is closed after a day.
+    const [old] = await owner`insert into subscription_invoices (tenant_id, plan_name, cycles, period_from, period_to,
+      amount_kes, phone, created_by, created_at)
+      values (${tenantId}, 'Lango Club', 1, ${from.toISODate()}, ${to}, 5000, '254726049097', 'test',
+              now() - interval '25 hours') returning id`;
+    await reconcileSubscriptions(app, () => {}, client);
+    expect((await owner`select status from subscription_invoices where id = ${old?.id}`)[0]?.status).toBe('expired');
     // The club can't change its own plan.
     await expect(withTenant(app, tenantId, (tx) => tx`update club_plans set fee_kes = 10`)).rejects.toThrow(
       /permission/,
@@ -1079,6 +1098,13 @@ describe('walking skeleton: pay → door', () => {
     expect((await perms(mgr, tenantId))?.perms).not.toContain('members.view');
     expect(await perms(mgr, otherTenant)).toBeNull();
     await expect(setRolePerm(app, ownerWho, 'reception', 'club.own', true)).rejects.toThrow(/unknown permission/);
+    // NAVAC support acts as viewer: a club tuning the viewer role never changes what NAVAC can see.
+    const [nav] = await owner`select id from staff_users where email = 'sms-admin@navac.test'`;
+    const navBefore = (await perms(nav?.id, tenantId))?.perms ?? [];
+    await setRolePerm(app, ownerWho, 'viewer', 'members.view', false);
+    await setRolePerm(app, ownerWho, 'viewer', 'payments.assign', true);
+    expect((await perms(nav?.id, tenantId))?.perms ?? []).toEqual(navBefore);
+    await resetRolePerms(app, ownerWho, 'viewer');
     await resetRolePerms(app, ownerWho, 'reception');
     expect((await perms(mgr, tenantId))?.perms).not.toContain('payments.assign');
 

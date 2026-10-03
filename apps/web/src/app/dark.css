@@ -72,6 +72,7 @@ html[data-mode="dark"] .hover\:bg-\[\#F7F8FA\]:hover { background-color:#1D2739 
 html[data-mode="dark"] .hover\:bg-\[\#FAFBFC\]:hover { background-color:#1D2739 }
 html[data-mode="dark"] .hover\:bg-white:hover { background-color:#1D2739 }
 html[data-mode="dark"] .hover\:bg-white\/70:hover { background-color:#1D2739 }
+html[data-mode="dark"] .bg-white\/70 { background-color: rgba(19,26,40,.7) }
 html[data-mode="dark"] .group:hover .group-hover\:bg-white { background-color:#1D2739 }
 html[data-mode="dark"] .hover\:text-ink-900:hover { color:#FFFFFF }
 html[data-mode="dark"] .bg-emerald-50,

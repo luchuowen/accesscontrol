@@ -40,17 +40,21 @@ export async function inbox(tenantId: string, o: { ch?: string; f?: Filter; q?: 
       where (${ch} = '' or c.channel = ${ch})
         and (${f} <> 'unread' or c.unread > 0)
         and (${f} <> 'waiting' or (c.status = 'open' and l.dir = 'in'))
-        and (case when ${f} = 'done' then c.status = 'done' else c.status = 'open' or ${f} = 'all' end)
+        and (case when ${f} = 'done' then c.status = 'done' else c.status = 'open' end)
         and (${q} = '' or lower(coalesce(m.first_name || ' ' || m.last_name, c.name, '')) like ${`%${q}%`}
              or lower(c.address) like ${`%${q}%`} or m.member_no::text = ${q}
              or (${digits} <> '' and c.address like ${`%${digits}%`}))
       order by c.last_at desc limit 200`;
     const [counts] = await tx<{ unread: number; waiting: number }[]>`
       select count(*) filter (where unread > 0)::int as unread,
-             count(*) filter (where status = 'open' and exists (
-               select 1 from comm_messages x where x.conversation_id = c.id and x.direction = 'in'
-                 and x.created_at >= c.last_at - interval '1 second'))::int as waiting
-      from conversations c`;
+             count(*) filter (where status = 'open' and l.dir = 'in')::int as waiting
+      from conversations c
+      left join lateral (
+        select dir from (
+          select direction as dir, created_at from comm_messages where conversation_id = c.id
+          union all
+          select 'out', created_at from sms_messages where conversation_id = c.id
+        ) x order by created_at desc limit 1) l on true`;
     return { rows, counts: counts ?? { unread: 0, waiting: 0 } };
   });
 }

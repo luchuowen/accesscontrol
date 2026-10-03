@@ -26,7 +26,10 @@ export interface ClubPlan {
 export type BillingState = 'active' | 'due' | 'overdue' | 'unpriced' | 'none';
 
 /** Where the club stands: active, due within 7 days, overdue, or no price agreed yet. */
-export function billingState(p: ClubPlan | null, today = DateTime.now().toISODate() ?? ''): BillingState {
+export function billingState(
+  p: ClubPlan | null,
+  today = DateTime.now().setZone('Africa/Nairobi').toISODate() ?? '',
+): BillingState {
   if (!p) return 'none';
   if (p.fee_kes == null) return 'unpriced';
   if (!p.paid_until || p.paid_until < today) return 'overdue';
@@ -71,8 +74,10 @@ export async function startSubscriptionPayment(
   const end = start.plus({ months: CYCLE_MONTHS[plan.cycle] * a.cycles }).minus({ days: 1 });
   const amount = plan.fee_kes * a.cycles;
   const created = await withTenant(sql, tenantId, async (tx) => {
+    // One prompt at a time per club (double clicks, two people paying at once).
+    await tx`select pg_advisory_xact_lock(hashtext(${`sub:${tenantId}`}))`;
     const [open] =
-      await tx`select 1 from subscription_invoices where status = 'pending' and created_at > now() - interval '2 minutes'`;
+      await tx`select 1 from subscription_invoices where status = 'pending' and created_at > now() - interval '3 minutes'`;
     if (open) return null;
     const [t] = await tx<{ name: string }[]>`select name from tenants where id = ${tenantId}`;
     const [row] = await tx<{ id: string; invoice_no: string }[]>`
@@ -85,22 +90,17 @@ export async function startSubscriptionPayment(
     return { id: row?.id as string, no: row?.invoice_no as string, desc: `Lango ${t?.name ?? ''}`.slice(0, 20).trim() };
   });
   if (!created) return { ok: false, reason: 'pending' };
+  let res: unknown;
   try {
-    const res = await client.stkPush({
+    res = await client.stkPush({
       phone,
       amount,
       accountReference: created.no,
       description: created.desc,
       externalId: created.id,
     });
-    const ref = initiatedTransactionId(res);
-    await withTenant(
-      sql,
-      tenantId,
-      (tx) => tx`update subscription_invoices set provider_ref = ${ref} where id = ${created.id}`,
-    );
-    return { ok: true, invoiceId: created.id, invoiceNo: created.no };
   } catch {
+    // The prompt never left: safe to close the invoice.
     await withTenant(
       sql,
       tenantId,
@@ -108,6 +108,19 @@ export async function startSubscriptionPayment(
     );
     return { ok: false, reason: 'failed' };
   }
+  // The prompt went out: never mark it failed from here; the poller settles it (or it expires after a day).
+  const ref = initiatedTransactionId(res as never);
+  try {
+    await withTenant(
+      sql,
+      tenantId,
+      (tx) => tx`update subscription_invoices set provider_ref = ${ref} where id = ${created.id}`,
+    );
+  } catch (e) {
+    console.error(`subscription ${created.id}: could not store the gateway reference: ${(e as Error).message}`);
+  }
+  if (!ref) console.error(`subscription ${created.id}: the gateway returned no transaction reference`);
+  return { ok: true, invoiceId: created.id, invoiceNo: created.no };
 }
 
 /** Settle pending subscription payments by asking the gateway (webhook nudge and the 60 s poller). Once each. */
@@ -118,6 +131,7 @@ export async function reconcileSubscriptions(
 ) {
   const taifa = client ?? (await platformTaifa(sql));
   if (!taifa) return 0;
+  await sql`select app_expire_sub_payments()`;
   const pending = await sql<{ id: string; tenant_id: string; provider_ref: string; amount_kes: number }[]>`
     select * from app_pending_sub_payments()`;
   let paid = 0;

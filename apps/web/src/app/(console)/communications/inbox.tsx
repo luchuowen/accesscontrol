@@ -110,7 +110,7 @@ export function Composer({
   quick: { label: string; text: string }[];
   member: boolean;
 }) {
-  const [state, action] = useActionState<ReplyState, FormData>(reply, {});
+  const [state, action, sending] = useActionState<ReplyState, FormData>(reply, {});
   const [body, setBody] = useState('');
   const [subject, setSubject] = useState('');
   const [open, setOpen] = useState(false);
@@ -176,7 +176,7 @@ export function Composer({
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
               e.preventDefault();
-              if (body.trim()) form.current?.requestSubmit();
+              if (body.trim() && !sending) form.current?.requestSubmit();
             }
           }}
           rows={Math.min(6, Math.max(1, body.split('\n').length))}

@@ -6,6 +6,7 @@ import {
   assignClubs,
   checkWhatsApp,
   clientIp,
+  decrypt,
   encrypt,
   hashPassword,
   inviteClubOwner,
@@ -634,8 +635,26 @@ export async function navacSaveGateway(form: FormData) {
   const tenantId = String(form.get('tenantId') ?? '');
   if (!UUID.test(tenantId)) redirect('/partner?m=denied');
   const env = String(form.get('env')) === 'sandbox' ? 'sandbox' : 'live';
-  const clientId = String(form.get('clientId') ?? '').trim();
-  const clientSecret = String(form.get('clientSecret') ?? '').trim();
+  let clientId = String(form.get('clientId') ?? '').trim();
+  let clientSecret = String(form.get('clientSecret') ?? '').trim();
+  // Blank fields keep what is stored (e.g. switching sandbox to live, or replacing only the secret).
+  if (!clientId || !clientSecret) {
+    const [cur] = await withTenant(
+      db(),
+      tenantId,
+      (tx) => tx<{ id: string | null; secret: string | null }[]>`
+        select data->'taifapay'->>'clientId' as id, data->'taifapay'->>'clientSecret' as secret
+        from tenant_settings where tenant_id = ${tenantId}`,
+    );
+    clientId ||= cur?.id ?? '';
+    if (!clientSecret && cur?.secret) {
+      try {
+        clientSecret = decrypt(cur.secret);
+      } catch {
+        clientSecret = '';
+      }
+    }
+  }
   if (!clientId || !clientSecret) toClub(tenantId, 'pay', 'gw-missing');
   let outcome: 'ok' | 'rejected' | 'unreachable' = 'ok';
   try {

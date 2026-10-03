@@ -47,7 +47,9 @@ export async function GET(req: Request) {
   const name = `lango-payments-${new Date().toISOString().slice(0, 10)}`;
   if (u.searchParams.get('f') === 'csv') {
     const esc = (v: unknown) => {
-      const t = String(v ?? '');
+      // Text starting with = + - @ would run as a formula in Excel.
+      const t =
+        typeof v === 'string' && /^[=+\-@\t\r]/.test(v) && !/^[+-]?[\d\s.,]+$/.test(v) ? `'${v}` : String(v ?? '');
       return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t;
     };
     const csv = [head, ...rows].map((r) => r.map(esc).join(',')).join('\r\n');
