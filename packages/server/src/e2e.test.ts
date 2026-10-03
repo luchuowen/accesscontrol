@@ -23,6 +23,7 @@ import {
   startSignInCode,
   verifySignInCode,
 } from './accounts.js';
+import { billingState, clubPlan, reconcileSubscriptions, startSubscriptionPayment } from './billing.js';
 import { handleAck, handleDrift, handleEvents, handleInventory, handlePair, handleSync } from './bridge-api.js';
 import { parseMeta, ReplyError, receiveEmail, receiveWhatsApp, sendReply, verifyMeta } from './comms.js';
 import { encrypt } from './crypto.js';
@@ -670,6 +671,54 @@ describe('walking skeleton: pay → door', () => {
       ok: false,
       reason: 'no-platform-taifapay',
     });
+  });
+  it('Lango subscription: NAVAC sets the plan, the owner pays by M-Pesa, paid-until moves on once', async () => {
+    const [pa] = await owner`select id from staff_users where email = 'sms-admin@navac.test'`;
+    // Price not agreed yet: nothing to pay.
+    await owner`select app_platform_set_plan(${pa?.id}, ${tenantId}, 'Lango Club', ${null}, 'monthly', ${null}, '', '')`;
+    expect(billingState(await clubPlan(app, tenantId))).toBe('unpriced');
+    expect(await startSubscriptionPayment(app, tenantId, { cycles: 1, phone: '0726049097', actor: 'test' })).toEqual({
+      ok: false,
+      reason: 'unpriced',
+    });
+    // Only NAVAC can set a plan.
+    await expect(
+      app`select app_platform_set_plan(${tenantId}, ${tenantId}, 'x', 100, 'monthly', ${null}, '', '')`,
+    ).rejects.toThrow(/platform/);
+    const paidUntil = DateTime.now().plus({ days: 3 }).toISODate();
+    await owner`select app_platform_set_plan(${pa?.id}, ${tenantId}, 'Lango Club', 5000, 'monthly', ${paidUntil}, '', '')`;
+    expect(billingState(await clubPlan(app, tenantId))).toBe('due');
+    // A pending payment for 3 months, as startSubscriptionPayment records it, confirmed by the gateway.
+    let status = 'PENDING';
+    const fakeFetch = (async (u: string) =>
+      new Response(
+        JSON.stringify(
+          String(u).endsWith('/auth/token')
+            ? { access_token: 't', expires_in: '3599' }
+            : { transaction: { id: 'TP-SUB-1', status, amount: 15000, mpesaReceiptNumber: 'TK12ABC3XY' } },
+        ),
+      )) as typeof fetch;
+    const client = new TaifaPay({ env: 'live', clientId: 'navac', clientSecret: 's' }, fakeFetch);
+    const from = DateTime.fromISO(paidUntil as string).plus({ days: 1 });
+    const to = from.plus({ months: 3 }).minus({ days: 1 }).toISODate();
+    const [inv] = await owner`insert into subscription_invoices (tenant_id, plan_name, cycles, period_from, period_to,
+      amount_kes, phone, created_by, provider_ref, created_at)
+      values (${tenantId}, 'Lango Club', 3, ${from.toISODate()}, ${to}, 15000, '254726049097', 'test', 'TP-SUB-1',
+              now() - interval '2 minutes') returning id, invoice_no`;
+    expect(inv?.invoice_no).toMatch(/^LSUB-\d{5}$/);
+    expect(await reconcileSubscriptions(app, () => {}, client)).toBe(0);
+    status = 'COMPLETED';
+    expect(await reconcileSubscriptions(app, () => {}, client)).toBe(1);
+    expect(await reconcileSubscriptions(app, () => {}, client)).toBe(0);
+    const plan = await clubPlan(app, tenantId);
+    expect(plan?.paid_until).toBe(to);
+    expect(billingState(plan)).toBe('active');
+    const [r] = await owner`select status, receipt_ref from subscription_invoices where id = ${inv?.id}`;
+    expect(r).toMatchObject({ status: 'paid', receipt_ref: 'TK12ABC3XY' });
+    // The club can't change its own plan.
+    await expect(withTenant(app, tenantId, (tx) => tx`update club_plans set fee_kes = 10`)).rejects.toThrow(
+      /permission/,
+    );
   });
   it('SMS etiquette: quiet hours, one message a day, nothing twice; staff and NAVAC alerts; portal sign-in codes', async () => {
     // The previous test switched quiet hours off to run at any time of day; this one tests them.

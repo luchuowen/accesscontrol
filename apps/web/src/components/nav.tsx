@@ -35,7 +35,7 @@ export const ITEMS = [
     href: '/settings',
     label: 'Settings',
     icon: SlidersHorizontal,
-    any: ['settings.payments', 'sms.buy', 'messages.manage', 'team.manage'],
+    any: ['settings.payments', 'sms.buy', 'messages.manage', 'team.manage', 'billing.manage'],
   },
 ];
 

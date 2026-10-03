@@ -682,3 +682,29 @@ export async function navacSaveChannels(form: FormData) {
   revalidatePath(`/partner/clubs/${tenantId}`);
   toClub(tenantId, 'pay', 'ch-ok');
 }
+
+/** NAVAC only: a club's Lango plan (name, fee per cycle, cycle, paid until, who to bill). Leave the fee empty while
+ * the price is being agreed. */
+export async function navacSavePlan(form: FormData) {
+  const s = await platformOnly();
+  const tenantId = String(form.get('tenantId') ?? '');
+  if (!UUID.test(tenantId)) redirect('/partner?m=denied');
+  const feeRaw = String(form.get('fee') ?? '').replace(/[^\d]/g, '');
+  const fee = feeRaw ? Number(feeRaw) : null;
+  if (fee !== null && fee < 10) toClub(tenantId, 'billing', 'plan-fee');
+  const cycle = ['monthly', 'quarterly', 'yearly'].includes(String(form.get('cycle')))
+    ? String(form.get('cycle'))
+    : 'monthly';
+  const until = String(form.get('paidUntil') ?? '');
+  const phoneRaw = String(form.get('phone') ?? '').trim();
+  const phone = phoneRaw ? msisdn(phoneRaw) : '';
+  if (phoneRaw && !phone) toClub(tenantId, 'billing', 'plan-phone');
+  await db()`select app_platform_set_plan(${s.uid}, ${tenantId}, ${String(form.get('name') ?? '').slice(0, 60)}, ${fee},
+             ${cycle}, ${/^\d{4}-\d{2}-\d{2}$/.test(until) ? until : null}, ${phone ?? ''},
+             ${String(form.get('email') ?? '')
+               .trim()
+               .toLowerCase()
+               .slice(0, 120)})`;
+  revalidatePath(`/partner/clubs/${tenantId}`);
+  toClub(tenantId, 'billing', 'plan-ok');
+}

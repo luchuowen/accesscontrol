@@ -1,5 +1,5 @@
 import { withTenant } from '@lango/db';
-import { onboardingChecklist, platformEmailConfig, platformSmsConfig } from '@lango/server';
+import { billingState, clubPlan, onboardingChecklist, platformEmailConfig, platformSmsConfig } from '@lango/server';
 import {
   ArrowLeft,
   CheckCircle2,
@@ -11,6 +11,7 @@ import {
   MessageCircle,
   MessageSquare,
   MonitorSmartphone,
+  ReceiptText,
   RefreshCw,
 } from 'lucide-react';
 import { headers } from 'next/headers';
@@ -27,6 +28,7 @@ import {
   inviteOwner,
   navacSaveChannels,
   navacSaveGateway,
+  navacSavePlan,
   partnerInventory,
   partnerPairCode,
   partnerSaveEmail,
@@ -55,9 +57,12 @@ const NOTE: Record<string, [ok: boolean, text: string]> = {
   'gw-unreachable': [false, 'The Payment Gateway did not answer, so nothing was saved. Try again in a minute.'],
   'ch-ok': [true, 'Payment details saved. The club sees them straight away.'],
   'ch-number': [false, 'Paybill and till numbers are 5 to 7 digits.'],
+  'plan-ok': [true, 'Plan saved. The club sees it under Settings › Billing.'],
+  'plan-fee': [false, 'The fee is at least KES 10, or leave it empty while the price is agreed.'],
+  'plan-phone': [false, 'Enter a Kenyan mobile number, or leave it empty.'],
 };
 
-type Tab = 'overview' | 'pay' | 'doors' | 'comms';
+type Tab = 'overview' | 'pay' | 'billing' | 'doors' | 'comms';
 
 export default async function PartnerClub({
   params,
@@ -91,7 +96,7 @@ export default async function PartnerClub({
     from app_partner_clubs(${s.uid}) c join app_partner_stats(${s.uid}) st on st.tenant_id = c.id
     where c.id = ${id}`;
   if (!club) notFound();
-  const tab: Tab = sp.tab === 'doors' || sp.tab === 'comms' || sp.tab === 'pay' ? sp.tab : 'overview';
+  const tab: Tab = ['doors', 'comms', 'pay', 'billing'].includes(sp.tab ?? '') ? (sp.tab as Tab) : 'overview';
   const installer = s.kind === 'partner_admin' || s.kind === 'partner_tech';
   const admin = s.kind === 'partner_admin';
   const note = sp.n ? NOTE[sp.n] : undefined;
@@ -151,6 +156,7 @@ export default async function PartnerClub({
       <div className="mt-5 inline-flex rounded-xl bg-[#EEF1F6] p-1">
         {tabLink('overview', 'Overview', LayoutGrid)}
         {tabLink('pay', 'Payments', CreditCard)}
+        {tabLink('billing', 'Billing', ReceiptText)}
         {installer && tabLink('doors', 'Doors', DoorOpen)}
         {tabLink('comms', 'Communications', MessageSquare)}
       </div>
@@ -228,6 +234,7 @@ export default async function PartnerClub({
         )}
         {tab === 'doors' && installer && <Doors tenantId={id} />}
         {tab === 'pay' && <Payments tenantId={id} uid={s.uid} />}
+        {tab === 'billing' && <Billing tenantId={id} uid={s.uid} />}
         {tab === 'comms' && <Comms tenantId={id} uid={s.uid} admin={admin} slug={club.slug} />}
       </div>
     </>
@@ -349,6 +356,130 @@ async function Doors({ tenantId }: { tenantId: string }) {
           </section>
         );
       })}
+    </div>
+  );
+}
+
+async function Billing({ tenantId, uid }: { tenantId: string; uid: string }) {
+  const [[plat], plan, invoices] = await Promise.all([
+    db()<{ ok: boolean }[]>`select app_is_platform(${uid}) as ok`,
+    clubPlan(db(), tenantId),
+    withTenant(
+      db(),
+      tenantId,
+      (tx) => tx<
+        { id: string; invoice_no: string; created_at: Date; period_to: Date; amount_kes: number; status: string }[]
+      >`
+        select id, invoice_no, created_at, period_to, amount_kes, status from subscription_invoices order by created_at desc limit 8`,
+    ),
+  ]);
+  const navac = !!plat?.ok;
+  const state = billingState(plan);
+  const lbl = 'mb-1.5 block text-[11.5px] font-semibold text-ink-500';
+  const tone =
+    state === 'active'
+      ? 'bg-emerald-50 text-emerald-700'
+      : state === 'unpriced' || state === 'none'
+        ? 'bg-slate-100 text-ink-500'
+        : 'bg-amber-50 text-amber-800';
+  const word = {
+    active: 'Active',
+    due: 'Renews this week',
+    overdue: 'Payment due',
+    unpriced: 'Price not set',
+    none: 'Not set up',
+  }[state];
+  return (
+    <div className="grid gap-4 xl:grid-cols-[1.2fr_1fr]">
+      <section className="rounded-2xl border border-[#E4E8EF] bg-white p-5">
+        <header className="flex items-center gap-3">
+          <h2 className="text-[14.5px] font-semibold">Lango plan</h2>
+          <span className={`ml-auto rounded-full px-2.5 py-1 text-[11.5px] font-semibold ${tone}`}>{word}</span>
+        </header>
+        {navac ? (
+          <form action={navacSavePlan} className="mt-4 grid gap-3.5 sm:grid-cols-2">
+            <input type="hidden" name="tenantId" value={tenantId} />
+            <label>
+              <span className={lbl}>Plan name</span>
+              <input name="name" defaultValue={plan?.plan_name ?? 'Lango'} className="input py-2" />
+            </label>
+            <label>
+              <span className={lbl}>Billing cycle</span>
+              <select name="cycle" defaultValue={plan?.cycle ?? 'monthly'} className="input py-2">
+                <option value="monthly">Monthly</option>
+                <option value="quarterly">Every 3 months</option>
+                <option value="yearly">Yearly</option>
+              </select>
+            </label>
+            <label>
+              <span className={lbl}>Fee per cycle (KES)</span>
+              <input
+                name="fee"
+                inputMode="numeric"
+                defaultValue={plan?.fee_kes ?? ''}
+                placeholder="Empty while agreeing"
+                className="input py-2"
+              />
+            </label>
+            <label>
+              <span className={lbl}>Paid until</span>
+              <input name="paidUntil" type="date" defaultValue={plan?.paid_until ?? ''} className="input py-2" />
+            </label>
+            <label>
+              <span className={lbl}>Billing phone</span>
+              <input
+                name="phone"
+                inputMode="tel"
+                defaultValue={plan?.billing_phone ?? ''}
+                placeholder="07…"
+                className="input py-2"
+              />
+            </label>
+            <label>
+              <span className={lbl}>Billing email</span>
+              <input
+                name="email"
+                type="email"
+                defaultValue={plan?.billing_email ?? ''}
+                placeholder="accounts@club.co.ke"
+                className="input py-2"
+              />
+            </label>
+            <SubmitButton pendingText="Saving…" className="btn-primary py-2.5 sm:col-span-2">
+              Save plan
+            </SubmitButton>
+          </form>
+        ) : (
+          <dl className="mt-3 grid gap-2 text-[13px]">
+            <div className="flex justify-between">
+              <dt className="text-ink-500">Plan</dt>
+              <dd>{plan?.plan_name ?? '—'}</dd>
+            </div>
+            <div className="flex justify-between">
+              <dt className="text-ink-500">Paid until</dt>
+              <dd>{plan?.paid_until ?? '—'}</dd>
+            </div>
+          </dl>
+        )}
+      </section>
+      <section className="rounded-2xl border border-[#E4E8EF] bg-white p-5">
+        <h2 className="text-[14.5px] font-semibold">Payments</h2>
+        <ul className="mt-3 divide-y divide-[#F0F2F6] text-[13px]">
+          {invoices.length === 0 && <li className="py-3 text-ink-500">No payments yet.</li>}
+          {invoices.map((i) => (
+            <li key={i.id} className="flex items-center gap-3 py-2.5">
+              <span className="font-mono text-[12px] text-ink-500">{i.invoice_no}</span>
+              <span className="flex-1 text-ink-500">{dateTime(i.created_at)}</span>
+              <b className="tabular-nums">{kes(i.amount_kes)}</b>
+              <span
+                className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${i.status === 'paid' ? 'bg-emerald-50 text-emerald-700' : i.status === 'pending' ? 'bg-slate-100 text-ink-500' : 'bg-rose-50 text-rose-700'}`}
+              >
+                {i.status === 'paid' ? 'Paid' : i.status === 'pending' ? 'Waiting' : 'Not paid'}
+              </span>
+            </li>
+          ))}
+        </ul>
+      </section>
     </div>
   );
 }

@@ -1,0 +1,160 @@
+import type { Sql } from '@lango/db';
+import { withTenant } from '@lango/db';
+import { DateTime } from 'luxon';
+import { msisdn } from './sms.js';
+import { platformTaifa } from './sms-topup.js';
+import { initiatedTransactionId, normalStatus, pick, transactionRecord } from './taifapay.js';
+
+/**
+ * Lango subscription (3 Oct 2026): NAVAC sets each club's plan; the owner pays NAVAC by M-Pesa prompt to NAVAC's own
+ * Payment Gateway account. A confirmed payment moves paid-until on by the cycles paid for. Never charged
+ * automatically.
+ */
+export type Cycle = 'monthly' | 'quarterly' | 'yearly';
+export const CYCLE_MONTHS: Record<Cycle, number> = { monthly: 1, quarterly: 3, yearly: 12 };
+export const CYCLE_LABEL: Record<Cycle, string> = { monthly: 'Monthly', quarterly: 'Every 3 months', yearly: 'Yearly' };
+
+export interface ClubPlan {
+  plan_name: string;
+  fee_kes: number | null;
+  cycle: Cycle;
+  paid_until: string | null;
+  billing_phone: string | null;
+  billing_email: string | null;
+}
+
+export type BillingState = 'active' | 'due' | 'overdue' | 'unpriced' | 'none';
+
+/** Where the club stands: active, due within 7 days, overdue, or no price agreed yet. */
+export function billingState(p: ClubPlan | null, today = DateTime.now().toISODate() ?? ''): BillingState {
+  if (!p) return 'none';
+  if (p.fee_kes == null) return 'unpriced';
+  if (!p.paid_until || p.paid_until < today) return 'overdue';
+  const days = DateTime.fromISO(p.paid_until).diff(DateTime.fromISO(today), 'days').days;
+  return days <= 7 ? 'due' : 'active';
+}
+
+export async function clubPlan(sql: Sql, tenantId: string): Promise<ClubPlan | null> {
+  const [p] = await withTenant(
+    sql,
+    tenantId,
+    (tx) => tx<ClubPlan[]>`
+      select plan_name, fee_kes, cycle, to_char(paid_until, 'YYYY-MM-DD') as paid_until, billing_phone, billing_email
+      from club_plans`,
+  );
+  return p ?? null;
+}
+
+export type SubResult =
+  | { ok: true; invoiceId: string; invoiceNo: string }
+  | { ok: false; reason: 'no-plan' | 'unpriced' | 'phone' | 'cycles' | 'no-platform-taifapay' | 'pending' | 'failed' };
+
+/** Send an M-Pesa prompt for N cycles of the club's plan; the period starts where the last one ends. */
+export async function startSubscriptionPayment(
+  sql: Sql,
+  tenantId: string,
+  a: { cycles: number; phone: string; actor: string },
+): Promise<SubResult> {
+  const phone = msisdn(a.phone);
+  if (!phone) return { ok: false, reason: 'phone' };
+  if (!Number.isInteger(a.cycles) || a.cycles < 1 || a.cycles > 12) return { ok: false, reason: 'cycles' };
+  const plan = await clubPlan(sql, tenantId);
+  if (!plan) return { ok: false, reason: 'no-plan' };
+  if (plan.fee_kes == null) return { ok: false, reason: 'unpriced' };
+  const client = await platformTaifa(sql);
+  if (!client) return { ok: false, reason: 'no-platform-taifapay' };
+  const today = DateTime.now().setZone('Africa/Nairobi').startOf('day');
+  const start =
+    plan.paid_until && plan.paid_until >= (today.toISODate() ?? '')
+      ? DateTime.fromISO(plan.paid_until).plus({ days: 1 })
+      : today;
+  const end = start.plus({ months: CYCLE_MONTHS[plan.cycle] * a.cycles }).minus({ days: 1 });
+  const amount = plan.fee_kes * a.cycles;
+  const created = await withTenant(sql, tenantId, async (tx) => {
+    const [open] =
+      await tx`select 1 from subscription_invoices where status = 'pending' and created_at > now() - interval '2 minutes'`;
+    if (open) return null;
+    const [t] = await tx<{ name: string }[]>`select name from tenants where id = ${tenantId}`;
+    const [row] = await tx<{ id: string; invoice_no: string }[]>`
+      insert into subscription_invoices (tenant_id, plan_name, cycles, period_from, period_to, amount_kes, phone, created_by)
+      values (${tenantId}, ${plan.plan_name}, ${a.cycles}, ${start.toISODate()}, ${end.toISODate()}, ${amount}, ${phone}, ${a.actor})
+      returning id, invoice_no`;
+    await tx`insert into audit_log (tenant_id, actor, action, entity, data)
+             values (${tenantId}, ${a.actor}, 'billing.payment_requested', ${row?.id ?? null},
+                     ${tx.json({ amount, cycles: a.cycles } as never)})`;
+    return { id: row?.id as string, no: row?.invoice_no as string, desc: `Lango ${t?.name ?? ''}`.slice(0, 20).trim() };
+  });
+  if (!created) return { ok: false, reason: 'pending' };
+  try {
+    const res = await client.stkPush({
+      phone,
+      amount,
+      accountReference: created.no,
+      description: created.desc,
+      externalId: created.id,
+    });
+    const ref = initiatedTransactionId(res);
+    await withTenant(
+      sql,
+      tenantId,
+      (tx) => tx`update subscription_invoices set provider_ref = ${ref} where id = ${created.id}`,
+    );
+    return { ok: true, invoiceId: created.id, invoiceNo: created.no };
+  } catch {
+    await withTenant(
+      sql,
+      tenantId,
+      (tx) => tx`update subscription_invoices set status = 'failed' where id = ${created.id}`,
+    );
+    return { ok: false, reason: 'failed' };
+  }
+}
+
+/** Settle pending subscription payments by asking the gateway (webhook nudge and the 60 s poller). Once each. */
+export async function reconcileSubscriptions(
+  sql: Sql,
+  log: (m: string) => void = console.log,
+  client?: Awaited<ReturnType<typeof platformTaifa>>,
+) {
+  const taifa = client ?? (await platformTaifa(sql));
+  if (!taifa) return 0;
+  const pending = await sql<{ id: string; tenant_id: string; provider_ref: string; amount_kes: number }[]>`
+    select * from app_pending_sub_payments()`;
+  let paid = 0;
+  for (const p of pending) {
+    try {
+      const raw = await taifa.transaction(p.provider_ref);
+      const rec = transactionRecord(raw);
+      if (!rec) continue;
+      const state = normalStatus(rec.status);
+      if (state === 'failed') {
+        await withTenant(
+          sql,
+          p.tenant_id,
+          (tx) => tx`update subscription_invoices set status = 'failed' where id = ${p.id} and status = 'pending'`,
+        );
+        continue;
+      }
+      if (state !== 'completed' || Number(rec.amount) !== p.amount_kes) continue;
+      paid += await withTenant(sql, p.tenant_id, async (tx) => {
+        const code = pick(raw, 'mpesaReceiptNumber', 'MpesaReceiptNumber', 'receiptNumber', 'mpesaReceipt', 'mpesaRef');
+        const receipt = typeof code === 'string' && /^[A-Z0-9]{8,12}$/.test(code) ? code : null;
+        const [inv] = await tx<{ phone: string; amount_kes: number; invoice_no: string; period_to: Date }[]>`
+          update subscription_invoices set status = 'paid', paid_at = now(), receipt_ref = ${receipt}
+          where id = ${p.id} and status = 'pending' returning phone, amount_kes, invoice_no, period_to`;
+        if (!inv) return 0;
+        await tx`select app_plan_paid(${p.id})`;
+        const [club] = await tx<{ name: string }[]>`select name from tenants where id = ${p.tenant_id}`;
+        const until = DateTime.fromJSDate(inv.period_to).toFormat('d LLL yyyy');
+        await tx`insert into sms_messages (tenant_id, phone, body, kind)
+                 values (${p.tenant_id}, ${inv.phone}, ${`Lango: KES ${inv.amount_kes.toLocaleString('en-KE')} received for ${club?.name} (${inv.invoice_no}). Subscription paid until ${until}. Thank you.`}, 'system')`;
+        await tx`insert into audit_log (tenant_id, actor, action, entity, data)
+                 values (${p.tenant_id}, 'taifapay', 'billing.paid', ${p.id}, ${tx.json({ amount: inv.amount_kes, until } as never)})`;
+        return 1;
+      });
+    } catch (e) {
+      log(`subscription ${p.id}: ${(e as Error).message}`);
+    }
+  }
+  return paid;
+}

@@ -18,6 +18,7 @@ export async function startJobs() {
     queueReminders,
     queueWinbacks,
     reconcileTaifaPay,
+    reconcileSubscriptions,
     reconcileTopups,
     startTopup,
     watchBridges,
@@ -79,6 +80,13 @@ export async function startJobs() {
     'sms top-ups',
     () => reconcileTopups(db(), (m) => console.warn(m)),
     (n) => `sms: credited ${n} top-up(s)`,
+  );
+  every(
+    60_000,
+    40_000,
+    'subscription payments',
+    () => reconcileSubscriptions(db(), (m) => console.warn(m)),
+    (n) => `billing: ${n} subscription payment(s) confirmed`,
   );
   every(
     15 * 60_000,

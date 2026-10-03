@@ -1,9 +1,10 @@
 import { can, type Perm } from '@lango/server';
-import { Bell, Building2, CreditCard, History, UsersRound, Wallet } from 'lucide-react';
+import { Bell, Building2, CreditCard, History, ReceiptText, UsersRound, Wallet } from 'lucide-react';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { requireSession } from '@/lib/session';
 import { type AuditParams, AuditTab } from './audit-tab';
+import { BillingTab } from './billing-tab';
 import { ClubTab } from './club-tab';
 import { NotifyTab } from './notify-tab';
 import { PaymentsTab } from './payments-tab';
@@ -17,18 +18,23 @@ import { TeamTab } from './team-tab';
 const TABS = [
   { key: 'club', label: 'Club profile', icon: Building2, any: [] as Perm[] },
   { key: 'payments', label: 'Payments', icon: CreditCard, any: ['settings.payments'] as Perm[] },
+  { key: 'billing', label: 'Billing', icon: ReceiptText, any: ['billing.manage'] as Perm[] },
   { key: 'sms', label: 'SMS credit', icon: Wallet, any: ['sms.buy', 'messages.manage'] as Perm[] },
   { key: 'notifications', label: 'Notifications', icon: Bell, any: ['messages.manage'] as Perm[] },
   { key: 'team', label: 'Team & roles', icon: UsersRound, any: ['team.manage'] as Perm[] },
   { key: 'audit', label: 'System audit', icon: History, any: ['team.manage'] as Perm[] },
 ] as const;
 
-type Params = AuditParams & { tab?: string; m?: string; sms?: string };
+type Params = AuditParams & { tab?: string; m?: string; sms?: string; b?: string };
 const OLD: Record<string, string> = { messages: 'notifications' };
 
 export default async function Settings({ searchParams }: { searchParams: Promise<Params> }) {
   const s = await requireSession();
-  if (!(['settings.payments', 'sms.buy', 'messages.manage', 'team.manage'] as const).some((p) => can(s, p)))
+  if (
+    !(['settings.payments', 'sms.buy', 'messages.manage', 'team.manage', 'billing.manage'] as const).some((p) =>
+      can(s, p),
+    )
+  )
     redirect('/?denied=1');
   const tabs = TABS.filter((t) => t.key === 'club' || t.any.some((p) => can(s, p)));
   const sp = await searchParams;
@@ -63,6 +69,8 @@ export default async function Settings({ searchParams }: { searchParams: Promise
           <SmsTab s={s} sms={sp.sms} />
         ) : tab?.key === 'notifications' ? (
           <NotifyTab s={s} m={sp.m} />
+        ) : tab?.key === 'billing' ? (
+          <BillingTab s={s} b={sp.b} />
         ) : tab?.key === 'audit' ? (
           <AuditTab s={s} sp={sp} />
         ) : tab?.key === 'team' ? (

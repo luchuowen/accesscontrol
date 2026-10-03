@@ -1,7 +1,8 @@
 import type { LiveSession } from '@lango/server';
-import { can } from '@lango/server';
+import { billingState, can, clubPlan } from '@lango/server';
 import { consoleAlerts } from '@/lib/data';
 import { ago, kes } from '@/lib/format';
+import { db } from '@/server/db';
 
 /**
  * Club health (drawer design C, approved 3 Oct 2026). Notifications follow the signed-in person's permissions: an
@@ -29,13 +30,14 @@ export interface HealthArea {
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 export async function clubHealth(s: LiveSession): Promise<HealthArea[]> {
-  const a = await consoleAlerts(s.tid);
+  const [a, plan] = await Promise.all([consoleAlerts(s.tid), can(s, 'billing.manage') ? clubPlan(db(), s.tid) : null]);
+  const bill = billingState(plan);
   const areas: HealthArea[] = [];
   const add = (name: HealthArea['name'], show: boolean, items: (HealthItem | false)[]) => {
     if (show) areas.push({ name, items: items.filter((x): x is HealthItem => !!x) });
   };
 
-  add('Money', can(s, 'payments.assign') || can(s, 'settings.payments'), [
+  add('Money', can(s, 'payments.assign') || can(s, 'settings.payments') || can(s, 'billing.manage'), [
     a.unmatched > 0 &&
       can(s, 'payments.assign') && {
         id: 'unmatched',
@@ -55,6 +57,18 @@ export async function clubHealth(s: LiveSession): Promise<HealthArea[]> {
         sub: 'NAVAC connects it during setup. Until then members pay cash at the desk.',
         href: '/settings?tab=payments',
         action: 'See',
+      },
+    (bill === 'due' || bill === 'overdue') &&
+      can(s, 'billing.manage') && {
+        id: 'billing',
+        tone: bill === 'overdue' ? 'red' : 'amber',
+        icon: 'card',
+        title: bill === 'overdue' ? 'Lango subscription is due' : 'Lango subscription renews this week',
+        sub: plan?.paid_until
+          ? `Paid until ${plan.paid_until}. Pay by M-Pesa in a minute.`
+          : 'Pay by M-Pesa in a minute.',
+        href: '/settings?tab=billing',
+        action: 'Pay',
       },
   ]);
 

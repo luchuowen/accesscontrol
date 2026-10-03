@@ -8,6 +8,7 @@ import {
   platformSms,
   platformSmsConfig,
   rateLimit,
+  startSubscriptionPayment,
   startTopup,
 } from '@lango/server';
 import { revalidatePath } from 'next/cache';
@@ -93,4 +94,18 @@ export async function saveNotifications(form: FormData) {
   });
   revalidatePath('/settings');
   redirect('/settings?tab=notifications&m=saved');
+}
+
+/** Pay NAVAC for the Lango subscription: an M-Pesa prompt for 1 or more billing cycles. */
+export async function payPlan(form: FormData) {
+  const s = await requireSession();
+  if (!can(s, 'billing.manage')) redirect('/settings?tab=billing&b=forbidden');
+  if (!rateLimit(`billing:${s.tid}`, 5, 10 * 60_000)) redirect('/settings?tab=billing&b=wait');
+  const r = await startSubscriptionPayment(db(), s.tid, {
+    cycles: Number(form.get('cycles') ?? 1),
+    phone: String(form.get('phone') ?? ''),
+    actor: s.uid,
+  });
+  revalidatePath('/settings');
+  redirect(`/settings?tab=billing&b=${r.ok ? 'sent' : r.reason}`);
 }

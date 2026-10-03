@@ -30,7 +30,7 @@ export const PERMISSIONS = [
   { key: 'sms.buy', label: 'Buy SMS credit' },
   { key: 'reports.all', label: 'Reports beyond today' },
   { key: 'settings.payments', label: 'See how members pay' },
-  { key: 'billing.manage', label: 'Club subscription, invoices, setup fee' },
+  { key: 'billing.manage', label: 'Billing: pay the Lango subscription' },
   { key: 'team.manage', label: 'Team: invite, roles, remove' },
   { key: 'club.own', label: 'Close the club, transfer ownership' },
 ] as const;
