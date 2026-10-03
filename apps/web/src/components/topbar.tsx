@@ -37,7 +37,10 @@ function Menu({ button, label, children }: { button: ReactNode; label: string; c
       </button>
       {open && (
         <div
-          onClick={(e) => (e.target as HTMLElement).closest('a,button') && setOpen(false)}
+          onClick={(e) => {
+            // Close after the click is handled: closing at once removes a form (Sign out) before it submits.
+            if ((e.target as HTMLElement).closest('a,button')) setTimeout(() => setOpen(false), 0);
+          }}
           className="absolute right-0 top-11 z-30 w-72 rounded-xl border border-[#E5E8EE] bg-white p-1.5 text-sm shadow-[0_12px_32px_-12px_rgba(11,22,41,0.25)]"
         >
           {children}
