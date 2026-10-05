@@ -31,7 +31,7 @@ export default async function Login({ searchParams }: { searchParams: Promise<{ 
   const note = m ? NOTES[m] : undefined;
   return (
     <AuthShell>
-      <AuthHeading title="Welcome back" sub="Sign in to your Lango account" />
+      <AuthHeading title="Welcome back" sub="Sign in to your Lango account." />
       {e && ERRORS[e] && <AuthNotice tone="error">{ERRORS[e]}</AuthNotice>}
       {!e && note && <AuthNotice tone={note[0]}>{note[1]}</AuthNotice>}
       <form action={login} className="mt-8 grid gap-[18px]">
@@ -62,8 +62,11 @@ export default async function Login({ searchParams }: { searchParams: Promise<{ 
         <SubmitButton pendingText="Signing in…" className="auth-btn mt-1">
           Sign in
         </SubmitButton>
-        <p className="text-center text-[12.5px] text-slate-500">
-          New to Lango? Your membership club will invite you to join.
+        <p className="mt-3 text-center text-[13px] text-slate-500">
+          Are you a member?{' '}
+          <Link href="/m?from=staff" className="auth-link font-semibold">
+            Member sign-in
+          </Link>
         </p>
       </form>
     </AuthShell>

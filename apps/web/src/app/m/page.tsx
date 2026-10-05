@@ -14,7 +14,16 @@ export const dynamic = 'force-dynamic';
 export default async function MemberPortal({
   searchParams,
 }: {
-  searchParams: Promise<{ e?: string; pay?: string; step?: string; c?: string; n?: string; w?: string; news?: string }>;
+  searchParams: Promise<{
+    e?: string;
+    pay?: string;
+    step?: string;
+    c?: string;
+    n?: string;
+    w?: string;
+    news?: string;
+    from?: string;
+  }>;
 }) {
   const sp = await searchParams;
   const who = await readMember();
@@ -86,7 +95,7 @@ export default async function MemberPortal({
           sub={
             step === 'phone'
               ? 'Enter the phone number your club has for you.'
-              : 'Check your access and renew with M-Pesa before you arrive.'
+              : 'Sign in with your club code and member number.'
           }
         />
         {error && <AuthNotice tone="error">{error}</AuthNotice>}
@@ -94,7 +103,7 @@ export default async function MemberPortal({
           <form action={memberStart} className="mt-8 grid gap-[18px]">
             <div>
               <label htmlFor="club" className="auth-label">
-                Club Code
+                Club code
               </label>
               <input
                 id="club"
@@ -108,7 +117,7 @@ export default async function MemberPortal({
             </div>
             <div>
               <label htmlFor="memberNo" className="auth-label">
-                Member Number
+                Member number
               </label>
               <input
                 id="memberNo"
@@ -123,9 +132,16 @@ export default async function MemberPortal({
             <SubmitButton pendingText="Checking…" className="auth-btn mt-1">
               Continue
             </SubmitButton>
-            <p className="text-center text-[12.5px] text-slate-500">
-              Your club code and member number are on your membership card or receipt.
-            </p>
+            <p className="text-center text-[12.5px] text-slate-500">Both are on your membership card or receipt.</p>
+            {/* Only someone who came from the staff sign-in sees the way back; links sent to members never do. */}
+            {sp.from === 'staff' && (
+              <p className="mt-3 text-center text-[13px] text-slate-500">
+                Staff?{' '}
+                <a href="/login" className="auth-link font-semibold">
+                  Sign in with email
+                </a>
+              </p>
+            )}
           </form>
         ) : (
           <form action={memberLogin} className="mt-8 grid gap-[18px]">
