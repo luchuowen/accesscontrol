@@ -60,6 +60,7 @@ export default async function Users({ searchParams }: { searchParams: Promise<{ 
     <>
       <PageHeader
         title="Users"
+        repeats
         subtitle={
           platform
             ? 'Everyone who signs in to this console, by organization. Technicians see only the clubs assigned to them.'

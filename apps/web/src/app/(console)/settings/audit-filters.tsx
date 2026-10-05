@@ -84,7 +84,7 @@ export function AuditFilters({
         {people.map((p) => (
           <option key={p.id} value={p.id}>
             {p.name}
-            {p.partner ? ' · partner' : ''}
+            {p.partner ? ' · installer' : ''}
           </option>
         ))}
       </select>

@@ -61,6 +61,7 @@ export async function AccountView({ s, m, from }: { s: Session; m?: string; from
     <>
       <PageHeader
         title="Your account"
+        repeats={from === 'partner'}
         subtitle={from === 'club' ? `${me?.email} · ${roleLabel(s.role)} in this club` : me?.email}
       />
       {msg && (

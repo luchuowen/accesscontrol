@@ -73,12 +73,12 @@ export function NewClubForm({
       )}
       <label className="block">
         <span className="label">Club name</span>
-        <input name="name" required placeholder="Enter club name, e.g. Muthaiga Golf Club" className="input mt-1.5" />
+        <input name="name" required placeholder="Enter club name" className="input mt-1.5" />
       </label>
       <label className="block">
-        <span className="label">Club code (optional)</span>
-        <input name="slug" placeholder="Enter club code, e.g. muthaiga-golf-club" className="input mt-1.5" />
-        <span className="mt-1 block text-xs text-ink-500">Members type this on the member portal.</span>
+        <span className="label">Club code</span>
+        <input name="slug" placeholder="Made from the club name if left blank" className="input mt-1.5" />
+        <span className="mt-1 block text-xs text-ink-500">A short name for the club, used in its email address.</span>
       </label>
       <div className="grid gap-4 sm:grid-cols-2">
         <label className="block">
@@ -91,7 +91,7 @@ export function NewClubForm({
         </label>
       </div>
       <label className="block">
-        <span className="label">Their mobile (optional)</span>
+        <span className="label">Their mobile</span>
         <input
           name="ownerPhone"
           type="tel"

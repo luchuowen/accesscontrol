@@ -159,11 +159,11 @@ export default async function Communications({ searchParams }: { searchParams: P
           ? 'SMS is off for the club. Turn it on in Settings › Notifications.'
           : 'SMS isn’t connected yet. NAVAC sets it up.'
         : c.channel === 'whatsapp' && !chans.whatsapp.on
-          ? 'WhatsApp is not connected for the club. Your partner sets it up.'
+          ? 'WhatsApp is not connected for the club. Your installer sets it up.'
           : c.channel === 'whatsapp' && (!c.last_in_at || Date.now() - c.last_in_at.getTime() > 24 * 3600_000)
             ? 'WhatsApp only allows replies within 24 hours of their last message. Message them by SMS instead.'
             : c.channel === 'email' && !chans.email.on
-              ? 'Email is not switched on for the club. Your partner sets it up.'
+              ? 'Email is not switched on for the club. Your installer sets it up.'
               : undefined;
   const lastIn = open?.msgs.filter((m) => m.dir === 'in').at(-1);
   const subjectHint = c?.channel === 'email' && lastIn?.subject ? lastIn.subject : null;

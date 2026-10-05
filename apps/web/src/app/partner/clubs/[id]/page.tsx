@@ -224,7 +224,12 @@ export default async function PartnerClub({
               {owner?.owner_email ? (
                 <div className="mt-3 flex flex-wrap items-center gap-3 text-[13px]">
                   <span className="grid h-9 w-9 place-items-center rounded-full bg-ink-50 font-semibold">
-                    {(owner.owner_name ?? '?').slice(0, 1)}
+                    {(owner.owner_name ?? '?')
+                      .split(/\s+/)
+                      .map((w) => w[0])
+                      .join('')
+                      .slice(0, 2)
+                      .toUpperCase()}
                   </span>
                   <span className="min-w-0 flex-1">
                     <b className="block">{owner.owner_name}</b>

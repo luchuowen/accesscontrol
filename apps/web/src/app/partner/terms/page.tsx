@@ -45,6 +45,7 @@ export default async function PartnerTerms({ searchParams }: { searchParams: Pro
     <>
       <PageHeader
         title="Partner terms"
+        repeats
         subtitle="What each partner earns from its clubs. Shares are worked out on what the club pays NAVAC; gateway charges stay with NAVAC."
       />
       {msg && (

@@ -70,7 +70,12 @@ export async function TeamTab({ m }: { m?: string }) {
                 <div key={t.id} className="p-5">
                   <div className="flex flex-wrap items-center gap-3">
                     <div className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-ink-50 text-sm font-semibold text-ink-700">
-                      {t.name.slice(0, 1).toUpperCase()}
+                      {t.name
+                        .split(/\s+/)
+                        .map((w) => w[0])
+                        .join('')
+                        .slice(0, 2)
+                        .toUpperCase()}
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">

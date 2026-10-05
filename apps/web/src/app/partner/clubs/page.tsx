@@ -64,6 +64,7 @@ export default async function PartnerClubs({ searchParams }: { searchParams: Pro
     <>
       <PageHeader
         title="Clubs"
+        repeats
         subtitle="Every club, how far its setup has come, how members pay and whether its door PC is online."
         actions={
           s.kind === 'partner_admin' && (
@@ -114,14 +115,11 @@ export default async function PartnerClubs({ searchParams }: { searchParams: Pro
               );
               return (
                 <tr key={r.id} className="group hover:bg-[#FAFBFC]">
-                  <td className="px-4 py-3.5">
-                    <Link href={href} className="font-semibold text-ink-900 hover:underline">
+                  <td className="min-w-[200px] px-4 py-3.5">
+                    <Link href={href} className="whitespace-nowrap font-semibold text-ink-900 hover:underline">
                       {r.name}
                     </Link>
-                    <div className="font-mono text-[11px] text-ink-500">
-                      {r.slug}
-                      {r.partner ? ` · ${r.partner}` : ''}
-                    </div>
+                    <div className="whitespace-nowrap text-[12px] text-ink-500">{r.partner ?? r.slug}</div>
                   </td>
                   <td className="px-4 py-3.5">
                     {o?.owner_email ? (
@@ -171,8 +169,12 @@ export default async function PartnerClubs({ searchParams }: { searchParams: Pro
                     {r.active_members} <span className="text-ink-500">/ {r.members}</span>
                     {r.unmatched > 0 && <div className="text-[11px] text-amber-700">{r.unmatched} to sort</div>}
                   </td>
-                  {navac && <td className="px-4 py-3.5 tabular-nums">{kes(Number(r.via_taifapay))}</td>}
-                  {navac && <td className="px-4 py-3.5 tabular-nums text-ink-500">{kes(Number(r.cash))}</td>}
+                  {navac && (
+                    <td className="whitespace-nowrap px-4 py-3.5 tabular-nums">{kes(Number(r.via_taifapay))}</td>
+                  )}
+                  {navac && (
+                    <td className="whitespace-nowrap px-4 py-3.5 tabular-nums text-ink-500">{kes(Number(r.cash))}</td>
+                  )}
                   <td className="px-4 py-3.5 text-right">
                     <Link href={href} aria-label={`Open ${r.name}`} className="text-ink-300 group-hover:text-ink-900">
                       <ChevronRight size={18} />

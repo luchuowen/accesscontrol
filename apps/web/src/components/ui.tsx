@@ -1,12 +1,31 @@
 import type { ReactNode } from 'react';
 
-export function PageHeader({ title, subtitle, actions }: { title: string; subtitle?: string; actions?: ReactNode }) {
+/** `repeats`: the partner top bar already shows this title on wide screens, so the big heading is kept for phones only. */
+export function PageHeader({
+  title,
+  subtitle,
+  actions,
+  repeats,
+}: {
+  title: string;
+  subtitle?: string;
+  actions?: ReactNode;
+  repeats?: boolean;
+}) {
   return (
     <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
       {/* In the club console the top bar already shows the page icon and name: only the description is shown here. */}
       <div className="min-w-0">
-        <h1 className="text-[26px] font-semibold tracking-tight text-ink-900 [[data-console]_&]:sr-only">{title}</h1>
-        {subtitle && <p className="mt-1 text-[15px] text-ink-500 [[data-console]_&]:mt-0">{subtitle}</p>}
+        <h1
+          className={`text-[26px] font-semibold tracking-tight text-ink-900 [[data-console]_&]:sr-only ${repeats ? 'lg:sr-only' : ''}`}
+        >
+          {title}
+        </h1>
+        {subtitle && (
+          <p className={`mt-1 text-[15px] text-ink-500 [[data-console]_&]:mt-0 ${repeats ? 'lg:mt-0' : ''}`}>
+            {subtitle}
+          </p>
+        )}
       </div>
       {actions && <div className="flex gap-2">{actions}</div>}
     </div>

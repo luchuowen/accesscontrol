@@ -150,8 +150,8 @@ export default async function PlatformSettings({ searchParams }: { searchParams:
   const sec = 'scroll-mt-8 border-t border-[#EEF1F5] p-6 first:border-t-0';
   return (
     <>
-      <h1 className="text-[22px] font-semibold tracking-tight">Platform settings</h1>
-      <p className="mt-1 text-[13px] text-ink-500">
+      <h1 className="text-[22px] font-semibold tracking-tight lg:sr-only">Platform settings</h1>
+      <p className="mt-1 text-[13px] text-ink-500 lg:mt-0">
         How Lango sends SMS, takes payment for SMS credit, and bills clubs. Last 30 days: {sent.toLocaleString('en-KE')}{' '}
         SMS sent · {kes(sold)} sold · {kes(Math.round(sold - sent * cost))} margin.
       </p>

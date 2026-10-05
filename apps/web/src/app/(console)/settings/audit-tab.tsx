@@ -92,7 +92,7 @@ export async function AuditTab({ s, sp }: { s: Session; sp: AuditParams }) {
                         <b className="font-semibold text-ink-900">{x.who && x.who !== 'system' ? x.who : 'Lango'}</b>
                         {x.partner && (
                           <span className="ml-1.5 rounded-full bg-slate-100 px-1.5 py-0.5 text-[10.5px] font-semibold text-ink-500">
-                            Partner
+                            Installer
                           </span>
                         )}{' '}
                         <span className="text-ink-700">{text}</span>
