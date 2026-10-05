@@ -31,12 +31,26 @@ export default async function MemberPortal({
     const step = sp.step === 'code' || sp.step === 'phone' ? sp.step : 'start';
     const club = (sp.c ?? '').slice(0, 40);
     const no = (sp.n ?? '').replace(/\D/g, '').slice(0, 10);
+    // Someone who came from the staff sign-in keeps a way back on every step; links sent to members never show it.
+    const staff = sp.from === 'staff';
+    const FromStaff = () => (staff ? <input type="hidden" name="from" value="staff" /> : null);
     const Hidden = () => (
       <>
         <input type="hidden" name="club" value={club} />
         <input type="hidden" name="memberNo" value={no} />
+        <FromStaff />
       </>
     );
+    const restart = staff ? '/m?from=staff' : '/m';
+    const BackToStaff = () =>
+      staff ? (
+        <p className="mt-3 text-center text-[13px] text-slate-500">
+          Staff?{' '}
+          <a href="/login" className="auth-link font-semibold">
+            Sign in with email
+          </a>
+        </p>
+      ) : null;
     const error =
       sp.e === '2'
         ? 'Too many attempts. Wait a few minutes and try again.'
@@ -81,10 +95,11 @@ export default async function MemberPortal({
             )}
           </div>
           <p className="mt-3 text-center text-[13px]">
-            <a href="/m" className="text-slate-500 hover:text-ink-900">
+            <a href={restart} className="text-slate-500 hover:text-ink-900">
               Change details
             </a>
           </p>
+          <BackToStaff />
         </AuthShell>
       );
     }
@@ -101,6 +116,7 @@ export default async function MemberPortal({
         {error && <AuthNotice tone="error">{error}</AuthNotice>}
         {step === 'start' ? (
           <form action={memberStart} className="mt-8 grid gap-[18px]">
+            <FromStaff />
             <div>
               <label htmlFor="club" className="auth-label">
                 Club code
@@ -133,15 +149,7 @@ export default async function MemberPortal({
               Continue
             </SubmitButton>
             <p className="text-center text-[12.5px] text-slate-500">Both are on your membership card or receipt.</p>
-            {/* Only someone who came from the staff sign-in sees the way back; links sent to members never do. */}
-            {sp.from === 'staff' && (
-              <p className="mt-3 text-center text-[13px] text-slate-500">
-                Staff?{' '}
-                <a href="/login" className="auth-link font-semibold">
-                  Sign in with email
-                </a>
-              </p>
-            )}
+            <BackToStaff />
           </form>
         ) : (
           <form action={memberLogin} className="mt-8 grid gap-[18px]">
@@ -166,10 +174,11 @@ export default async function MemberPortal({
               Continue
             </SubmitButton>
             <p className="text-center text-[13px]">
-              <a href="/m" className="text-slate-500 hover:text-ink-900">
+              <a href={restart} className="text-slate-500 hover:text-ink-900">
                 Change details
               </a>
             </p>
+            <BackToStaff />
           </form>
         )}
       </AuthShell>

@@ -45,6 +45,8 @@ const who = (form: FormData) => ({
   no: Number.parseInt(String(form.get('memberNo') ?? ''), 10),
 });
 const q = (slug: string, no: number) => `c=${encodeURIComponent(slug)}&n=${Number.isSafeInteger(no) ? no : ''}`;
+/** Keeps the way back to the staff sign-in for someone who came from it. */
+const fromStaff = (form: FormData) => (form.get('from') === 'staff' ? '&from=staff' : '');
 
 /**
  * Step 1: club code + member number. A 6-digit code goes by SMS to the phone the club has on file; the answer is
@@ -53,11 +55,11 @@ const q = (slug: string, no: number) => `c=${encodeURIComponent(slug)}&n=${Numbe
 export async function memberStart(form: FormData) {
   const { slug, no } = who(form);
   const ip = clientIp(await headers());
-  if (!rateLimit(`member-start-ip:${ip}`, 20, 10 * 60_000)) redirect('/m?e=2');
-  if (!(await otpAvailable(db(), slug))) redirect(`/m?step=phone&${q(slug, no)}`);
+  if (!rateLimit(`member-start-ip:${ip}`, 20, 10 * 60_000)) redirect(`/m?e=2${fromStaff(form)}`);
+  if (!(await otpAvailable(db(), slug))) redirect(`/m?step=phone&${q(slug, no)}${fromStaff(form)}`);
   const r = await requestOtp(db(), slug, no);
-  if (r === 'fallback') redirect(`/m?step=phone&${q(slug, no)}`);
-  redirect(`/m?step=code&${q(slug, no)}${r === 'wait' ? '&w=1' : ''}`);
+  if (r === 'fallback') redirect(`/m?step=phone&${q(slug, no)}${fromStaff(form)}`);
+  redirect(`/m?step=code&${q(slug, no)}${r === 'wait' ? '&w=1' : ''}${fromStaff(form)}`);
 }
 
 /** Step 2: the code from the SMS. */
@@ -67,11 +69,11 @@ export async function memberVerify(form: FormData) {
   const ip = clientIp(await headers());
   const account = `member-code:${slug}:${no}`;
   if (!rateLimit(`member-code-ip:${ip}`, 30, 10 * 60_000) || isLimited(account, 8, 15 * 60_000))
-    redirect(`/m?step=code&${q(slug, no)}&e=2`);
+    redirect(`/m?step=code&${q(slug, no)}&e=2${fromStaff(form)}`);
   const m = await verifyOtp(db(), slug, no, code);
   if (!m) {
     recordFailure(account, 15 * 60_000);
-    redirect(`/m?step=code&${q(slug, no)}&e=1`);
+    redirect(`/m?step=code&${q(slug, no)}&e=1${fromStaff(form)}`);
   }
   await setMember(m.tenantId, m.memberId);
   redirect('/m');
@@ -104,7 +106,7 @@ export async function memberLogin(form: FormData) {
   const phone = digits(String(form.get('phone') ?? ''));
   const ip = clientIp(await headers());
   const account = `member-login:${slug}:${no}`;
-  const back = `/m?step=phone&c=${encodeURIComponent(slug)}&n=${Number.isSafeInteger(no) ? no : ''}`;
+  const back = `/m?step=phone&${q(slug, no)}${fromStaff(form)}`;
   if (!rateLimit(`member-login-ip:${ip}`, 20, 5 * 60_000) || isLimited(account, 5, 15 * 60_000))
     redirect(`${back}&e=2`);
   const [t] = await db()<{ id: string }[]>`select id from tenants where slug = ${slug}`;
