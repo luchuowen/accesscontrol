@@ -7,10 +7,12 @@ import { SubmitButton } from '@/components/submit-button';
 import { kes } from '@/lib/format';
 import type { Session } from '@/lib/session';
 import { db } from '@/server/db';
+import { LiveRefresh } from '../_dash/live-refresh';
 import { payPlan } from './actions';
 import { Banner, Group, type Note, Pill, Row, SectionHead } from './bits';
 
 const NOTES: Record<string, Note> = {
+  received: ['green', 'Payment received. Thank you; your receipt is listed below.'],
   sent: ['green', 'M-Pesa prompt sent. Enter your PIN; your plan updates as soon as the payment is confirmed.'],
   phone: ['red', 'Enter a Kenyan mobile number for the M-Pesa prompt.'],
   pending: ['amber', 'A payment prompt was just sent. Give it two minutes before trying again.'],
@@ -51,6 +53,8 @@ export async function BillingTab({ s, b }: { s: Session; b?: string }) {
     db()<{ phone: string | null }[]>`select phone from app_staff_get(${s.uid})`,
   ]);
   const state = billingState(plan);
+  // While an M-Pesa prompt is out, re-read every few seconds so the paid state shows the moment it lands.
+  const waiting = invoices.some((i) => i.status === 'pending' && Date.now() - i.created_at.getTime() < 5 * 60_000);
   const today = DateTime.now().setZone('Africa/Nairobi').startOf('day');
   const left = plan?.paid_until ? Math.round(DateTime.fromISO(plan.paid_until).diff(today, 'days').days) : null;
   const months = plan ? CYCLE_MONTHS[plan.cycle] : 1;
@@ -77,7 +81,10 @@ export async function BillingTab({ s, b }: { s: Session; b?: string }) {
   return (
     <>
       <SectionHead icon={ReceiptText} title="Billing" sub="Your Lango plan and payments to NAVAC." action={pill} />
-      <Banner note={b ? NOTES[b] : undefined} />
+      {waiting && <LiveRefresh seconds={4} />}
+      <Banner
+        note={b === 'sent' && !waiting && invoices[0]?.status === 'paid' ? NOTES.received : b ? NOTES[b] : undefined}
+      />
 
       <div className="relative overflow-hidden rounded-3xl bg-[#0B1629] text-white">
         <ReceiptText
@@ -107,7 +114,9 @@ export async function BillingTab({ s, b }: { s: Session; b?: string }) {
                 ? left !== null && left < 0
                   ? `Ended ${fmt(plan.paid_until)} · ${-left} day${left === -1 ? '' : 's'} ago`
                   : `Paid until ${fmt(plan.paid_until)} · ${left} day${left === 1 ? '' : 's'} left`
-                : 'No payment yet'}
+                : plan?.setup_paid
+                  ? 'Setup fee paid · first month not paid yet'
+                  : 'No payment yet'}
             </div>
           </div>
           {payer && plan?.fee_kes != null && (
