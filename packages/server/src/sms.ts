@@ -399,8 +399,8 @@ export async function queueReminders(sql: Sql, portalUrl: string): Promise<numbe
         const which = left <= 0 ? 'today' : left <= days ? `${days}d` : null;
         if (!which) continue;
         const how = ch?.paybill
-          ? `Renew on M-Pesa Paybill ${ch.paybill}, account ${d.member_no}, or at ${portalUrl}/m (member code ${slug?.slug}).`
-          : `Renew at ${portalUrl}/m (member code ${slug?.slug}, member no. ${d.member_no}).`;
+          ? `Renew on M-Pesa Paybill ${ch.paybill}, account ${d.member_no}, or at ${portalUrl}/m (club code ${slug?.slug}).`
+          : `Renew at ${portalUrl}/m (club code ${slug?.slug}, member no. ${d.member_no}).`;
         const body =
           which === 'today'
             ? `${t.name}: ${d.first_name}, your access ends today at ${end.toFormat('HH:mm')}. ${how}`
