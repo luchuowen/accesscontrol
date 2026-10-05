@@ -28,6 +28,7 @@ import { handleAck, handleDrift, handleEvents, handleInventory, handlePair, hand
 import { parseMeta, ReplyError, receiveEmail, receiveWhatsApp, sendReply, verifyMeta } from './comms.js';
 import { encrypt } from './crypto.js';
 import { applyResendEvent, Resend, sendEmail, verifySvix } from './email.js';
+import { memberLastPlan, startMemberPrompt } from './member-pay.js';
 import {
   platformAlerts,
   previewAnnouncement,
@@ -421,6 +422,79 @@ describe('walking skeleton: pay → door', () => {
     expect(await (await hook()).json()).toMatchObject({ status: 'duplicate' });
     const [it] = await owner`select status from payment_intents where id = ${i?.id}`;
     expect(it).toEqual({ status: 'completed' });
+  });
+  it('member self-service: one prompt pays two services, settles both, and a renew link renews the last plan', async () => {
+    const [m] = await owner`select id from members where member_no = 21001`;
+    const two = await owner<{ id: string; price_kes: number; service_id: string | null }[]>`
+      select distinct on (coalesce(p.service_id, p.id)) p.id, p.price_kes, p.service_id from products p
+      left join services s on s.id = p.service_id
+      where p.tenant_id = ${tenantId} and p.active and coalesce(s.active and s.deleted_at is null and s.sold_to <> 'walkins', true)
+      order by coalesce(p.service_id, p.id), p.price_kes limit 2`;
+    expect(two).toHaveLength(2);
+    const total = two.reduce((a, p) => a + p.price_kes, 0);
+    const pushed: Record<string, unknown>[] = [];
+    let intentId = '';
+    const fakeFetch = (async (u: string, init?: RequestInit) => {
+      const url = String(u);
+      if (url.endsWith('/auth/token')) return new Response(JSON.stringify({ access_token: 't', expires_in: '3599' }));
+      if (url.includes('/initiate')) {
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        pushed.push(body);
+        intentId = String(body.externalId);
+        return new Response(JSON.stringify({ transaction: { id: 'TP-SELF-1' } }));
+      }
+      return new Response(
+        JSON.stringify({
+          transaction: {
+            id: 'TP-SELF-1',
+            status: 'COMPLETED',
+            amount: total,
+            accountReference: '21001',
+            externalReference: intentId,
+          },
+        }),
+      );
+    }) as typeof fetch;
+    const client = new TaifaPay({ env: 'live', clientId: 'self', clientSecret: 's' }, fakeFetch);
+    // The same service twice, an unknown product, or nothing at all never reaches M-Pesa.
+    const [a, b] = two as [(typeof two)[number], (typeof two)[number]];
+    const [sameSvc] = a.service_id
+      ? await owner`select id from products where service_id = ${a.service_id} and id <> ${a.id} and active limit 1`
+      : [];
+    if (sameSvc)
+      expect(await startMemberPrompt(app, tenantId, m?.id, [a.id, sameSvc.id], 'member', client)).toBe('invalid');
+    expect(
+      await startMemberPrompt(app, tenantId, m?.id, ['00000000-0000-0000-0000-000000000000'], 'member', client),
+    ).toBe('invalid');
+    expect(await startMemberPrompt(app, tenantId, m?.id, [], 'member', client)).toBe('invalid');
+    expect(pushed).toHaveLength(0);
+    // One prompt for both, priced by the club, to the member's own phone, account = member number.
+    expect(await startMemberPrompt(app, tenantId, m?.id, [a.id, b.id], 'member', client)).toBe('sent');
+    expect(pushed[0]).toMatchObject({ amount: total, accountReference: '21001', transactionDesc: '2 services' });
+    const [it] =
+      await owner`select amount_kes, provider_ref, lines, created_by from payment_intents where id = ${intentId}`;
+    expect(it).toMatchObject({ amount_kes: total, provider_ref: 'TP-SELF-1', created_by: 'member' });
+    expect(it?.lines).toHaveLength(2);
+    // TaifaPay confirms: both services are applied, each with its own access, exactly once.
+    const hook = () =>
+      handleTaifaWebhook(
+        app,
+        new Request('http://x', { method: 'POST', body: JSON.stringify({ data: { transactionId: 'TP-SELF-1' } }) }),
+        'demo-club',
+        client,
+      );
+    const res = (await (await hook()).json()) as { status: string; paymentId: string };
+    expect(res.status).toBe('applied');
+    expect(await (await hook()).json()).toMatchObject({ status: 'duplicate' });
+    const lines = await owner`select product_id from payment_lines where payment_id = ${res.paymentId}`;
+    expect(lines.map((l) => l.product_id).sort()).toEqual([a.id, b.id].sort());
+    const ents = await owner`select distinct product_id from entitlements where source_id = ${res.paymentId}`;
+    expect(ents).toHaveLength(2);
+    const [done] = await owner`select status from payment_intents where id = ${intentId}`;
+    expect(done).toEqual({ status: 'completed' });
+    // The renew link renews the plan last paid for, and only for a product the club still sells.
+    const last = await withTenant(app, tenantId, (tx) => memberLastPlan(tx, m?.id));
+    expect([a.id, b.id]).toContain(last?.id);
   });
   it('missed-payment queue: a mistyped account number is assigned to the right member and applied', async () => {
     const r = await recordPayment(app, tenantId, {

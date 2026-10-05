@@ -1,26 +1,28 @@
-import 'server-only';
-import { withTenant } from '@lango/db';
-import { initiatedTransactionId, rateLimit, tenantTaifa } from '@lango/server';
-import { db } from '@/server/db';
+import { type Sql, type Tx, withTenant } from '@lango/db';
+import { rateLimit } from './bridge-api.js';
+import { initiatedTransactionId, type TaifaPay, tenantTaifa } from './taifapay.js';
 
 export type PromptResult = 'sent' | 'failed' | 'wait' | 'unavailable' | 'invalid';
 
 /**
- * One M-Pesa prompt to the member's own phone for up to five of the club's products (one per service). Prices come
- * from the club's products at this moment, never from the caller. Shared by the portal bill and the SMS renew link.
+ * Member self-service payment (portal bill and SMS renew link): one M-Pesa prompt to the member's own phone for up
+ * to five of the club's products, one per service. Prices come from the club's products at this moment, never from
+ * the caller. Settlement is the normal TaifaPay path (webhook or reconcile), which reads the intent's lines.
  */
 export async function startMemberPrompt(
+  sql: Sql,
   tenantId: string,
   memberId: string,
   productIds: string[],
   createdBy: 'member' | 'renew-link',
+  client?: TaifaPay,
 ): Promise<PromptResult> {
   const ids = [...new Set(productIds)].filter((x) => /^[0-9a-f-]{36}$/.test(x));
   if (!ids.length || ids.length > 5) return 'invalid';
   if (!rateLimit(`member-pay:${memberId}`, 3, 5 * 60_000)) return 'wait';
-  const client = await tenantTaifa(db(), tenantId);
-  if (!client) return 'unavailable';
-  const intent = await withTenant(db(), tenantId, async (tx) => {
+  const taifa = client ?? (await tenantTaifa(sql, tenantId));
+  if (!taifa) return 'unavailable';
+  const intent = await withTenant(sql, tenantId, async (tx) => {
     const [m] = await tx<
       { member_no: number; phone: string }[]
     >`select member_no, phone from members where id = ${memberId} and status = 'active' and phone is not null`;
@@ -45,7 +47,7 @@ export async function startMemberPrompt(
   });
   if (!intent) return 'invalid';
   try {
-    const res = await client.stkPush({
+    const res = await taifa.stkPush({
       phone: intent.phone,
       amount: intent.amount,
       accountReference: intent.ref,
@@ -55,14 +57,30 @@ export async function startMemberPrompt(
     const ref = initiatedTransactionId(res);
     if (ref)
       await withTenant(
-        db(),
+        sql,
         tenantId,
         (tx) => tx`update payment_intents set provider_ref = ${ref} where id = ${intent.id}`,
       );
     return 'sent';
   } catch (err) {
     console.error('stk push failed', err instanceof Error ? err.message : err);
-    await withTenant(db(), tenantId, (tx) => tx`update payment_intents set status = 'failed' where id = ${intent.id}`);
+    await withTenant(sql, tenantId, (tx) => tx`update payment_intents set status = 'failed' where id = ${intent.id}`);
     return 'failed';
   }
+}
+
+/** The plan a member last paid for, if the club still sells it to members (what a renew link renews). */
+export async function memberLastPlan(tx: Tx, memberId: string) {
+  const [p] = await tx<{ id: string; name: string; price_kes: number; ends: Date | null }[]>`
+    select pr.id, pr.name, pr.price_kes,
+      (select max(e.ends_at) from entitlements e where e.member_id = p.member_id and e.service_id = pr.service_id
+         and e.ends_at > now()) as ends
+    from payments p
+    left join payment_lines l on l.payment_id = p.id
+    join products pr on pr.id = coalesce(l.product_id, p.product_id)
+    left join services s on s.id = pr.service_id
+    where p.member_id = ${memberId} and p.status = 'applied' and pr.active
+      and coalesce(s.sold_to, 'both') <> 'walkins' and coalesce(s.active and s.deleted_at is null, true)
+    order by p.paid_at desc, pr.price_kes desc limit 1`;
+  return p ?? null;
 }

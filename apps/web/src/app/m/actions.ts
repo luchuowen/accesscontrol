@@ -10,12 +10,12 @@ import {
   rateLimit,
   recordFailure,
   requestOtp,
+  startMemberPrompt,
   verifyOtp,
 } from '@lango/server';
 import { cookies, headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { db } from '@/server/db';
-import { startMemberPrompt } from './prompt';
 import { PHONE, PICK, type Pick, pendingPhone, pendingPicks, short, sign } from './session';
 
 const COOKIE = 'lango_member';
@@ -142,6 +142,6 @@ export async function memberLogin(form: FormData) {
 export async function memberPay(form: FormData) {
   const who = await readMember();
   if (!who) redirect('/m');
-  const r = await startMemberPrompt(who.tenantId, who.memberId, form.getAll('productId').map(String), 'member');
+  const r = await startMemberPrompt(db(), who.tenantId, who.memberId, form.getAll('productId').map(String), 'member');
   redirect(r === 'invalid' ? '/m?v=add' : `/m?pay=${r}`);
 }

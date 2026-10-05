@@ -6,6 +6,7 @@ export * from './bridge-api.js';
 export * from './comms.js';
 export * from './crypto.js';
 export * from './email.js';
+export * from './member-pay.js';
 export * from './notify.js';
 export * from './onboarding.js';
 export * from './otp.js';

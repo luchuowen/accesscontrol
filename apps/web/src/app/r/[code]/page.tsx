@@ -1,5 +1,5 @@
 import { withTenant } from '@lango/db';
-import { readRenewLink } from '@lango/server';
+import { memberLastPlan, readRenewLink } from '@lango/server';
 import { CheckCircle2, Loader2 } from 'lucide-react';
 import Link from 'next/link';
 import { LiveRefresh } from '@/app/(console)/_dash/live-refresh';
@@ -8,7 +8,6 @@ import { date, kes } from '@/lib/format';
 import { settlePending } from '@/lib/settle';
 import { db } from '@/server/db';
 import { renewPay } from './actions';
-import { lastPlan } from './plan';
 
 export const dynamic = 'force-dynamic';
 
@@ -51,7 +50,7 @@ export default async function Renew({
     const [m] = await tx<{ first_name: string; member_no: number; phone: string | null; club: string }[]>`
       select m.first_name, m.member_no, m.phone, t.name as club from members m join tenants t on t.id = m.tenant_id
       where m.id = ${link.memberId}`;
-    const plan = await lastPlan(tx, link.memberId);
+    const plan = await memberLastPlan(tx, link.memberId);
     const [paid] = await tx<{ ends: Date }[]>`
       select max(e.ends_at) as ends from payments p join entitlements e on e.source_id = p.id
       where p.member_id = ${link.memberId} and p.status = 'applied' and p.applied_at > now() - interval '15 minutes'
