@@ -1,13 +1,11 @@
 import { withTenant } from '@lango/db';
-import { memberOtpStatus } from '@lango/server';
 import { CheckCircle2, Megaphone, MessageCircle, Smartphone } from 'lucide-react';
-import { AuthHeading, AuthNotice, AuthShell } from '@/components/auth-shell';
 import { LangoMark } from '@/components/logo';
 import { SubmitButton } from '@/components/submit-button';
 import { date, daysLeft, kes } from '@/lib/format';
 import { db } from '@/server/db';
-import { Checking, CodeTimer, OtpInput, ResendButton } from '../login/code/otp';
-import { memberLogin, memberLogout, memberPay, memberStart, memberVerify, readMember, setNews } from './actions';
+import { memberLogout, memberPay, readMember, setNews } from './actions';
+import { MemberSignIn } from './signin';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,8 +16,6 @@ export default async function MemberPortal({
     e?: string;
     pay?: string;
     step?: string;
-    c?: string;
-    n?: string;
     w?: string;
     news?: string;
     from?: string;
@@ -27,163 +23,7 @@ export default async function MemberPortal({
 }) {
   const sp = await searchParams;
   const who = await readMember();
-  if (!who) {
-    const step = sp.step === 'code' || sp.step === 'phone' ? sp.step : 'start';
-    const club = (sp.c ?? '').slice(0, 40);
-    const no = (sp.n ?? '').replace(/\D/g, '').slice(0, 10);
-    // Someone who came from the staff sign-in keeps a way back on every step; links sent to members never show it.
-    const staff = sp.from === 'staff';
-    const FromStaff = () => (staff ? <input type="hidden" name="from" value="staff" /> : null);
-    const Hidden = () => (
-      <>
-        <input type="hidden" name="club" value={club} />
-        <input type="hidden" name="memberNo" value={no} />
-        <FromStaff />
-      </>
-    );
-    const restart = staff ? '/m?from=staff' : '/m';
-    const BackToStaff = () =>
-      staff ? (
-        <p className="mt-3 text-center text-[13px] text-slate-500">
-          Not a member?{' '}
-          <a href="/login" className="auth-link font-semibold">
-            Staff sign-in
-          </a>
-        </p>
-      ) : null;
-    const error =
-      sp.e === '2'
-        ? 'Too many attempts. Wait a few minutes and try again.'
-        : sp.e === '1'
-          ? step === 'code'
-            ? 'That code isn’t right or has expired. Check the latest SMS and try again.'
-            : 'We couldn’t find an active membership with those details. Check your club code and member number.'
-          : null;
-    if (step === 'code') {
-      const st = await memberOtpStatus(db(), club.toLowerCase(), Number.parseInt(no, 10));
-      const minutes = Math.max(1, Math.ceil((st.resendAt - Date.now()) / 60_000));
-      return (
-        <AuthShell audience="members">
-          <div className="text-center">
-            <CodeTimer expiresAt={st.expiresAt} />
-            <h1 className="text-[26px] font-semibold tracking-tight text-ink-900">Enter your code</h1>
-            <p className="mt-1.5 text-sm text-ink-500">Sent by SMS to the phone number your club has for you.</p>
-          </div>
-          {error && <AuthNotice tone="error">{error}</AuthNotice>}
-          {!error && sp.w && !st.capped && (
-            <AuthNotice tone="info">A code was sent a moment ago. Use that one, or wait to ask for another.</AuthNotice>
-          )}
-          <form action={memberVerify}>
-            <Hidden />
-            <OtpInput />
-            <Checking />
-          </form>
-          <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-center text-[13px] text-slate-600">
-            {st.capped ? (
-              <>
-                You’ve asked for several codes. For your security, try again in about {minutes} minute
-                {minutes === 1 ? '' : 's'}.
-              </>
-            ) : (
-              <span className="inline-flex flex-wrap items-center justify-center gap-x-1.5">
-                Didn’t get it?
-                <form action={memberStart} className="inline">
-                  <Hidden />
-                  <ResendButton resendAt={st.resendAt} label="Resend SMS" />
-                </form>
-              </span>
-            )}
-          </div>
-          <p className="mt-3 text-center text-[13px]">
-            <a href={restart} className="text-slate-500 hover:text-ink-900">
-              Change details
-            </a>
-          </p>
-          <BackToStaff />
-        </AuthShell>
-      );
-    }
-    return (
-      <AuthShell audience="members">
-        <AuthHeading
-          title={step === 'phone' ? 'Confirm your phone' : 'Member sign-in'}
-          sub={
-            step === 'phone'
-              ? 'Enter the phone number your club has for you.'
-              : 'Use your club code and member number.'
-          }
-        />
-        {error && <AuthNotice tone="error">{error}</AuthNotice>}
-        {step === 'start' ? (
-          <form action={memberStart} className="mt-8 grid gap-[18px]">
-            <FromStaff />
-            <div>
-              <label htmlFor="club" className="auth-label">
-                Club code
-              </label>
-              <input
-                id="club"
-                name="club"
-                defaultValue={club}
-                required
-                autoCapitalize="none"
-                placeholder="Enter club code"
-                className="auth-input"
-              />
-            </div>
-            <div>
-              <label htmlFor="memberNo" className="auth-label">
-                Member number
-              </label>
-              <input
-                id="memberNo"
-                name="memberNo"
-                defaultValue={no}
-                inputMode="numeric"
-                required
-                placeholder="Enter member number"
-                className="auth-input"
-              />
-            </div>
-            <SubmitButton pendingText="Checking…" className="auth-btn mt-1">
-              Continue
-            </SubmitButton>
-            <p className="text-center text-[12.5px] text-slate-500">Both are on your membership card or receipt.</p>
-            <BackToStaff />
-          </form>
-        ) : (
-          <form action={memberLogin} className="mt-8 grid gap-[18px]">
-            <Hidden />
-            <div>
-              <label htmlFor="phone" className="auth-label">
-                Phone Number
-              </label>
-              <input
-                id="phone"
-                name="phone"
-                type="tel"
-                inputMode="tel"
-                autoComplete="tel"
-                required
-                autoFocus
-                placeholder="Enter phone number"
-                className="auth-input"
-              />
-            </div>
-            <SubmitButton pendingText="Checking…" className="auth-btn mt-1">
-              Continue
-            </SubmitButton>
-            <p className="text-center text-[13px]">
-              <a href={restart} className="text-slate-500 hover:text-ink-900">
-                Change details
-              </a>
-            </p>
-            <BackToStaff />
-          </form>
-        )}
-      </AuthShell>
-    );
-  }
+  if (!who) return <MemberSignIn sp={sp} />;
   const d = await withTenant(db(), who.tenantId, async (tx) => {
     const [m] = await tx<
       { first_name: string; member_no: number; sms_news: boolean }[]

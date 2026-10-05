@@ -54,7 +54,7 @@ export function NewClubForm({
             </div>
           </div>
           <div>
-            <span className="label">Member portal club code</span>
+            <span className="label">Club code</span>
             <div className="mt-1.5">
               <CopyField value={d.slug} label="Club code" />
             </div>

@@ -1,10 +1,12 @@
 'use server';
-import { createHmac } from 'node:crypto';
 import { withTenant } from '@lango/db';
 import {
   clientIp,
   initiatedTransactionId,
   isLimited,
+  type MemberMatch,
+  membersByPhone,
+  msisdn,
   otpAvailable,
   rateLimit,
   recordFailure,
@@ -14,11 +16,10 @@ import {
 } from '@lango/server';
 import { cookies, headers } from 'next/headers';
 import { redirect } from 'next/navigation';
-import { sessionSecret } from '@/lib/session';
 import { db } from '@/server/db';
+import { PHONE, PICK, type Pick, pendingPhone, pendingPicks, short, sign } from './session';
 
 const COOKIE = 'lango_member';
-const sign = (v: string) => `${v}.${createHmac('sha256', sessionSecret()).update(`member:${v}`).digest('base64url')}`;
 export async function readMember(): Promise<{ tenantId: string; memberId: string } | null> {
   const raw = (await cookies()).get(COOKIE)?.value ?? '';
   const i = raw.lastIndexOf('.');
@@ -27,55 +28,78 @@ export async function readMember(): Promise<{ tenantId: string; memberId: string
   return tenantId && memberId ? { tenantId, memberId } : null;
 }
 
-const digits = (p: string) => p.replace(/\D/g, '').replace(/^0/, '254').slice(-12);
-
-const setMember = async (tenantId: string, memberId: string) =>
-  (await cookies()).set(COOKIE, sign(`${tenantId}:${memberId}`), {
+const setMember = async (tenantId: string, memberId: string) => {
+  const jar = await cookies();
+  jar.delete({ name: PHONE, path: '/m' });
+  jar.delete({ name: PICK, path: '/m' });
+  jar.set(COOKIE, sign(`${tenantId}:${memberId}`), {
     httpOnly: true,
     sameSite: 'lax',
     path: '/m',
     maxAge: 30 * 86400,
     secure: process.env.NODE_ENV === 'production',
   });
+};
 
-const who = (form: FormData) => ({
-  slug: String(form.get('club') ?? '')
-    .trim()
-    .toLowerCase(),
-  no: Number.parseInt(String(form.get('memberNo') ?? ''), 10),
-});
-const q = (slug: string, no: number) => `c=${encodeURIComponent(slug)}&n=${Number.isSafeInteger(no) ? no : ''}`;
+/** Signed in when the code (or member number) fits one membership; several clubs → pick one. */
+async function finish(ms: MemberMatch[], from: string): Promise<never> {
+  const [one] = ms;
+  if (ms.length === 1 && one) {
+    await setMember(one.tenantId, one.memberId);
+    redirect('/m');
+  }
+  const picks: Pick[] = ms.map((m) => ({ t: m.tenantId, m: m.memberId, c: m.club, n: m.memberNo }));
+  (await cookies()).set(PICK, sign(Buffer.from(JSON.stringify(picks)).toString('base64url')), {
+    ...short,
+    secure: process.env.NODE_ENV === 'production',
+  });
+  redirect(`/m?step=club${from}`);
+}
+
 /** Keeps the way back to the staff sign-in for someone who came from it. */
 const fromStaff = (form: FormData) => (form.get('from') === 'staff' ? '&from=staff' : '');
 
 /**
- * Step 1: club code + member number. A 6-digit code goes by SMS to the phone the club has on file; the answer is
- * the same whether or not the member exists. Clubs without SMS fall back to confirming the phone number.
+ * Step 1: the phone number. A 6-digit code goes by SMS to it; the answer is the same whether or not it belongs
+ * to a member. When none of the member's clubs can send SMS, the portal asks for the member number instead.
  */
 export async function memberStart(form: FormData) {
-  const { slug, no } = who(form);
+  const from = fromStaff(form);
+  const phone = msisdn(String(form.get('phone') ?? '')) ?? (form.get('resend') ? await pendingPhone() : null);
+  if (!phone) redirect(`/m?e=3${from}`);
   const ip = clientIp(await headers());
-  if (!rateLimit(`member-start-ip:${ip}`, 20, 10 * 60_000)) redirect(`/m?e=2${fromStaff(form)}`);
-  if (!(await otpAvailable(db(), slug))) redirect(`/m?step=phone&${q(slug, no)}${fromStaff(form)}`);
-  const r = await requestOtp(db(), slug, no);
-  if (r === 'fallback') redirect(`/m?step=phone&${q(slug, no)}${fromStaff(form)}`);
-  redirect(`/m?step=code&${q(slug, no)}${r === 'wait' ? '&w=1' : ''}${fromStaff(form)}`);
+  if (!rateLimit(`member-start-ip:${ip}`, 20, 10 * 60_000)) redirect(`/m?e=2${from}`);
+  (await cookies()).set(PHONE, phone, { ...short, secure: process.env.NODE_ENV === 'production' });
+  if (!(await otpAvailable(db(), phone))) redirect(`/m?step=number${from}`);
+  const r = await requestOtp(db(), phone);
+  if (r === 'fallback') redirect(`/m?step=number${from}`);
+  redirect(`/m?step=code${r === 'wait' ? '&w=1' : ''}${from}`);
 }
 
 /** Step 2: the code from the SMS. */
 export async function memberVerify(form: FormData) {
-  const { slug, no } = who(form);
+  const from = fromStaff(form);
+  const phone = await pendingPhone();
+  if (!phone) redirect(`/m?${from.slice(1)}`);
   const code = String(form.get('code') ?? '').replace(/\D/g, '');
   const ip = clientIp(await headers());
-  const account = `member-code:${slug}:${no}`;
+  const account = `member-code:${phone}`;
   if (!rateLimit(`member-code-ip:${ip}`, 30, 10 * 60_000) || isLimited(account, 8, 15 * 60_000))
-    redirect(`/m?step=code&${q(slug, no)}&e=2${fromStaff(form)}`);
-  const m = await verifyOtp(db(), slug, no, code);
-  if (!m) {
+    redirect(`/m?step=code&e=2${from}`);
+  const ms = await verifyOtp(db(), phone, code);
+  if (!ms.length) {
     recordFailure(account, 15 * 60_000);
-    redirect(`/m?step=code&${q(slug, no)}&e=1${fromStaff(form)}`);
+    redirect(`/m?step=code&e=1${from}`);
   }
-  await setMember(m.tenantId, m.memberId);
+  await finish(ms, from);
+}
+
+/** Step 3, only for a phone that is a member at more than one club: which one. */
+export async function memberPick(form: FormData) {
+  const id = String(form.get('member') ?? '');
+  const p = (await pendingPicks()).find((x) => x.m === id);
+  if (!p) redirect(`/m?${fromStaff(form).slice(1)}`);
+  await setMember(p.t, p.m);
   redirect('/m');
 }
 
@@ -97,37 +121,22 @@ export async function setNews(form: FormData) {
   redirect(`/m?news=${on ? 'on' : 'off'}`);
 }
 
-/** Fallback when the club has no SMS: club code + member number + the phone number the club has on file. */
+/** Fallback when no club of the member can send SMS: the phone number plus the member number. */
 export async function memberLogin(form: FormData) {
-  const slug = String(form.get('club') ?? '')
-    .trim()
-    .toLowerCase();
-  const no = Number.parseInt(String(form.get('memberNo') ?? ''), 10);
-  const phone = digits(String(form.get('phone') ?? ''));
+  const from = fromStaff(form);
+  const phone = await pendingPhone();
+  if (!phone) redirect(`/m?${from.slice(1)}`);
+  const no = Number.parseInt(String(form.get('memberNo') ?? '').replace(/\D/g, ''), 10);
   const ip = clientIp(await headers());
-  const account = `member-login:${slug}:${no}`;
-  const back = `/m?step=phone&${q(slug, no)}${fromStaff(form)}`;
+  const account = `member-login:${phone}`;
   if (!rateLimit(`member-login-ip:${ip}`, 20, 5 * 60_000) || isLimited(account, 5, 15 * 60_000))
-    redirect(`${back}&e=2`);
-  const [t] = await db()<{ id: string }[]>`select id from tenants where slug = ${slug}`;
-  if (!t || !Number.isSafeInteger(no)) {
+    redirect(`/m?step=number&e=2${from}`);
+  const ms = (await membersByPhone(db(), phone)).filter((m) => m.memberNo === no);
+  if (!ms.length) {
     recordFailure(account, 15 * 60_000);
-    redirect(`${back}&e=1`);
+    redirect(`/m?step=number&e=1${from}`);
   }
-  const [m] = await withTenant(
-    db(),
-    t.id,
-    (tx) =>
-      tx<
-        { id: string; phone: string | null }[]
-      >`select id, phone from members where member_no = ${no} and status = 'active'`,
-  );
-  if (!m?.phone || digits(m.phone) !== phone) {
-    recordFailure(account, 15 * 60_000);
-    redirect(`${back}&e=1`);
-  }
-  await setMember(t.id, m.id);
-  redirect('/m');
+  await finish(ms, from);
 }
 
 export async function memberPay(form: FormData) {

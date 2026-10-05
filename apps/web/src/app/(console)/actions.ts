@@ -82,7 +82,7 @@ async function insertMember(
           from tenants t left join tenant_settings ts on ts.tenant_id = t.id where t.id = ${s.tid}`;
         const portal = (process.env.PUBLIC_URL ?? '').replace(/\/$/, '');
         const pay = t?.paybill ? ` Pay by M-Pesa Paybill ${t.paybill}, account ${memberNo}.` : '';
-        const body = `Welcome to ${t?.name}, ${first}. Your member number is ${memberNo}.${pay} Check or renew your plan at ${portal}/m (club code ${t?.slug}).`;
+        const body = `Welcome to ${t?.name}, ${first}. Your member number is ${memberNo}.${pay} Check or renew your plan at ${portal}/m.`;
         await tx`insert into sms_messages (tenant_id, member_id, phone, body, kind, dedupe_key)
                  values (${s.tid}, ${newId}, ${phone}, ${body}, 'welcome', ${`welcome:${newId}`})`;
       }
@@ -357,8 +357,8 @@ export async function remindEnding(_prev: { done?: string }, _form: FormData): P
     for (const d of due) {
       const end = DateTime.fromJSDate(d.ends, { zone: t?.timezone ?? 'Africa/Nairobi' });
       const how = t?.paybill
-        ? `Renew on M-Pesa Paybill ${t.paybill}, account ${d.member_no}, or at ${portal}/m (club code ${t?.slug}).`
-        : `Renew at ${portal}/m (club code ${t?.slug}, member no. ${d.member_no}).`;
+        ? `Renew on M-Pesa Paybill ${t.paybill}, account ${d.member_no}, or at ${portal}/m.`
+        : `Renew at ${portal}/m (member no. ${d.member_no}).`;
       const body = `${t?.name}: ${d.first_name}, your access ends on ${end.toFormat('d LLL')}. ${how}`;
       const r = await tx`insert into sms_messages (tenant_id, member_id, phone, body, kind, dedupe_key, send_before)
         values (${s.tid}, ${d.member_id}, ${d.phone}, ${body}, 'reminder', ${`reminder:manual:${d.member_id}:${end.toISODate()}`}, ${d.ends})

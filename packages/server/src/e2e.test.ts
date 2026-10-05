@@ -855,15 +855,17 @@ describe('walking skeleton: pay → door', () => {
     expect(to('254726049097').some((x) => /^Demo Club today: KES/.test(x.message))).toBe(true);
     for (const m of sent) expect([m.message, smsUnits(m.message)]).toEqual([m.message, 1]); // every message fits one SMS
 
-    // Portal sign-in code: sent at once, one per minute, single use, wrong codes refused.
-    expect(await requestOtp(app, 'demo-club', 21088, client)).toBe('sent');
+    // Portal sign-in by phone number: code sent at once, one per minute, single use, wrong codes refused.
+    expect(await requestOtp(app, '0711 000 088', client)).toBe('sent');
     const code = sent.at(-1)?.message.match(/\b(\d{6})\b/)?.[1] as string;
     expect(sent.at(-1)?.mobile).toBe('254711000088');
-    expect(await requestOtp(app, 'demo-club', 21088, client)).toBe('wait');
-    expect(await verifyOtp(app, 'demo-club', 21088, code === '000000' ? '111111' : '000000')).toBeNull();
-    expect(await verifyOtp(app, 'demo-club', 21088, code)).toEqual({ tenantId, memberId: w?.id });
-    expect(await verifyOtp(app, 'demo-club', 21088, code)).toBeNull();
-    expect(await requestOtp(app, 'demo-club', 99999, client)).toBe('unknown');
+    expect(await requestOtp(app, '+254711000088', client)).toBe('wait');
+    expect(await verifyOtp(app, '254711000088', code === '000000' ? '111111' : '000000')).toEqual([]);
+    expect(await verifyOtp(app, '0711000088', code)).toEqual([
+      { tenantId, club: 'Demo Club', memberId: w?.id, memberNo: 21088 },
+    ]);
+    expect(await verifyOtp(app, '0711000088', code)).toEqual([]);
+    expect(await requestOtp(app, '0799 999 999', client)).toBe('unknown');
   });
   it('accounts: invitation, password reset, sessions and sign-in codes, with email through Resend', async () => {
     const mails: { to: string[]; subject: string; html: string; key: string | null }[] = [];

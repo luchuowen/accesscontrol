@@ -385,7 +385,6 @@ export async function queueReminders(sql: Sql, portalUrl: string): Promise<numbe
       const days = Math.min(14, Math.max(1, n.reminderDays ?? 3));
       const [ch] = await tx<{ paybill: string | null }[]>`
         select data->'channels'->>'paybill' as paybill from tenant_settings where tenant_id = ${t.id}`;
-      const [slug] = await tx<{ slug: string }[]>`select slug from tenants where id = ${t.id}`;
       const due = await tx<{ member_id: string; member_no: number; first_name: string; phone: string; ends: Date }[]>`
         select m.id as member_id, m.member_no, m.first_name, m.phone, x.ends from members m
         join (select member_id, max(ends_at) as ends from entitlements group by member_id) x on x.member_id = m.id
@@ -399,8 +398,8 @@ export async function queueReminders(sql: Sql, portalUrl: string): Promise<numbe
         const which = left <= 0 ? 'today' : left <= days ? `${days}d` : null;
         if (!which) continue;
         const how = ch?.paybill
-          ? `Renew on M-Pesa Paybill ${ch.paybill}, account ${d.member_no}, or at ${portalUrl}/m (club code ${slug?.slug}).`
-          : `Renew at ${portalUrl}/m (club code ${slug?.slug}, member no. ${d.member_no}).`;
+          ? `Renew on M-Pesa Paybill ${ch.paybill}, account ${d.member_no}, or at ${portalUrl}/m.`
+          : `Renew at ${portalUrl}/m (member no. ${d.member_no}).`;
         const body =
           which === 'today'
             ? `${t.name}: ${d.first_name}, your access ends today at ${end.toFormat('HH:mm')}. ${how}`

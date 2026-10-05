@@ -42,7 +42,7 @@ export async function ClubTab({ s }: { s: Session }) {
         <Row icon={Building2} label="Club name">
           {t?.name}
         </Row>
-        <Row icon={Hash} label="Club code" hint="Members use it to sign in to their portal">
+        <Row icon={Hash} label="Club code" hint="Your club’s short name in Lango">
           <span className="font-mono">{t?.slug}</span>
         </Row>
         <Row icon={Globe2} label="Time zone">
