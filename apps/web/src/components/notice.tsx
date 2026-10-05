@@ -8,6 +8,8 @@ const MESSAGES: Record<string, { tone: 'ok' | 'warn' | 'err'; text: string }> = 
   },
   granted: { tone: 'ok', text: 'Complimentary access granted and logged with your reason.' },
   'card-linked': { tone: 'ok', text: 'Card linked. It works at the doors as soon as the member has a paid plan.' },
+  'card-unblocked': { tone: 'ok', text: 'Card switched back on. It opens the doors again.' },
+  'pause-ended': { tone: 'ok', text: 'Pause ended. Unused pause days came off the end date.' },
   'card-taken': { tone: 'err', text: 'That card is already linked to another member.' },
   card: { tone: 'err', text: 'Card numbers are 1 to 65535 (the number printed on the card or tag).' },
   'prompt-sent': { tone: 'ok', text: 'M-Pesa prompt sent. Access opens automatically once the member approves.' },

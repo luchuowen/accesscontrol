@@ -4,12 +4,14 @@ import {
   assignPayment,
   can,
   clubNotify,
+  endPause,
   initiatedTransactionId,
   newPairCode,
   rebuildAccessState,
   recordPayment,
   renewLink,
   tenantTaifa,
+  unblockCards,
 } from '@lango/server';
 import { DateTime } from 'luxon';
 import { revalidatePath } from 'next/cache';
@@ -193,6 +195,9 @@ export async function linkCard(form: FormData) {
   try {
     await withTenant(db(), s.tid, async (tx) => {
       await tx`insert into credentials (tenant_id, member_id, kind, site_code, card_code) values (${s.tid}, ${memberId}, 'card', ${site}, ${code})`;
+      // A new card ends a lost-card block; the lost card stays switched off.
+      await tx`update credentials set revoked_reason = 'replaced' where member_id = ${memberId} and revoked_reason = 'lost'`;
+      await tx`update members set cards_blocked_at = null where id = ${memberId}`;
       await tx`insert into audit_log (tenant_id, actor, action, entity, data) values (${s.tid}, ${s.uid}, 'credential.linked', ${memberId}, ${tx.json({ site, code } as never)})`;
       await rebuildAccessState(tx, s.tid, memberId);
     });
@@ -374,4 +379,26 @@ export async function remindEnding(_prev: { done?: string }, _form: FormData): P
   });
   if (!queued.due) return { done: 'No mobile numbers to text' };
   return { done: queued.n ? `Reminder sent to ${queued.n}` : 'Already reminded' };
+}
+
+/** Member profile: lift a lost-card block (the member found the card at the club). */
+export async function staffUnblockCards(form: FormData) {
+  const s = await requireSession();
+  const memberId = id(form, 'memberId');
+  if (!memberId) redirect('/members');
+  if (!can(s, 'members.edit')) back(memberId, 'forbidden');
+  await unblockCards(db(), s.tid, memberId, s.uid);
+  revalidatePath(`/members/${memberId}`);
+  back(memberId, 'card-unblocked');
+}
+
+/** Member profile: end or cancel a member's pause (unused days come off the end date). */
+export async function staffEndPause(form: FormData) {
+  const s = await requireSession();
+  const memberId = id(form, 'memberId');
+  if (!memberId) redirect('/members');
+  if (!can(s, 'members.edit')) back(memberId, 'forbidden');
+  await endPause(db(), s.tid, memberId, s.uid);
+  revalidatePath(`/members/${memberId}`);
+  back(memberId, 'pause-ended');
 }

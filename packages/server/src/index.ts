@@ -13,6 +13,7 @@ export * from './otp.js';
 export * from './payments.js';
 export * from './receipts.js';
 export * from './renew.js';
+export * from './self-service.js';
 export * from './sms.js';
 export * from './sms-topup.js';
 export * from './taifapay.js';

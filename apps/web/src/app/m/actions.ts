@@ -1,7 +1,10 @@
 'use server';
 import { withTenant } from '@lango/db';
 import {
+  blockCards,
   clientIp,
+  confirmPhoneChange,
+  endPause,
   isLimited,
   type MemberMatch,
   membersByPhone,
@@ -10,7 +13,11 @@ import {
   rateLimit,
   recordFailure,
   requestOtp,
+  requestPhoneChange,
+  setEmergencyContact,
   startMemberPrompt,
+  startPause,
+  unblockCards,
   verifyOtp,
 } from '@lango/server';
 import { cookies, headers } from 'next/headers';
@@ -144,4 +151,93 @@ export async function memberPay(form: FormData) {
   if (!who) redirect('/m');
   const r = await startMemberPrompt(db(), who.tenantId, who.memberId, form.getAll('productId').map(String), 'member');
   redirect(r === 'invalid' ? '/m?v=add' : `/m?pay=${r}`);
+}
+
+// ── Phase 2 self-service (5 Oct 2026) ─────────────────────────────────────────────────────────────────────────
+
+/** Lost card: blocked at once; reception links a new one. */
+export async function memberLostCard() {
+  const who = await readMember();
+  if (!who) redirect('/m');
+  await blockCards(db(), who.tenantId, who.memberId, 'member');
+  redirect('/m?v=card&n=blocked');
+}
+export async function memberFoundCard() {
+  const who = await readMember();
+  if (!who) redirect('/m');
+  await unblockCards(db(), who.tenantId, who.memberId, 'member');
+  redirect('/m?n=card-on');
+}
+
+export async function memberPause(form: FormData) {
+  const who = await readMember();
+  if (!who) redirect('/m');
+  const r = await startPause(
+    db(),
+    who.tenantId,
+    who.memberId,
+    {
+      start: String(form.get('start') ?? ''),
+      days: Number(form.get('days')),
+      reason: String(form.get('reason') ?? ''),
+    },
+    'member',
+  );
+  redirect(r.ok ? '/m?v=pause&n=paused' : `/m?v=pause&e=${encodeURIComponent(r.why)}`);
+}
+export async function memberEndPause() {
+  const who = await readMember();
+  if (!who) redirect('/m');
+  await endPause(db(), who.tenantId, who.memberId, 'member');
+  redirect('/m?n=pause-ended');
+}
+
+const NEWPHONE = 'lango_member_newphone';
+export async function memberPhoneStart(form: FormData) {
+  const who = await readMember();
+  if (!who) redirect('/m');
+  const phone = msisdn(String(form.get('phone') ?? ''));
+  if (!phone) redirect(`/m?v=details&e=${encodeURIComponent('That doesn’t look like a Kenyan mobile number.')}`);
+  if (!rateLimit(`member-phone:${who.memberId}`, 3, 15 * 60_000))
+    redirect(`/m?v=details&e=${encodeURIComponent('Too many tries. Wait a few minutes.')}`);
+  const r = await requestPhoneChange(db(), who.tenantId, who.memberId, phone);
+  if (r !== 'sent') {
+    const why = {
+      invalid: 'That doesn’t look like a Kenyan mobile number.',
+      same: 'That is already your number.',
+      wait: 'Too many codes sent. Wait a few minutes.',
+      failed: 'We couldn’t send the code just now. Try again later or ask at reception.',
+    }[r];
+    redirect(`/m?v=details&e=${encodeURIComponent(why)}`);
+  }
+  (await cookies()).set(NEWPHONE, sign(phone), short);
+  const local = phone.replace(/^254/, '0');
+  redirect(
+    `/m?v=details&step=code&p=${encodeURIComponent(`${local.slice(0, 4)} ${local.slice(4, 7)} ${local.slice(7)}`)}`,
+  );
+}
+export async function memberPhoneConfirm(form: FormData) {
+  const who = await readMember();
+  if (!who) redirect('/m');
+  const jar = await cookies();
+  const raw = jar.get(NEWPHONE)?.value ?? '';
+  const i = raw.lastIndexOf('.');
+  const phone = i > 0 && sign(raw.slice(0, i)) === raw ? raw.slice(0, i) : null;
+  if (!phone) redirect(`/m?v=details&e=${encodeURIComponent('That code has expired. Start again.')}`);
+  const ok = await confirmPhoneChange(db(), who.tenantId, who.memberId, phone, String(form.get('code') ?? '').trim());
+  if (!ok)
+    redirect(`/m?v=details&step=code&e=${encodeURIComponent('That code is not right. Check the SMS and try again.')}`);
+  jar.delete(NEWPHONE);
+  redirect('/m?v=details&n=phone');
+}
+export async function memberEmergency(form: FormData) {
+  const who = await readMember();
+  if (!who) redirect('/m');
+  const ok = await setEmergencyContact(db(), who.tenantId, who.memberId, {
+    name: String(form.get('name') ?? ''),
+    phone: String(form.get('phone') ?? ''),
+  });
+  redirect(
+    ok ? '/m?v=details&n=contact' : `/m?v=details&e=${encodeURIComponent('Add both a name and a valid phone number.')}`,
+  );
 }

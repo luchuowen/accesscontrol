@@ -5,6 +5,7 @@ import {
   clubSms,
   msisdn,
   type NotifySettings,
+  normaliseRules,
   platformSms,
   platformSmsConfig,
   rateLimit,
@@ -109,4 +110,26 @@ export async function payPlan(form: FormData) {
   });
   revalidatePath('/settings');
   redirect(`/settings?tab=billing&b=${r.ok ? 'sent' : r.reason}`);
+}
+
+/** Settings › Member app: the club's self-service rules (pause limits, replacement card fee). */
+export async function saveMemberRules(form: FormData) {
+  const s = await requireSession();
+  if (!can(s, 'members.edit')) redirect('/settings?tab=member-app&m=forbidden');
+  const memberRules = normaliseRules({
+    pause: {
+      enabled: form.get('pause') === 'on',
+      minDays: form.get('minDays'),
+      maxDays: form.get('maxDays'),
+      perYear: form.get('perYear'),
+    },
+    card: { replaceFeeKes: String(form.get('replaceFeeKes') ?? '0').replace(/[^\d]/g, '') || 0 },
+  });
+  await withTenant(db(), s.tid, async (tx) => {
+    await tx`insert into tenant_settings (tenant_id, data) values (${s.tid}, ${tx.json({ memberRules } as never)})
+             on conflict (tenant_id) do update set data = tenant_settings.data || excluded.data`;
+    await tx`insert into audit_log (tenant_id, actor, action, data) values (${s.tid}, ${s.uid}, 'settings.member_rules', ${tx.json(memberRules as never)})`;
+  });
+  revalidatePath('/settings');
+  redirect('/settings?tab=member-app&m=saved');
 }

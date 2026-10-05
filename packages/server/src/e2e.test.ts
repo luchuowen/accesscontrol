@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { AxtraxClient, demoSeed, FakeAxtrax } from '@lango/axtrax';
 import { Bridge, Journal, sign } from '@lango/bridge';
 import { connect, migrate, type Sql, withTenant } from '@lango/db';
+import type { AccessState } from '@lango/protocol';
 import { DateTime } from 'luxon';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { rebuildAccessState } from './access.js';
@@ -42,6 +43,15 @@ import { importMembers, onboardingChecklist, planImport } from './onboarding.js'
 import { requestOtp, verifyOtp } from './otp.js';
 import { assignPayment, recordPayment } from './payments.js';
 import { readRenewLink } from './renew.js';
+import {
+  blockCards,
+  confirmPhoneChange,
+  endPause,
+  quotePause,
+  requestPhoneChange,
+  startPause,
+  unblockCards,
+} from './self-service.js';
 import { dispatchSms, msisdn, queueReminders, SourceCodeSms, smsUnits } from './sms.js';
 import { reconcileTopups, smsDescription, startTopup } from './sms-topup.js';
 import { handleTaifaWebhook, reconcileTaifaPay, TaifaAuthError, TaifaPay } from './taifapay.js';
@@ -1455,6 +1465,80 @@ describe('walking skeleton: pay → door', () => {
     const at = later.toFormat("yyyy-MM-dd'T'HH:mm:ss");
     expect(fake.swipe(28777, 0, 12, at)).toBe(false);
     expect(fake.swipe(28777, 0, 11, at)).toBe(true);
+  });
+  it('self-service: a lost card is blocked and found again; a pause moves the end date; a new phone is confirmed by code', async () => {
+    const [m] = await owner`insert into members (tenant_id, member_no, first_name, last_name, phone)
+      values (${tenantId}, 28888, 'Self', 'Service', '0700000888') returning id`;
+    const id = m?.id as string;
+    await owner`insert into credentials (tenant_id, member_id, card_code) values (${tenantId}, ${id}, 28888)`;
+    const tz = 'Africa/Nairobi';
+    const start = DateTime.now().setZone(tz).minus({ hours: 1 });
+    const end = DateTime.now().setZone(tz).plus({ days: 30 }).endOf('day');
+    await owner`insert into entitlements (tenant_id, member_id, zone_key, starts_at, ends_at, source)
+      values (${tenantId}, ${id}, 'gym', ${start.toJSDate()}, ${end.toJSDate()}, 'override')`;
+    await withTenant(app, tenantId, (tx) => rebuildAccessState(tx, tenantId, id));
+    await bridge.cycle(0);
+    expect(fake.swipe(28888, 0, 11, today())).toBe(true);
+    const doc = async () =>
+      (await owner<{ doc: AccessState }[]>`select doc from access_states where member_id = ${id}`)[0]
+        ?.doc as AccessState;
+
+    // Lost card: blocked at once, days kept; found again: back on.
+    expect(await blockCards(app, tenantId, id, 'member')).toBe(1);
+    expect((await doc()).segments).toEqual([]);
+    expect((await doc()).revoked).toEqual([{ siteCode: 0, cardCode: 28888, cardType: 1 }]);
+    await bridge.cycle(0);
+    expect(fake.swipe(28888, 0, 11, today())).toBe(false);
+    const [ents] = await owner`select count(*)::int as n from entitlements where member_id = ${id}`;
+    expect(ents?.n).toBe(1);
+    await unblockCards(app, tenantId, id, 'member');
+    expect((await doc()).revoked).toBeUndefined();
+    await bridge.cycle(0);
+    expect(fake.swipe(28888, 0, 11, today())).toBe(true);
+
+    // Pause: the club's rules decide; access stops for the window and the end moves by the same days.
+    const day = (n: number) => DateTime.now().setZone(tz).plus({ days: n }).toISODate() as string;
+    const q = (start: string, days: number) =>
+      withTenant(app, tenantId, (tx) => quotePause(tx, tenantId, id, { start, days }));
+    expect(await q(day(0), 7)).toMatchObject({ ok: false }); // not today
+    expect(await q(day(2), 1)).toMatchObject({ ok: false }); // shorter than 3 days
+    expect(await q(day(2), 31)).toMatchObject({ ok: false }); // longer than 30 days
+    expect(await q(day(40), 7)).toMatchObject({ ok: false }); // more than 30 days ahead
+    const p = await startPause(app, tenantId, id, { start: day(2), days: 7, reason: 'Travel' }, 'member');
+    expect(p.ok).toBe(true);
+    if (!p.ok) return;
+    expect(p.newEnd.getTime() - p.oldEnd.getTime()).toBe(7 * 86_400_000);
+    expect((await doc()).segments).toHaveLength(2); // before and after the pause
+    expect(await q(day(20), 3)).toMatchObject({ ok: false }); // one pause at a time
+    // Ended before it starts: cancelled, the added days removed, access as before.
+    expect(await endPause(app, tenantId, id, 'member')).toBe(true);
+    expect((await doc()).segments).toHaveLength(1);
+    const [ext] = await owner`select count(*)::int as n from entitlements where member_id = ${id} and source = 'pause'`;
+    expect(ext?.n).toBe(0);
+
+    // New phone: a code goes to the new number; only the right code changes it, and the old number is told.
+    const texts: { mobile: string; message: string }[] = [];
+    const smsFetch = (async (_u: string, i: RequestInit) => {
+      const b = JSON.parse(String(i.body));
+      texts.push({ mobile: b.mobile, message: b.message });
+      return new Response(JSON.stringify({ status_code: '1000', status_desc: 'Success', message_id: texts.length }));
+    }) as typeof fetch;
+    const sms = new SourceCodeSms('key', 'NAVAC', smsFetch);
+    expect(await requestPhoneChange(app, tenantId, id, '0700000888', sms)).toBe('same');
+    const r = await requestPhoneChange(app, tenantId, id, '0711 000 888', sms);
+    if (r === 'sent') {
+      const code = /(\d{6})/.exec(texts.at(-1)?.message ?? '')?.[1] as string;
+      expect(texts.at(-1)?.mobile).toBe('254711000888');
+      expect(await confirmPhoneChange(app, tenantId, id, '0711000888', code === '000000' ? '111111' : '000000')).toBe(
+        false,
+      );
+      expect(await confirmPhoneChange(app, tenantId, id, '0711000888', code)).toBe(true);
+      const [now] = await owner`select phone from members where id = ${id}`;
+      expect(now?.phone).toBe('0711000888');
+      const [warn] =
+        await owner`select phone from sms_messages where member_id = ${id} and dedupe_key like 'phone-changed:%'`;
+      expect(warn?.phone).toBe('0700000888');
+    } else expect(r).toBe('failed'); // the club cannot send SMS here: nothing changes
   });
 });
 

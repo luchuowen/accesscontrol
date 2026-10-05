@@ -46,6 +46,25 @@ describe('converge', () => {
     expect(fake.swipe(21001, 0, 11, '2026-11-01T00:00:01')).toBe(false); // expired, offline-safe
   });
 
+  it('a lost card is switched off while its replacement opens the door', async () => {
+    const seg = [{ from: '2026-10-01T00:00:00', until: '2026-10-31T23:59:59', zones: ['gym'] }];
+    await converge(ax, { ...base, segments: seg }, zones, now('2026-10-01T08:00'));
+    expect(fake.swipe(21001, 0, 11, '2026-10-02T08:00:00')).toBe(true);
+    // Reception links card 31001; the old card 21001 is revoked but still sits on the AxTraxNG user.
+    const replaced: AccessState = {
+      ...base,
+      version: 2,
+      credentials: [{ siteCode: 0, cardCode: 31001, cardType: 1 }],
+      revoked: [{ siteCode: 0, cardCode: 21001, cardType: 1 }],
+      segments: seg,
+    };
+    const r = await converge(ax, replaced, zones, now('2026-10-02T09:00'));
+    expect(r.changes).toContain('card 21001 revoked');
+    expect(fake.swipe(21001, 0, 11, '2026-10-02T09:05:00')).toBe(false);
+    expect(fake.swipe(31001, 0, 11, '2026-10-02T09:05:00')).toBe(true);
+    expect((await converge(ax, replaced, zones, now('2026-10-02T09:10'))).changes).toEqual([]);
+  });
+
   it('is idempotent: second apply changes nothing', async () => {
     const paid = {
       ...base,

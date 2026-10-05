@@ -137,9 +137,19 @@ export async function converge(ax: AxtraxClient, s: AccessState, map: ZoneMap, n
       changes.push(`card ${c.cardCode} ${status === 1 ? 'active' : 'inactive'}`);
     }
   }
+  // Cards reported lost or replaced are switched off on this member, whatever the member's state.
+  const isRevoked = (card: CardInfoDT) =>
+    (s.revoked ?? []).some((c) => c.cardCode === card.iCardCode && c.siteCode === card.iSiteCode);
   // Credentials enrolled on site (biometrics, extra tags) follow the member's state too.
   const after = await ax.getUser(found.ID);
   for (const card of (after.UserCards ?? ([] as CardInfoDT[])).filter((x) => x.ID > 0 && x.iCardCode > 0)) {
+    if (isRevoked(card)) {
+      if (card.wStatus !== 2) {
+        await ax.updateCard({ ...card, wStatus: 2 });
+        changes.push(`card ${card.iCardCode} revoked`);
+      }
+      continue;
+    }
     if (
       card.wStatus !== status &&
       !s.credentials.some((c) => c.cardCode === card.iCardCode && c.siteCode === card.iSiteCode)

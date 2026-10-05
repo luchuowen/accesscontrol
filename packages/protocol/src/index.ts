@@ -19,6 +19,9 @@ export const AccessState = z.object({
   mobile: z.string().optional(),
   version: z.number().int().nonnegative(),
   credentials: z.array(Credential).max(16),
+  /** Cards reported lost or replaced: always switched off on this member, whatever the member's state. Optional so
+   * bridges older than this field keep working (they ignore it). */
+  revoked: z.array(Credential).max(16).optional(),
   segments: z.array(Segment),
 });
 export type AccessState = z.infer<typeof AccessState>;

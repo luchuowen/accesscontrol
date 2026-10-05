@@ -1,5 +1,17 @@
 import { withTenant } from '@lango/db';
-import { CalendarCheck, CheckCircle2, Loader2, Megaphone, MessageCircle, Plus, Receipt, RefreshCw } from 'lucide-react';
+import {
+  CalendarCheck,
+  CheckCircle2,
+  Loader2,
+  Megaphone,
+  MessageCircle,
+  MoreHorizontal,
+  PauseCircle,
+  Plus,
+  Receipt,
+  RefreshCw,
+  ShieldAlert,
+} from 'lucide-react';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { date, daysLeft, kes } from '@/lib/format';
@@ -8,6 +20,7 @@ import { db } from '@/server/db';
 import { LiveRefresh } from '../(console)/_dash/live-refresh';
 import { memberLogout, readMember, setNews } from './actions';
 import { AddWizard, type WizService } from './add-wizard';
+import { CardScreen, DetailsScreen, MoreMenu, PauseScreen } from './more';
 import { MemberReceipt, ReceiptList, VisitList } from './records';
 import { MemberSignIn } from './signin';
 
@@ -39,6 +52,8 @@ export default async function MemberPortal({
     v?: string;
     id?: string;
     renew?: string;
+    n?: string;
+    p?: string;
   }>;
 }) {
   const sp = await searchParams;
@@ -55,11 +70,26 @@ export default async function MemberPortal({
   if (sp.v === 'receipts') return shell(<ReceiptList who={who} />);
   if (sp.v === 'receipt' && sp.id) return shell(<MemberReceipt who={who} id={sp.id} />);
   if (sp.v === 'visits') return shell(<VisitList who={who} />);
+  if (sp.v === 'more') return shell(<MoreMenu who={who} />);
+  if (sp.v === 'card') return shell(<CardScreen who={who} sp={sp} />);
+  if (sp.v === 'pause') return shell(<PauseScreen who={who} sp={sp} />);
+  if (sp.v === 'details') return shell(<DetailsScreen who={who} sp={sp} />);
 
   const d = await withTenant(db(), who.tenantId, async (tx) => {
     const [m] = await tx<
-      { first_name: string; last_name: string | null; member_no: number; sms_news: boolean; phone: string | null }[]
-    >`select first_name, last_name, member_no, sms_news, phone from members where id = ${who.memberId}`;
+      {
+        first_name: string;
+        last_name: string | null;
+        member_no: number;
+        sms_news: boolean;
+        phone: string | null;
+        blocked: boolean;
+      }[]
+    >`select first_name, last_name, member_no, sms_news, phone, cards_blocked_at is not null as blocked
+      from members where id = ${who.memberId}`;
+    const [pause] = await tx<{ starts_at: Date; ends_at: Date }[]>`
+      select starts_at, ends_at from member_pauses where member_id = ${who.memberId} and status = 'on' and ends_at > now()
+      order by starts_at limit 1`;
     // Access per service: the latest end date, and whether it is on now.
     const access = await tx<{ service_id: string | null; name: string; ends: Date; live: boolean }[]>`
       select e.service_id, coalesce(sv.name, initcap(e.zone_key)) as name, max(e.ends_at) as ends,
@@ -108,6 +138,7 @@ export default async function MemberPortal({
       visits: counts?.visits ?? 0,
       receipts: counts?.receipts ?? 0,
       waiting: waiting?.amount_kes ?? null,
+      pause: pause ?? null,
       club: t?.name,
       ch,
       wa: wa?.phone ?? null,
@@ -115,7 +146,8 @@ export default async function MemberPortal({
   });
 
   const live = d.access.filter((a) => a.live);
-  const on = live.length > 0;
+  const pausedNow = d.pause !== null && d.pause.starts_at <= new Date();
+  const on = live.length > 0 && !pausedNow;
   const until = on ? new Date(Math.max(...live.map((a) => a.ends.getTime()))) : (d.access[0]?.ends ?? null);
   const left = on ? Math.max(0, daysLeft(until) ?? 0) : 0;
   const longDate = (x: Date | null) =>
@@ -213,7 +245,14 @@ export default async function MemberPortal({
           </div>
         </div>
         <div className="px-5 pb-[18px] pt-1">
-          {d.waiting !== null ? (
+          {pausedNow && d.pause ? (
+            <div className="py-3">
+              <div className="flex items-center gap-2 text-[24px] font-bold">
+                <PauseCircle size={24} /> Paused
+              </div>
+              <div className="mt-1 text-[13px] opacity-85">Back on {date(d.pause.ends_at)}. Your days are kept.</div>
+            </div>
+          ) : d.waiting !== null ? (
             <div className="py-3" role="status" aria-live="polite">
               <div className="flex items-center gap-2 text-[20px] font-bold">
                 <Loader2 size={20} className="animate-spin" /> Processing payment…
@@ -255,11 +294,49 @@ export default async function MemberPortal({
           </div>
           <div>
             <div className={`${cap} opacity-70`}>Status</div>
-            <div className="text-[14px] font-semibold">{on ? 'Active' : d.access.length ? 'Ended' : 'New'}</div>
+            <div className="text-[14px] font-semibold">
+              {pausedNow ? 'Paused' : on ? 'Active' : d.access.length ? 'Ended' : 'New'}
+            </div>
           </div>
         </div>
       </section>
 
+      {d.m?.blocked && (
+        <Link
+          href="/m?v=card"
+          className="mt-4 flex items-start gap-2.5 rounded-xl bg-rose-50 p-3 text-[13px] text-rose-800 ring-1 ring-rose-200"
+        >
+          <ShieldAlert size={17} className="mt-0.5 shrink-0" />
+          <span>
+            <b className="font-semibold">Your card is blocked.</b> Collect a new card at reception. Found it? Tap here.
+          </span>
+        </Link>
+      )}
+      {d.pause && (
+        <Link
+          href="/m?v=pause"
+          className="mt-4 flex items-start gap-2.5 rounded-xl bg-sky-50 p-3 text-[13px] text-sky-900 ring-1 ring-sky-200"
+        >
+          <PauseCircle size={17} className="mt-0.5 shrink-0" />
+          <span>
+            <b className="font-semibold">
+              {d.pause.starts_at <= new Date() ? 'Paused' : 'Pause booked'} {date(d.pause.starts_at)} to{' '}
+              {date(new Date(d.pause.ends_at.getTime() - 1))}.
+            </b>{' '}
+            Tap to change it.
+          </span>
+        </Link>
+      )}
+      {sp.n === 'card-on' && (
+        <div className="mt-4 flex items-center gap-2 rounded-xl bg-emerald-50 p-3 text-[13px] text-emerald-800 ring-1 ring-emerald-200">
+          <CheckCircle2 size={16} className="shrink-0" /> Your card is back on.
+        </div>
+      )}
+      {sp.n === 'pause-ended' && (
+        <div className="mt-4 flex items-center gap-2 rounded-xl bg-emerald-50 p-3 text-[13px] text-emerald-800 ring-1 ring-emerald-200">
+          <CheckCircle2 size={16} className="shrink-0" /> Your pause has ended. Welcome back.
+        </div>
+      )}
       {sp.pay === 'unavailable' && (
         <div className="mt-4 rounded-xl bg-amber-50 p-3 text-[13px] text-amber-800 ring-1 ring-amber-200">
           Online payment isn&apos;t switched on for this club yet. Pay at reception.
@@ -317,23 +394,21 @@ export default async function MemberPortal({
               {d.receipts ? `${d.receipts} ${d.receipts === 1 ? 'payment' : 'payments'} · open or share` : 'None yet'}
             </span>
           </Link>
-          <Link
-            href="/m?v=visits"
-            className={
-              lastPlan
-                ? 'col-span-2 flex items-center gap-3 rounded-2xl border border-[#E4E8EF] bg-white p-3.5 transition hover:bg-[#F7F9FC]'
-                : tile
-            }
-          >
+          <Link href="/m?v=visits" className={tile}>
             <span className={tileIcon}>
               <CalendarCheck size={17} />
             </span>
-            <span className="min-w-0 flex-1">
-              <b className="block text-[14px] font-semibold">My visits</b>
-              <span className="block text-[12px] leading-snug text-ink-500">
-                {d.visits} {d.visits === 1 ? 'visit' : 'visits'} this month
-              </span>
+            <b className="text-[14px] font-semibold">My visits</b>
+            <span className="text-[12px] leading-snug text-ink-500">
+              {d.visits} {d.visits === 1 ? 'visit' : 'visits'} this month
             </span>
+          </Link>
+          <Link href="/m?v=more" className={lastPlan ? tile : `${tile} col-span-2`}>
+            <span className={tileIcon}>
+              <MoreHorizontal size={17} />
+            </span>
+            <b className="text-[14px] font-semibold">More</b>
+            <span className="text-[12px] leading-snug text-ink-500">Lost card, pause, my details</span>
           </Link>
         </div>
       )}

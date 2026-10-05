@@ -1,11 +1,12 @@
 import { can, type Perm } from '@lango/server';
-import { Bell, Building2, CreditCard, History, ReceiptText, UsersRound, Wallet } from 'lucide-react';
+import { Bell, Building2, CreditCard, History, ReceiptText, Smartphone, UsersRound, Wallet } from 'lucide-react';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { requireSession } from '@/lib/session';
 import { type AuditParams, AuditTab } from './audit-tab';
 import { BillingTab } from './billing-tab';
 import { ClubTab } from './club-tab';
+import { MemberAppTab } from './member-app-tab';
 import { NotifyTab } from './notify-tab';
 import { PaymentsTab } from './payments-tab';
 import { SmsTab } from './sms-tab';
@@ -21,6 +22,7 @@ const TABS = [
   { key: 'billing', label: 'Billing', icon: ReceiptText, any: ['billing.manage'] as Perm[] },
   { key: 'sms', label: 'SMS credit', icon: Wallet, any: ['sms.buy', 'messages.manage'] as Perm[] },
   { key: 'notifications', label: 'Notifications', icon: Bell, any: ['messages.manage'] as Perm[] },
+  { key: 'member-app', label: 'Member app', icon: Smartphone, any: ['members.edit'] as Perm[] },
   { key: 'team', label: 'Users & roles', icon: UsersRound, any: ['team.manage'] as Perm[] },
   { key: 'audit', label: 'System audit', icon: History, any: ['team.manage'] as Perm[] },
 ] as const;
@@ -31,9 +33,9 @@ const OLD: Record<string, string> = { messages: 'notifications' };
 export default async function Settings({ searchParams }: { searchParams: Promise<Params> }) {
   const s = await requireSession();
   if (
-    !(['settings.payments', 'sms.buy', 'messages.manage', 'team.manage', 'billing.manage'] as const).some((p) =>
-      can(s, p),
-    )
+    !(
+      ['settings.payments', 'sms.buy', 'messages.manage', 'team.manage', 'billing.manage', 'members.edit'] as const
+    ).some((p) => can(s, p))
   )
     redirect('/?denied=1');
   const tabs = TABS.filter((t) => t.key === 'club' || t.any.some((p) => can(s, p)));
@@ -69,6 +71,8 @@ export default async function Settings({ searchParams }: { searchParams: Promise
           <SmsTab s={s} sms={sp.sms} />
         ) : tab?.key === 'notifications' ? (
           <NotifyTab s={s} m={sp.m} />
+        ) : tab?.key === 'member-app' ? (
+          <MemberAppTab s={s} m={sp.m} />
         ) : tab?.key === 'billing' ? (
           <BillingTab s={s} b={sp.b} />
         ) : tab?.key === 'audit' ? (

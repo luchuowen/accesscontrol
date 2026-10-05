@@ -9,6 +9,7 @@ import {
   CreditCard,
   Gift,
   MessageSquare,
+  PauseCircle,
   ShieldAlert,
   Smartphone,
 } from 'lucide-react';
@@ -22,7 +23,14 @@ import { date, dateTime, daysLeft, kes } from '@/lib/format';
 import { requirePerm } from '@/lib/session';
 import { settlePending } from '@/lib/settle';
 import { db } from '@/server/db';
-import { grantOverride, linkCard, recordDeskPayment, requestMpesa } from '../../actions';
+import {
+  grantOverride,
+  linkCard,
+  recordDeskPayment,
+  requestMpesa,
+  staffEndPause,
+  staffUnblockCards,
+} from '../../actions';
 
 const nbDay = (d: Date) => d.toLocaleDateString('en-GB', { timeZone: 'Africa/Nairobi' });
 
@@ -387,6 +395,43 @@ export default async function MemberPage({
         <ArrowLeft size={15} /> Members
       </Link>
       <Notice code={n} />
+      {d.m.cards_blocked_at && (
+        <div className="mb-4 flex flex-wrap items-center gap-3 rounded-2xl bg-rose-50 p-4 text-[13.5px] text-rose-900 ring-1 ring-rose-200">
+          <ShieldAlert size={18} className="shrink-0" />
+          <span className="min-w-0 flex-1">
+            <b className="font-semibold">Card blocked as lost</b> on {dateTime(d.m.cards_blocked_at)}. Door access is
+            held until you link a new card below, which lifts the block.
+          </span>
+          {can(s, 'members.edit') && (
+            <form action={staffUnblockCards}>
+              <input type="hidden" name="memberId" value={d.m.id} />
+              <SubmitButton pendingText="Switching on…" className="btn-ghost h-9 bg-white">
+                Card found, switch it back on
+              </SubmitButton>
+            </form>
+          )}
+        </div>
+      )}
+      {d.pause && (
+        <div className="mb-4 flex flex-wrap items-center gap-3 rounded-2xl bg-sky-50 p-4 text-[13.5px] text-sky-900 ring-1 ring-sky-200">
+          <PauseCircle size={18} className="shrink-0" />
+          <span className="min-w-0 flex-1">
+            <b className="font-semibold">
+              {d.pause.starts_at <= new Date() ? 'Paused' : 'Pause booked'} {date(d.pause.starts_at)} to{' '}
+              {date(new Date(d.pause.ends_at.getTime() - 1))}
+            </b>{' '}
+            · {d.pause.reason} · the end date moved later by the same days.
+          </span>
+          {can(s, 'members.edit') && (
+            <form action={staffEndPause}>
+              <input type="hidden" name="memberId" value={d.m.id} />
+              <SubmitButton pendingText="Ending…" className="btn-ghost h-9 bg-white">
+                {d.pause.starts_at <= new Date() ? 'End pause today' : 'Cancel pause'}
+              </SubmitButton>
+            </form>
+          )}
+        </div>
+      )}
 
       <section className="overflow-hidden rounded-2xl border border-[#E4E8EF] bg-white">
         <div className="flex flex-wrap items-center gap-5 border-b border-[#E4E8EF] px-6 py-5">
@@ -398,6 +443,7 @@ export default async function MemberPage({
             <div className="mt-0.5 text-[13px] text-ink-500">
               <span className="font-mono">#{d.m.member_no}</span> · {d.m.phone ?? 'No phone'} · joined{' '}
               {date(d.m.created_at)}
+              {d.m.emergency_name ? ` · emergency: ${d.m.emergency_name} ${d.m.emergency_phone ?? ''}` : ''}
             </div>
             <div className="mt-2 flex flex-wrap items-center gap-2">
               {current.length ? (

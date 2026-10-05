@@ -171,13 +171,20 @@ export async function member(tenantId: string, id: string) {
         email: string | null;
         status: string;
         created_at: Date;
+        cards_blocked_at: Date | null;
+        emergency_name: string | null;
+        emergency_phone: string | null;
       }[]
     >`
-      select id, member_no, first_name, last_name, phone, email, status, created_at from members where id = ${id}`;
+      select id, member_no, first_name, last_name, phone, email, status, created_at, cards_blocked_at, emergency_name,
+             emergency_phone from members where id = ${id}`;
     if (!m) return null;
     const creds = await tx<
       { id: string; kind: string; site_code: number; card_code: bigint }[]
-    >`select id, kind, site_code, card_code from credentials where member_id = ${id}`;
+    >`select id, kind, site_code, card_code from credentials where member_id = ${id} and revoked_at is null`;
+    const [pause] = await tx<{ starts_at: Date; ends_at: Date; reason: string; created_by: string }[]>`
+      select starts_at, ends_at, reason, created_by from member_pauses
+      where member_id = ${id} and status = 'on' and ends_at > now() order by starts_at limit 1`;
     const ents = await tx<{ zone_key: string; starts_at: Date; ends_at: Date; source: string }[]>`
       select zone_key, starts_at, ends_at, source from entitlements where member_id = ${id} order by ends_at desc limit 30`;
     const pays = await tx<
@@ -202,7 +209,7 @@ export async function member(tenantId: string, id: string) {
       { version: number; applied_version: number | null; applied_at: Date | null; error: string | null }[]
     >`
       select version, applied_version, applied_at, error from access_states where member_id = ${id}`;
-    return { m, creds, ents, pays, visits, sync };
+    return { m, creds, ents, pays, visits, sync, pause: pause ?? null };
   });
 }
 

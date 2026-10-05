@@ -41,7 +41,7 @@ export type OtpRequest = 'sent' | 'unknown' | 'wait' | 'fallback';
 
 const sentTimes = async (tx: Tx, memberId: string) =>
   (
-    await tx<{ t: Date }[]>`select created_at as t from member_otps where member_id = ${memberId}
+    await tx<{ t: Date }[]>`select created_at as t from member_otps where purpose = 'signin' and member_id = ${memberId}
       and created_at > now() - interval '24 hours' order by created_at desc`
   ).map((r) => r.t.getTime());
 
@@ -56,7 +56,9 @@ export async function memberOtpStatus(
   const [m] = await membersByPhone(sql, phone);
   if (!m) return { expiresAt: Date.now() + TTL_MIN * 60_000, resendAt: Date.now() + 60_000, capped: false };
   return withTenant(sql, m.tenantId, async (tx) => {
-    const [live] = await tx<{ expires_at: Date }[]>`select expires_at from member_otps where member_id = ${m.memberId}
+    const [live] = await tx<
+      { expires_at: Date }[]
+    >`select expires_at from member_otps where purpose = 'signin' and member_id = ${m.memberId}
       and used_at is null and expires_at > now() order by created_at desc limit 1`;
     const next = nextCodeAt(await sentTimes(tx, m.memberId));
     return { expiresAt: live?.expires_at.getTime() ?? Date.now(), resendAt: next.at, capped: next.capped };
@@ -107,7 +109,7 @@ export async function verifyOtp(sql: Sql, phone: string, code: string): Promise<
     const right = await withTenant(sql, m.tenantId, async (tx) => {
       const [o] = await tx<{ id: string; code_hash: string }[]>`
         update member_otps set attempts = attempts + 1
-        where id = (select id from member_otps where member_id = ${m.memberId} and used_at is null
+        where id = (select id from member_otps where purpose = 'signin' and member_id = ${m.memberId} and used_at is null
                     and expires_at > now() and attempts < 5 order by created_at desc limit 1)
         returning id, code_hash`;
       if (!o) return false;
