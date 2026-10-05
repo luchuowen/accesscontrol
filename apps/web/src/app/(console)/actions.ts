@@ -162,7 +162,7 @@ export async function grantOverride(form: FormData) {
   const reason = String(form.get('reason') ?? '')
     .trim()
     .slice(0, 300);
-  if (reason.length < 5) back(memberId, 'reason');
+  if (reason.length < 2) back(memberId, 'reason');
   const ok = await withTenant(db(), s.tid, async (tx) => {
     const [z] = await tx`select 1 from zones where key = ${zone} limit 1`;
     const [m] = await tx`select 1 from members where id = ${memberId}`;

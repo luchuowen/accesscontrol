@@ -363,7 +363,7 @@ export default async function MemberPage({
             <input
               name="reason"
               required
-              minLength={5}
+              minLength={2}
               placeholder="Reason, e.g. gym closed for repairs"
               className="input"
             />
