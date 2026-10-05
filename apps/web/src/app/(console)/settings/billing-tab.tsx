@@ -1,6 +1,14 @@
 import { withTenant } from '@lango/db';
-import { billingState, CYCLE_LABEL, CYCLE_MONTHS, can, clubPlan, clubSeats } from '@lango/server';
-import { CalendarClock, CalendarRange, ReceiptText, RefreshCw, Users, Wallet } from 'lucide-react';
+import {
+  billingState,
+  CYCLE_LABEL,
+  CYCLE_MONTHS,
+  can,
+  clubPlan,
+  clubSeats,
+  reconcileSubscriptions,
+} from '@lango/server';
+import { CalendarClock, CalendarRange, Loader2, ReceiptText, RefreshCw, Smartphone, Users, Wallet } from 'lucide-react';
 import { DateTime } from 'luxon';
 import Link from 'next/link';
 import { SubmitButton } from '@/components/submit-button';
@@ -28,8 +36,27 @@ const NOTES: Record<string, Note> = {
 const fmt = (d: string | Date | null) =>
   d ? (typeof d === 'string' ? DateTime.fromISO(d) : DateTime.fromJSDate(d)).toFormat('d LLL yyyy') : '—';
 
+/**
+ * While a club is waiting on an M-Pesa prompt, each page refresh also asks the gateway (at most every 3 s), so the
+ * payment shows as paid within seconds of the PIN instead of waiting for the webhook or the 60 s poller.
+ */
+let lastCheck = 0;
+async function settleNow(tid: string) {
+  if (Date.now() - lastCheck < 3000) return;
+  const [p] = await withTenant(
+    db(),
+    tid,
+    (tx) =>
+      tx`select 1 from subscription_invoices where status = 'pending' and created_at > now() - interval '5 minutes' limit 1`,
+  );
+  if (!p) return;
+  lastCheck = Date.now();
+  await reconcileSubscriptions(db(), () => {}).catch(() => 0);
+}
+
 /** Settings › Billing: the club's Lango plan, when it renews, paying NAVAC by M-Pesa, and past payments. */
 export async function BillingTab({ s, b }: { s: Session; b?: string }) {
+  await settleNow(s.tid);
   const [plan, seats, invoices, [me]] = await Promise.all([
     clubPlan(db(), s.tid),
     clubSeats(db(), s.tid),
@@ -54,7 +81,8 @@ export async function BillingTab({ s, b }: { s: Session; b?: string }) {
   ]);
   const state = billingState(plan);
   // While an M-Pesa prompt is out, re-read every few seconds so the paid state shows the moment it lands.
-  const waiting = invoices.some((i) => i.status === 'pending' && Date.now() - i.created_at.getTime() < 5 * 60_000);
+  const pendingInv = invoices.find((i) => i.status === 'pending' && Date.now() - i.created_at.getTime() < 5 * 60_000);
+  const waiting = !!pendingInv;
   const today = DateTime.now().setZone('Africa/Nairobi').startOf('day');
   const left = plan?.paid_until ? Math.round(DateTime.fromISO(plan.paid_until).diff(today, 'days').days) : null;
   const months = plan ? CYCLE_MONTHS[plan.cycle] : 1;
@@ -119,7 +147,10 @@ export async function BillingTab({ s, b }: { s: Session; b?: string }) {
                   : 'No payment yet'}
             </div>
           </div>
-          {payer && plan?.fee_kes != null && (
+          {payer && plan?.fee_kes != null && pendingInv?.kind !== 'setup' && pendingInv && (
+            <Processing amount={pendingInv.amount_kes} dark />
+          )}
+          {payer && plan?.fee_kes != null && !pendingInv && (
             <form
               action={payPlan}
               className="relative grid w-full gap-2.5 rounded-2xl bg-white/[0.06] p-4 ring-1 ring-white/10 lg:w-[390px]"
@@ -154,7 +185,12 @@ export async function BillingTab({ s, b }: { s: Session; b?: string }) {
         </div>
       </div>
 
-      {payer && plan?.setup_fee_kes != null && !plan.setup_paid && (
+      {payer && plan?.setup_fee_kes != null && !plan.setup_paid && pendingInv?.kind === 'setup' && (
+        <div className="mt-4">
+          <Processing amount={pendingInv.amount_kes} />
+        </div>
+      )}
+      {payer && plan?.setup_fee_kes != null && !plan.setup_paid && pendingInv?.kind !== 'setup' && (
         <form
           action={payPlan}
           className="mt-4 flex flex-wrap items-center gap-3 rounded-2xl border border-amber-200 bg-amber-50/60 p-4"
@@ -225,5 +261,31 @@ export async function BillingTab({ s, b }: { s: Session; b?: string }) {
         Lango never charges you automatically. You’ll see a reminder here and on the bell a week before renewal.
       </p>
     </>
+  );
+}
+
+/** Shown in place of the pay form from the moment the prompt goes out until M-Pesa confirms it. */
+function Processing({ amount, dark }: { amount: number; dark?: boolean }) {
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className={`relative flex w-full items-start gap-3.5 rounded-2xl p-4 ring-1 lg:w-[390px] ${dark ? 'bg-white/[0.06] text-white ring-white/10' : 'bg-white text-ink-900 ring-ink-100'}`}
+    >
+      <span
+        className={`grid h-11 w-11 shrink-0 place-items-center rounded-xl ${dark ? 'bg-white/10' : 'bg-emerald-50 text-emerald-700'}`}
+      >
+        <Smartphone size={20} />
+      </span>
+      <div className="min-w-0">
+        <div className="flex items-center gap-2 text-[14px] font-semibold">
+          <Loader2 size={15} className="animate-spin" /> Processing your payment…
+        </div>
+        <p className={`mt-1 text-[12.5px] leading-relaxed ${dark ? 'text-white/70' : 'text-ink-500'}`}>
+          Enter your M-Pesa PIN on your phone to pay {kes(amount)}. This page updates by itself the moment the payment
+          is confirmed; there is no need to pay again.
+        </p>
+      </div>
+    </div>
   );
 }
