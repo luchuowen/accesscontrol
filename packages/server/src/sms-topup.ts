@@ -1,6 +1,7 @@
 import type { Sql } from '@lango/db';
 import { withTenant } from '@lango/db';
 import { decrypt } from './crypto.js';
+import { emailClubReceipt } from './receipts.js';
 import { clubSms, msisdn, platformSmsConfig } from './sms.js';
 import { initiatedTransactionId, normalStatus, pick, TaifaPay, transactionRecord } from './taifapay.js';
 
@@ -102,6 +103,7 @@ export async function reconcileTopups(
   const pending = await sql<{ id: string; tenant_id: string; provider_ref: string; amount_kes: number }[]>`
     select * from app_pending_topups()`;
   let credited = 0;
+  const mails: Parameters<typeof emailClubReceipt>[1][] = [];
   for (const p of pending) {
     try {
       const raw = await taifa.transaction(p.provider_ref);
@@ -133,12 +135,22 @@ export async function reconcileTopups(
                  values (${p.tenant_id}, ${t.phone}, ${`${club?.name}: KES ${t.amount_kes.toLocaleString('en-KE')} received (${t.invoice_no}). ${t.units.toLocaleString('en-KE')} SMS added; balance ${Number(bal?.units ?? 0).toLocaleString('en-KE')} SMS.`}, 'topup')`;
         await tx`insert into audit_log (tenant_id, actor, action, entity, data)
                  values (${p.tenant_id}, 'taifapay', 'sms.topup_completed', ${p.id}, ${tx.json({ units: t.units, amountKes: t.amount_kes } as never)})`;
+        mails.push({
+          tenantId: p.tenant_id,
+          docPath: `/settings/sms/${p.id}`,
+          invoiceNo: t.invoice_no,
+          amountKes: t.amount_kes,
+          what: 'SMS credit',
+          detail: `**${t.units.toLocaleString('en-KE')} SMS** were added; your balance is now ${Number(bal?.units ?? 0).toLocaleString('en-KE')} SMS.`,
+          mpesa: receipt,
+        });
         return 1;
       });
     } catch (e) {
       log(`topup ${p.id}: ${(e as Error).message}`);
     }
   }
+  for (const m of mails) await emailClubReceipt(sql, m);
   // Prompts nobody paid within a day are closed.
   for (const t of await sql<{ id: string }[]>`select id from tenants`)
     await withTenant(

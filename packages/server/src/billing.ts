@@ -1,6 +1,7 @@
 import type { Sql } from '@lango/db';
 import { withTenant } from '@lango/db';
 import { DateTime } from 'luxon';
+import { emailClubReceipt } from './receipts.js';
 import { msisdn } from './sms.js';
 import { platformTaifa } from './sms-topup.js';
 import { initiatedTransactionId, normalStatus, pick, transactionRecord } from './taifapay.js';
@@ -150,6 +151,7 @@ export async function reconcileSubscriptions(
   const pending = await sql<{ id: string; tenant_id: string; provider_ref: string; amount_kes: number }[]>`
     select * from app_pending_sub_payments()`;
   let paid = 0;
+  const mails: Parameters<typeof emailClubReceipt>[1][] = [];
   for (const p of pending) {
     try {
       const raw = await taifa.transaction(p.provider_ref);
@@ -186,11 +188,23 @@ export async function reconcileSubscriptions(
         await tx`insert into audit_log (tenant_id, actor, action, entity, data)
                  values (${p.tenant_id}, 'taifapay', ${inv.kind === 'setup' ? 'billing.setup_paid' : 'billing.paid'}, ${p.id},
                          ${tx.json({ amount: inv.amount_kes, until } as never)})`;
+        mails.push({
+          tenantId: p.tenant_id,
+          docPath: `/settings/billing/${p.id}`,
+          invoiceNo: inv.invoice_no,
+          amountKes: inv.amount_kes,
+          what: inv.kind === 'setup' ? 'the Lango setup fee' : 'your Lango subscription',
+          detail:
+            inv.kind === 'setup' ? undefined : until ? `Your subscription is now paid until **${until}**.` : undefined,
+          mpesa: receipt,
+        });
         return 1;
       });
     } catch (e) {
       log(`subscription ${p.id}: ${(e as Error).message}`);
     }
   }
+  // Email receipts go out after the payment is committed, so a mail problem never undoes a payment.
+  for (const m of mails) await emailClubReceipt(sql, m);
   return paid;
 }

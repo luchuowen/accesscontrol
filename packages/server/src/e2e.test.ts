@@ -708,8 +708,13 @@ describe('walking skeleton: pay → door', () => {
     expect(inv?.invoice_no).toMatch(/^LSUB-\d{5}$/);
     expect(await reconcileSubscriptions(app, () => {}, client)).toBe(0);
     status = 'COMPLETED';
+    await owner`update club_plans set billing_email = 'accounts@demo.club' where tenant_id = ${tenantId}`;
     expect(await reconcileSubscriptions(app, () => {}, client)).toBe(1);
     expect(await reconcileSubscriptions(app, () => {}, client)).toBe(0);
+    // The receipt also goes by email to the club's billing address, once (skipped here: no email account in tests).
+    expect(
+      await owner`select to_email, kind from email_messages where idempotency_key = ${`receipt-${inv?.invoice_no}`}`,
+    ).toEqual([{ to_email: 'accounts@demo.club', kind: 'receipt' }]);
     const plan = await clubPlan(app, tenantId);
     expect(plan?.paid_until).toBe(to);
     expect(billingState(plan)).toBe('active');
