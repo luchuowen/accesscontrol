@@ -1,10 +1,12 @@
 import { onboardingChecklist } from '@lango/server';
-import { ChevronRight, Plus } from 'lucide-react';
+import { ChevronRight } from 'lucide-react';
 import Link from 'next/link';
 import { PageHeader } from '@/components/ui';
 import { ago, kes } from '@/lib/format';
 import { requirePartner } from '@/lib/session';
 import { db } from '@/server/db';
+import { AddClubButton } from '../add-club';
+import { addClubProps } from '../add-club-data';
 
 interface Row {
   id: string;
@@ -36,9 +38,9 @@ const MSG: Record<string, [ok: boolean, text: string]> = {
   denied: [false, 'You can’t do that for this club.'],
 };
 
-export default async function PartnerClubs({ searchParams }: { searchParams: Promise<{ m?: string }> }) {
+export default async function PartnerClubs({ searchParams }: { searchParams: Promise<{ m?: string; add?: string }> }) {
   const s = await requirePartner();
-  const { m } = await searchParams;
+  const { m, add } = await searchParams;
   const msg = m ? MSG[m] : undefined;
   const rows = await db()<Row[]>`
     select c.id, c.slug, c.name, c.partner, st.members, st.active_members, st.via_taifapay, st.cash, st.unmatched,
@@ -67,11 +69,7 @@ export default async function PartnerClubs({ searchParams }: { searchParams: Pro
         repeats
         subtitle="Every club, how far its setup has come, how members pay and whether its door PC is online."
         actions={
-          s.kind === 'partner_admin' && (
-            <Link href="/partner/new" className="btn-primary">
-              <Plus size={16} /> Add a club
-            </Link>
-          )
+          s.kind === 'partner_admin' && <AddClubButton {...(await addClubProps(s.uid))} autoOpen={add === '1'} />
         }
       />
       {msg && (

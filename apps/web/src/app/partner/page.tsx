@@ -5,7 +5,6 @@ import {
   Lock,
   type LucideIcon,
   Monitor,
-  Plus,
   ReceiptText,
   UserRoundX,
   Wallet,
@@ -15,6 +14,8 @@ import Link from 'next/link';
 import { ago, kes } from '@/lib/format';
 import { type HomeClub, partnerHome } from '@/lib/partner-home';
 import { requirePartner } from '@/lib/session';
+import { AddClubButton } from './add-club';
+import { addClubProps } from './add-club-data';
 
 /**
  * Partner Home, design A "Dashboard" (approved 3 Oct 2026): the club owner's dashboard rebuilt for partners. A
@@ -193,14 +194,7 @@ export default async function PartnerHome({ searchParams }: { searchParams: Prom
           <p className="mt-1 text-[13px] text-[#A3B3C9]">{now.toFormat('cccc, d LLLL yyyy')}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {admin && (
-            <Link
-              href="/partner/new"
-              className="inline-flex items-center gap-1.5 rounded-xl bg-white px-3.5 py-2 text-[13px] font-semibold text-ink-950 hover:bg-slate-100"
-            >
-              <Plus size={15} /> Add a club
-            </Link>
-          )}
+          {admin && <AddClubButton variant="light" {...(await addClubProps(s.uid))} />}
           {d.money && (
             <nav
               className="flex gap-0.5 rounded-[10px] border border-white/20 bg-white/[0.08] p-[3px] text-xs"
