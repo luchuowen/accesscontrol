@@ -27,21 +27,21 @@ export function PlanPicker({ plans, initial }: { plans: PickPlan[]; initial: str
           type="button"
           onClick={() => setSel(p.id)}
           aria-pressed={p.id === chosen.id}
-          className={`flex items-center gap-3 rounded-2xl border px-3.5 py-3 text-left transition ${p.id === chosen.id ? 'border-emerald-400 bg-emerald-400/[0.08]' : 'border-white/[0.08] bg-white/[0.05] hover:bg-white/[0.08]'}`}
+          className={`flex items-center gap-3 rounded-2xl border px-3.5 py-3 text-left transition ${p.id === chosen.id ? 'border-emerald-500 bg-emerald-50 ring-1 ring-emerald-500' : 'border-[#E4E8EF] bg-white hover:bg-[#F7F9FC]'}`}
         >
-          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-[11px] bg-emerald-400/[0.18] text-[13px] font-bold text-emerald-300">
+          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-[11px] bg-emerald-100 text-[13px] font-bold text-emerald-700">
             {p.mark}
           </span>
           <span className="min-w-0 flex-1">
-            <b className="block truncate text-[14px] font-semibold text-white">{p.title}</b>
-            <span className="block text-[12px] text-[#8EA0B6]">{p.note}</span>
+            <b className="block truncate text-[14px] font-semibold text-ink-900">{p.title}</b>
+            <span className="block text-[12px] text-ink-500">{p.note}</span>
           </span>
-          <span className="shrink-0 text-[14px] font-bold tabular-nums text-white">{kes(p.price)}</span>
+          <span className="shrink-0 text-[14px] font-bold tabular-nums text-ink-900">{kes(p.price)}</span>
         </button>
       ))}
       <SubmitButton
         pendingText="Sending to your phone…"
-        className="mt-1.5 h-[52px] w-full rounded-2xl bg-emerald-400 text-[15px] font-bold text-[#062B20] transition hover:bg-emerald-300"
+        className="mt-1.5 h-[52px] w-full rounded-2xl bg-emerald-600 text-[15px] font-bold text-white shadow-[0_12px_24px_-12px_rgba(5,150,105,0.7)] transition hover:bg-emerald-700"
       >
         Pay {kes(chosen.price)} with M-Pesa
       </SubmitButton>

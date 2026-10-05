@@ -8,7 +8,9 @@ import { PageHeader } from '@/components/ui';
 import { WalkIn } from '@/components/walk-in';
 import { membersBoard, nextMemberNo, walkinPrices } from '@/lib/data';
 import { requirePerm } from '@/lib/session';
+import { settlePending } from '@/lib/settle';
 import { db } from '@/server/db';
+import { LiveRefresh } from '../_dash/live-refresh';
 import { DayPasses } from './day-passes';
 import { MemberFilters } from './filters';
 import { ImportMembers } from './import/import-modal';
@@ -26,6 +28,8 @@ export default async function Members({ searchParams }: { searchParams: Promise<
   const sp = await searchParams;
   const day = sp.tab === 'day';
   const page = Math.max(1, Number(sp.page) || 1);
+  // A member paying from their phone shows up here by itself: every 2 s while a prompt is out, else every 15 s.
+  const waiting = await settlePending(s.tid);
   const [board, nextNo, [t], walkins, [bands]] = await Promise.all([
     membersBoard(s.tid, { q: sp.q, f: sp.f, service: sp.service, page }),
     nextMemberNo(s.tid),
@@ -60,6 +64,7 @@ export default async function Members({ searchParams }: { searchParams: Promise<
 
   return (
     <>
+      <LiveRefresh seconds={waiting ? 2 : 15} />
       <PageHeader
         title="Members"
         subtitle="Everyone with a membership, what they pay for and when it ends."

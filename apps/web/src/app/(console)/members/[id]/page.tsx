@@ -20,6 +20,7 @@ import { SubmitButton } from '@/components/submit-button';
 import { member, products } from '@/lib/data';
 import { date, dateTime, daysLeft, kes } from '@/lib/format';
 import { requirePerm } from '@/lib/session';
+import { settlePending } from '@/lib/settle';
 import { db } from '@/server/db';
 import { grantOverride, linkCard, recordDeskPayment, requestMpesa } from '../../actions';
 
@@ -77,6 +78,7 @@ export default async function MemberPage({
   const { id } = await params;
   const sp = await searchParams;
   const n = sp.n;
+  const waiting = await settlePending(s.tid, id);
   const d = await member(s.tid, id);
   if (!d) notFound();
   const plans = (await products(s.tid)).filter((p) => p.on_sale && p.for_members);
@@ -380,7 +382,7 @@ export default async function MemberPage({
 
   return (
     <>
-      {(n === 'prompt-sent' || !synced) && <LiveRefresh seconds={5} />}
+      {(waiting || n === 'prompt-sent' || !synced) && <LiveRefresh seconds={waiting ? 2 : 5} />}
       <Link href="/members" className="mb-5 inline-flex items-center gap-1.5 text-sm text-ink-500 hover:text-ink-900">
         <ArrowLeft size={15} /> Members
       </Link>

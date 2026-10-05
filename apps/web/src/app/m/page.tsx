@@ -1,7 +1,7 @@
 import { withTenant } from '@lango/db';
-import { reconcileTaifaPay } from '@lango/server';
 import { CheckCircle2, Loader2, Megaphone, MessageCircle } from 'lucide-react';
 import { date, daysLeft, kes } from '@/lib/format';
+import { settlePending } from '@/lib/settle';
 import { db } from '@/server/db';
 import { LiveRefresh } from '../(console)/_dash/live-refresh';
 import { memberLogout, readMember, setNews } from './actions';
@@ -9,21 +9,6 @@ import { type PickPlan, PlanPicker } from './plan-picker';
 import { MemberSignIn } from './signin';
 
 export const dynamic = 'force-dynamic';
-
-/** While a member's M-Pesa prompt is out, each refresh asks the gateway (at most every 3 s) so the pass turns in seconds. */
-let lastCheck = 0;
-async function settleNow(tenantId: string, memberId: string) {
-  if (Date.now() - lastCheck < 3000) return;
-  const [p] = await withTenant(
-    db(),
-    tenantId,
-    (tx) => tx`select 1 from payment_intents where member_id = ${memberId} and status = 'pending'
-                and created_at > now() - interval '5 minutes' limit 1`,
-  );
-  if (!p) return;
-  lastCheck = Date.now();
-  await reconcileTaifaPay(db(), () => {}).catch(() => 0);
-}
 
 export default async function MemberPortal({
   searchParams,
@@ -40,7 +25,7 @@ export default async function MemberPortal({
   const sp = await searchParams;
   const who = await readMember();
   if (!who) return <MemberSignIn sp={sp} />;
-  await settleNow(who.tenantId, who.memberId);
+  await settlePending(who.tenantId, who.memberId);
   const d = await withTenant(db(), who.tenantId, async (tx) => {
     const [m] = await tx<
       { first_name: string; last_name: string | null; member_no: number; sms_news: boolean }[]
@@ -129,16 +114,16 @@ export default async function MemberPortal({
       : '';
   const label = 'text-[10.5px] font-semibold uppercase tracking-[0.12em]';
   return (
-    <div className="min-h-screen bg-[linear-gradient(180deg,#0E1A17_0%,#0B1220_55%,#0B0F17_100%)] px-[18px] pb-10 pt-6 text-[#EEF2F6]">
-      {d.waiting !== null && <LiveRefresh seconds={4} />}
+    <div className="min-h-screen bg-[#F4F6FA] px-[18px] pb-10 pt-6 text-ink-900">
+      {d.waiting !== null && <LiveRefresh seconds={2} />}
       <div className="mx-auto max-w-md">
         <header className="mb-4 flex items-center gap-3">
           <div className="min-w-0 flex-1">
             <div className="text-[15px] font-semibold">Hi {d.m?.first_name}</div>
-            <div className="truncate text-[12px] text-[#8EA0B6]">{d.club}</div>
+            <div className="truncate text-[12px] text-ink-500">{d.club}</div>
           </div>
           <form action={memberLogout}>
-            <button type="submit" className="rounded-lg px-2.5 py-1.5 text-[12.5px] text-[#8EA0B6] hover:text-white">
+            <button type="submit" className="rounded-lg px-2.5 py-1.5 text-[12.5px] text-ink-500 hover:text-ink-900">
               Sign out
             </button>
           </form>
@@ -146,7 +131,7 @@ export default async function MemberPortal({
 
         {/* The pass: emerald while access is on, slate once it has ended. */}
         <section
-          className={`overflow-hidden rounded-[22px] ${on ? 'bg-[linear-gradient(150deg,#10B981_0%,#047857_50%,#064E3B_100%)] shadow-[0_26px_50px_-20px_rgba(16,185,129,0.55)]' : 'bg-[linear-gradient(150deg,#475569_0%,#334155_55%,#1F2937_100%)] shadow-[0_26px_50px_-20px_rgba(0,0,0,0.6)]'}`}
+          className={`overflow-hidden rounded-[22px] text-white ${on ? 'bg-[linear-gradient(150deg,#10B981_0%,#047857_50%,#064E3B_100%)] shadow-[0_26px_50px_-20px_rgba(16,185,129,0.55)]' : 'bg-[linear-gradient(150deg,#475569_0%,#334155_55%,#1F2937_100%)] shadow-[0_26px_50px_-20px_rgba(15,23,42,0.45)]'}`}
         >
           <div className="flex items-start justify-between px-5 pt-[18px]">
             <div className="min-w-0">
@@ -189,8 +174,8 @@ export default async function MemberPortal({
             )}
           </div>
           <div className="relative h-[18px] bg-white/[0.08]">
-            <span className="absolute -left-[9px] top-0 h-[18px] w-[18px] rounded-full bg-[#0D1620]" />
-            <span className="absolute -right-[9px] top-0 h-[18px] w-[18px] rounded-full bg-[#0D1620]" />
+            <span className="absolute -left-[9px] top-0 h-[18px] w-[18px] rounded-full bg-[#F4F6FA]" />
+            <span className="absolute -right-[9px] top-0 h-[18px] w-[18px] rounded-full bg-[#F4F6FA]" />
           </div>
           <div className="grid grid-cols-3 gap-2.5 bg-white/[0.08] px-5 pb-[18px] pt-3.5">
             <div className="min-w-0">
@@ -223,50 +208,50 @@ export default async function MemberPortal({
           ].map(([v, k]) => (
             <div
               key={k}
-              className="rounded-[14px] border border-white/[0.08] bg-white/[0.06] px-2.5 py-3 text-center text-[12px] text-[#C8D3E0]"
+              className="rounded-[14px] border border-[#E4E8EF] bg-white px-2.5 py-3 text-center text-[12px] text-ink-500"
             >
-              <b className="block text-[15px] text-white tabular-nums">{v}</b>
+              <b className="block text-[15px] text-ink-900 tabular-nums">{v}</b>
               {k}
             </div>
           ))}
         </div>
 
         {sp.pay === 'unavailable' && (
-          <div className="mt-4 rounded-xl bg-amber-400/10 p-3 text-[13px] text-amber-200 ring-1 ring-amber-400/30">
+          <div className="mt-4 rounded-xl bg-amber-50 p-3 text-[13px] text-amber-800 ring-1 ring-amber-200">
             Online payment isn&apos;t switched on for this club yet. Pay at reception.
           </div>
         )}
         {(sp.pay === 'failed' || sp.pay === 'wait') && (
-          <div className="mt-4 rounded-xl bg-amber-400/10 p-3 text-[13px] text-amber-200 ring-1 ring-amber-400/30">
+          <div className="mt-4 rounded-xl bg-amber-50 p-3 text-[13px] text-amber-800 ring-1 ring-amber-200">
             {sp.pay === 'wait'
               ? 'A payment request was just sent. Give it a few minutes before trying again.'
               : 'We couldn\u2019t reach M-Pesa just now. Try again in a minute or pay at reception.'}
           </div>
         )}
         {sp.pay === 'sent' && d.waiting === null && on && (
-          <div className="mt-4 flex items-center gap-2 rounded-xl bg-emerald-400/10 p-3 text-[13px] text-emerald-200 ring-1 ring-emerald-400/30">
+          <div className="mt-4 flex items-center gap-2 rounded-xl bg-emerald-50 p-3 text-[13px] text-emerald-800 ring-1 ring-emerald-200">
             <CheckCircle2 size={16} /> Payment received. Your pass is updated and a receipt is on its way by SMS.
           </div>
         )}
 
         {d.waiting === null && picks.length > 0 && (
           <>
-            <h2 className={`${label} mb-2.5 mt-6 text-[#8EA0B6]`}>{on ? 'Add time' : 'Renew'}</h2>
+            <h2 className={`${label} mb-2.5 mt-6 text-ink-500`}>{on ? 'Add time' : 'Renew'}</h2>
             <PlanPicker plans={picks} initial={d.last && picks.some((p) => p.id === d.last) ? d.last : null} />
           </>
         )}
 
         {(d.ch?.paybill || d.ch?.till) && (
-          <div className="mt-4 rounded-2xl border border-white/[0.08] bg-white/[0.04] p-4">
-            <div className={`${label} text-[#8EA0B6]`}>Or pay from the M-Pesa menu</div>
+          <div className="mt-4 rounded-2xl border border-[#E4E8EF] bg-white p-4">
+            <div className={`${label} text-ink-500`}>Or pay from the M-Pesa menu</div>
             <div className="mt-2 grid grid-cols-2 gap-3">
               <div>
-                <div className="text-[12px] text-[#8EA0B6]">{d.ch?.paybill ? 'Paybill' : 'Till'}</div>
+                <div className="text-[12px] text-ink-500">{d.ch?.paybill ? 'Paybill' : 'Till'}</div>
                 <div className="font-mono text-[18px] font-semibold">{d.ch?.paybill ?? d.ch?.till}</div>
               </div>
               {d.ch?.paybill && (
                 <div>
-                  <div className="text-[12px] text-[#8EA0B6]">Account</div>
+                  <div className="text-[12px] text-ink-500">Account</div>
                   <div className="font-mono text-[18px] font-semibold">{d.m?.member_no}</div>
                 </div>
               )}
@@ -276,13 +261,13 @@ export default async function MemberPortal({
 
         {d.recent.length > 0 && (
           <>
-            <h2 className={`${label} mb-1 mt-7 text-[#8EA0B6]`}>Receipts</h2>
+            <h2 className={`${label} mb-1 mt-7 text-ink-500`}>Receipts</h2>
             <ul>
               {d.recent.map((r) => (
-                <li key={r.id} className="flex items-center gap-3 border-b border-white/[0.07] px-0.5 py-3 text-[13px]">
+                <li key={r.id} className="flex items-center gap-3 border-b border-[#E8ECF2] px-0.5 py-3 text-[13px]">
                   <div className="min-w-0 flex-1">
                     <div className="truncate">{r.what ?? 'Payment'}</div>
-                    <div className="text-[11.5px] text-[#8EA0B6]">
+                    <div className="text-[11.5px] text-ink-500">
                       {date(r.paid_at)} · {r.channel === 'cash' ? 'Cash at the desk' : 'M-Pesa'}
                     </div>
                   </div>
@@ -293,7 +278,7 @@ export default async function MemberPortal({
           </>
         )}
 
-        <div className="mt-7 divide-y divide-white/[0.07] overflow-hidden rounded-2xl border border-white/[0.08] bg-white/[0.04]">
+        <div className="mt-7 divide-y divide-[#EEF1F6] overflow-hidden rounded-2xl border border-[#E4E8EF] bg-white">
           {waLink && (
             <a
               href={waLink}
@@ -301,23 +286,23 @@ export default async function MemberPortal({
               rel="noopener"
               className="flex items-center gap-3 px-4 py-3.5 text-[13.5px]"
             >
-              <span className="grid h-9 w-9 place-items-center rounded-xl bg-emerald-400/[0.15] text-emerald-300">
+              <span className="grid h-9 w-9 place-items-center rounded-xl bg-emerald-50 text-emerald-600">
                 <MessageCircle size={17} />
               </span>
               <span className="min-w-0 flex-1">
                 <b className="block font-semibold">Message the club</b>
-                <span className="text-[12px] text-[#8EA0B6]">WhatsApp · {d.wa}</span>
+                <span className="text-[12px] text-ink-500">WhatsApp · {d.wa}</span>
               </span>
             </a>
           )}
           <form action={setNews} className="flex items-center gap-3 px-4 py-3.5">
             <input type="hidden" name="news" value={d.m?.sms_news ? 'off' : 'on'} />
-            <span className="grid h-9 w-9 place-items-center rounded-xl bg-white/[0.07] text-[#C8D3E0]">
+            <span className="grid h-9 w-9 place-items-center rounded-xl bg-[#F1F4F8] text-ink-700">
               <Megaphone size={16} />
             </span>
             <div className="min-w-0 flex-1">
               <div className="text-[13.5px] font-semibold">Club news by SMS</div>
-              <div className="text-[12px] text-[#8EA0B6]">
+              <div className="text-[12px] text-ink-500">
                 {sp.news === 'off'
                   ? 'Off. Receipts and renewal reminders still come.'
                   : sp.news === 'on'
@@ -327,13 +312,13 @@ export default async function MemberPortal({
             </div>
             <button
               type="submit"
-              className="rounded-lg px-3 py-1.5 text-[12.5px] ring-1 ring-white/15 hover:bg-white/[0.06]"
+              className="rounded-lg px-3 py-1.5 text-[12.5px] font-semibold ring-1 ring-[#D5DBE5] hover:bg-[#F5F7FB]"
             >
               {d.m?.sms_news ? 'Turn off' : 'Turn on'}
             </button>
           </form>
         </div>
-        <p className="mt-8 text-center text-[11px] tracking-[0.12em] text-[#4B5A70]">© NAVAC GLOBAL</p>
+        <p className="mt-8 text-center text-[11px] tracking-[0.12em] text-[#9AA6B8]">© NAVAC GLOBAL</p>
       </div>
     </div>
   );

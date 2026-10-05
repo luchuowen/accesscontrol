@@ -308,7 +308,15 @@ export function initiatedTransactionId(res: unknown): string | null {
  * Safety net for missed webhooks (TaifaPay's own docs recommend polling as the fallback): look up every club's
  * pending payment requests from the last 24 h and settle the ones TaifaPay reports as finished.
  */
-export async function reconcileTaifaPay(sql: Sql, log: (m: string) => void = console.log): Promise<number> {
+/**
+ * minAgeSec: the background poller leaves fresh requests to the webhook (45 s); a page someone is watching passes a
+ * few seconds so the payment shows as soon as M-Pesa confirms, even when the webhook is late or missed.
+ */
+export async function reconcileTaifaPay(
+  sql: Sql,
+  log: (m: string) => void = console.log,
+  minAgeSec = 45,
+): Promise<number> {
   let settled = 0;
   const tenants = await sql<{ id: string; timezone: string }[]>`select id, timezone from tenants`;
   for (const t of tenants) {
@@ -318,7 +326,7 @@ export async function reconcileTaifaPay(sql: Sql, log: (m: string) => void = con
       (tx) => tx<{ id: string; provider_ref: string }[]>`
         select id, provider_ref from payment_intents
         where status = 'pending' and provider = 'taifapay' and provider_ref is not null
-          and created_at > now() - interval '24 hours' and created_at < now() - interval '45 seconds'
+          and created_at > now() - interval '24 hours' and created_at < now() - make_interval(secs => ${minAgeSec})
         order by created_at limit 50`,
     );
     if (!pending.length) continue;
