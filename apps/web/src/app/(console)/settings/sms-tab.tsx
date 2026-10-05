@@ -1,5 +1,5 @@
 import { withTenant } from '@lango/db';
-import { can, clubSms, type NotifySettings, platformSmsConfig } from '@lango/server';
+import { can, clubSms, type NotifySettings, platformSmsConfig, reconcileTopups } from '@lango/server';
 import { BadgeCheck, Hash, History, MessageSquare, Send, Wallet } from 'lucide-react';
 import Link from 'next/link';
 import { MoneyInput } from '@/components/money-input';
@@ -7,8 +7,10 @@ import { SubmitButton } from '@/components/submit-button';
 import { dateTime, kes } from '@/lib/format';
 import type { Session } from '@/lib/session';
 import { db } from '@/server/db';
+import { LiveRefresh } from '../_dash/live-refresh';
 import { buySms, sendTestSms } from './actions';
 import { Banner, Group, type Note, Pill, Row, SectionHead } from './bits';
+import { Processing } from './processing';
 
 const NOTES: Record<string, Note> = {
   forbidden: ['red', 'You don’t have permission to do this.'],
@@ -17,6 +19,7 @@ const NOTES: Record<string, Note> = {
   platform: ['amber', 'SMS is not connected on the platform yet. Ask NAVAC.'],
   'test-sent': ['green', 'Test SMS sent. It should arrive within a minute.'],
   'test-failed': ['red', 'The test SMS was not accepted. See Communications › Sent automatically.'],
+  'topup-received': ['green', 'Payment received. Your SMS credit has been added and a receipt is on its way.'],
   'topup-sent': ['green', 'M-Pesa prompt sent. Credit is added as soon as the payment is confirmed.'],
   'topup-phone': ['red', 'Enter a Kenyan mobile number for the M-Pesa prompt.'],
   'topup-amount': ['red', 'Enter at least KES 10.'],
@@ -24,8 +27,23 @@ const NOTES: Record<string, Note> = {
   'topup-failed': ['red', 'M-Pesa could not be reached. Try again in a minute.'],
 };
 
+/** While a purchase waits on M-Pesa, each refresh asks the gateway (at most every 3 s) so credit lands in seconds. */
+let lastCheck = 0;
+async function settleNow(tid: string) {
+  if (Date.now() - lastCheck < 3000) return;
+  const [p] = await withTenant(
+    db(),
+    tid,
+    (tx) => tx`select 1 from sms_topups where status = 'pending' and created_at > now() - interval '5 minutes' limit 1`,
+  );
+  if (!p) return;
+  lastCheck = Date.now();
+  await reconcileTopups(db(), () => {}).catch(() => 0);
+}
+
 /** Settings › SMS credit: balance, buying credit by M-Pesa, price, sender name, purchases. */
 export async function SmsTab({ s, sms }: { s: Session; sms?: string }) {
+  await settleNow(s.tid);
   const [platformCfg, [row]] = await Promise.all([
     platformSmsConfig(db()),
     withTenant(
@@ -47,6 +65,13 @@ export async function SmsTab({ s, sms }: { s: Session; sms?: string }) {
         select coalesce(-sum(units), 0)::int as used from sms_ledger where kind = 'send' and created_at > now() - interval '30 days'`,
     ]),
   );
+  const pending = topups.find((t) => t.status === 'pending' && Date.now() - t.created_at.getTime() < 5 * 60_000);
+  const note =
+    sms === 'topup-sent' && !pending && topups[0]?.status === 'completed'
+      ? NOTES['topup-received']
+      : sms
+        ? NOTES[sms]
+        : undefined;
   const connected = !!platformCfg?.apiKey;
   const low = n.lowBalance ?? 100;
   return (
@@ -56,7 +81,8 @@ export async function SmsTab({ s, sms }: { s: Session; sms?: string }) {
         title="SMS credit"
         sub="Prepaid credit for receipts, reminders, replies and club news."
       />
-      <Banner note={sms ? NOTES[sms] : undefined} />
+      {pending && <LiveRefresh seconds={4} />}
+      <Banner note={note} />
       <div className="relative overflow-hidden rounded-3xl bg-[#0B1629] p-6 text-white">
         <Wallet
           size={150}
@@ -82,7 +108,12 @@ export async function SmsTab({ s, sms }: { s: Session; sms?: string }) {
             <div className="mt-1 text-[20px] font-semibold tabular-nums">{low.toLocaleString('en-KE')} SMS</div>
           </div>
         </div>
-        {can(s, 'sms.buy') && (
+        {can(s, 'sms.buy') && pending && (
+          <div className="relative mt-5">
+            <Processing amount={pending.amount_kes} what="buy SMS credit worth" dark wide />
+          </div>
+        )}
+        {can(s, 'sms.buy') && !pending && (
           <form action={buySms} className="relative mt-5 flex flex-wrap gap-2">
             <MoneyInput name="amountKes" required defaultValue={1000} className="h-11 w-36 bg-white text-ink-900" />
             <input
