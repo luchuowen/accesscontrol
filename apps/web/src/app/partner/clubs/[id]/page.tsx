@@ -52,7 +52,7 @@ import {
 const NOTE: Record<string, [ok: boolean, text: string]> = {
   'readers-saved': [true, 'Readers saved. The doors follow within a minute.'],
   inventory: [true, 'Asked the door PC to read AxTraxNG again. Readers update on its next sync (about a minute).'],
-  'pair-new': [true, 'New pairing code issued. Reinstall the Site Bridge on the new PC with it.'],
+  'pair-new': [true, 'New pairing code issued. Reinstall the NAVAC Bridge on the new PC with it.'],
   'zone-invalid': [false, 'That area is no longer there.'],
   'wa-ok': [true, 'WhatsApp saved. Messages to the club’s number now land in its inbox.'],
   'wa-id': [false, 'Enter the Phone number ID from Meta › WhatsApp › API setup (digits only).'],

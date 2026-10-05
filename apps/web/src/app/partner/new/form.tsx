@@ -48,7 +48,7 @@ export function NewClubForm({
             </div>
           </div>
           <div>
-            <span className="label">Site Bridge pairing code (valid 30 days)</span>
+            <span className="label">NAVAC Bridge pairing code (valid 30 days)</span>
             <div className="mt-1.5">
               <CopyField value={d.pairCode} label="Pairing code" />
             </div>

@@ -24,7 +24,7 @@ export default async function NewClub() {
       </Link>
       <PageHeader
         title="Add a club"
-        subtitle="Creates the club, invites its owner by email, and makes a pairing code for the Site Bridge. Payments, doors and members are set up from the club’s own console."
+        subtitle="Creates the club, invites its owner by email, and makes a pairing code for the NAVAC Bridge. Payments, doors and members are set up from the club’s own console."
       />
       <NewClubForm consoleUrl={base} partners={partners.map((p) => ({ id: p.partner_id, name: p.partner }))} />
     </>

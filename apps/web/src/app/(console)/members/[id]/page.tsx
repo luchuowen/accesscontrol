@@ -110,7 +110,7 @@ export default async function MemberPage({
               ? `Doors could not be updated: ${failed.error}`
               : synced
                 ? `Doors are in sync${d.sync[0]?.applied_at ? ` · updated ${dateTime(d.sync[0].applied_at)}` : ''}`
-                : 'Waiting for the Site Bridge to update the doors…'}
+                : 'Waiting for the NAVAC Bridge to update the doors…'}
           </div>
 
           <h2 className="label mt-8">Payments</h2>

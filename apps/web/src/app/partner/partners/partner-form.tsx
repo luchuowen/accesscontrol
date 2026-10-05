@@ -5,7 +5,7 @@ import { type AddPartnerState, addPartner } from '../actions';
 
 const ROLES = {
   partner_admin: { label: 'Partner admin', hint: 'Adds clubs, runs onboarding, manages their company’s people' },
-  partner_tech: { label: 'Technician', hint: 'Installs the Site Bridge and doors in the clubs assigned to them' },
+  partner_tech: { label: 'Technician', hint: 'Installs the NAVAC Bridge and doors in the clubs assigned to them' },
   navac_support: { label: 'NAVAC support', hint: 'Sees every club read-only, helps clubs and partners' },
   navac_admin: { label: 'NAVAC admin', hint: 'Everything, including platform settings and prices' },
 } as const;

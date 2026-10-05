@@ -59,7 +59,7 @@ export async function onboardingChecklist(sql: Sql, tenantId: string): Promise<C
       },
       {
         key: 'bridge',
-        label: 'Site Bridge connected',
+        label: 'NAVAC Bridge connected',
         done: !!b?.seen,
         hint: 'Installed on the AxTraxNG server PC and paired',
         href: '/access',

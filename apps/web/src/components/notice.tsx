@@ -45,7 +45,7 @@ const MESSAGES: Record<string, { tone: 'ok' | 'warn' | 'err'; text: string }> = 
   'zone-taken': { tone: 'err', text: 'An area with that name already exists at this site.' },
   'inventory-requested': {
     tone: 'ok',
-    text: 'Asked the Site Bridge to read AxTraxNG again. The list updates within a minute while the bridge is online.',
+    text: 'Asked the NAVAC Bridge to read AxTraxNG again. The list updates within a minute while the bridge is online.',
   },
   'pair-new': { tone: 'ok', text: 'New pairing code issued. It is valid for 30 days.' },
 };

@@ -21,13 +21,13 @@ export function GET(req: Request) {
   });
 }
 
-const TEMPLATE = String.raw`# Lango Site Bridge installer (Windows, run as Administrator on the AxTraxNG server PC)
+const TEMPLATE = String.raw`# NAVAC Bridge installer (Windows, run as Administrator on the AxTraxNG server PC)
 $ErrorActionPreference = 'Stop'; [Net.ServicePointManager]::SecurityProtocol = 'Tls12'; $ProgressPreference = 'SilentlyContinue'
 $principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
 if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { throw 'Open PowerShell with "Run as administrator" and run the command again.' }
 $cloud = '__CLOUD__'; $sha = '__SHA__'
 $app = 'C:\Program Files\Lango Bridge'; $data = 'C:\ProgramData\Lango'
-Write-Host ''; Write-Host '  Lango Site Bridge' -ForegroundColor Green; Write-Host '  Connects this AxTraxNG server to Lango. Doors keep working if the internet drops.'; Write-Host ''
+Write-Host ''; Write-Host '  NAVAC Bridge' -ForegroundColor Green; Write-Host '  Connects this AxTraxNG server to Lango. Doors keep working if the internet drops.'; Write-Host ''
 New-Item -ItemType Directory -Force $app, $data | Out-Null
 $paired = Test-Path "$data\bridge.json"
 $code = ''
@@ -51,10 +51,13 @@ if (-not (Test-Path "$app\node\node.exe")) {
   Expand-Archive "$env:TEMP\lango-node.zip" "$env:TEMP\lango-node" -Force
   Move-Item "$env:TEMP\lango-node\node-v22.20.0-win-x64" "$app\node" -Force
 }
-Write-Host '  Downloading the Site Bridge...'
+Write-Host '  Downloading the NAVAC Bridge...'
 Invoke-WebRequest -UseBasicParsing "$cloud/bridge/lango-bridge.mjs" -OutFile "$app\lango-bridge.mjs.new"
 if ((Get-FileHash "$app\lango-bridge.mjs.new" -Algorithm SHA256).Hash.ToLower() -ne $sha) { throw 'Download check failed. Run the command again.' }
+Stop-ScheduledTask -TaskName 'NAVAC Bridge' -ErrorAction SilentlyContinue
+# Older installs ran as 'Lango Site Bridge': stop and remove it so only one bridge runs.
 Stop-ScheduledTask -TaskName 'Lango Site Bridge' -ErrorAction SilentlyContinue
+Unregister-ScheduledTask -TaskName 'Lango Site Bridge' -Confirm:$false -ErrorAction SilentlyContinue
 Get-Process node -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "$app*" } | Stop-Process -Force
 Start-Sleep 2
 Move-Item "$app\lango-bridge.mjs.new" "$app\lango-bridge.mjs" -Force
@@ -72,8 +75,8 @@ $lines | Set-Content "$app\run.cmd" -Encoding ASCII
 $act = New-ScheduledTaskAction -Execute 'cmd.exe' -Argument ('/c "' + "$app\run.cmd" + '"')
 $trg = New-ScheduledTaskTrigger -AtStartup
 $set = New-ScheduledTaskSettingsSet -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero) -AllowStartIfOnBatteries
-Register-ScheduledTask -TaskName 'Lango Site Bridge' -Action $act -Trigger $trg -Settings $set -User 'SYSTEM' -RunLevel Highest -Force | Out-Null
-Start-ScheduledTask -TaskName 'Lango Site Bridge'
+Register-ScheduledTask -TaskName 'NAVAC Bridge' -Action $act -Trigger $trg -Settings $set -User 'SYSTEM' -RunLevel Highest -Force | Out-Null
+Start-ScheduledTask -TaskName 'NAVAC Bridge'
 Write-Host '  Starting...'
 for ($i = 0; $i -lt 20; $i++) {
   Start-Sleep 3
