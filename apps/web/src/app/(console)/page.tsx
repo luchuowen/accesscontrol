@@ -1,13 +1,11 @@
-import { can, onboardingChecklist } from '@lango/server';
+import { can } from '@lango/server';
 import { Check, CreditCard, DoorOpen, type LucideIcon, MessageSquare, Monitor } from 'lucide-react';
 import Link from 'next/link';
 import { AddMember } from '@/components/add-member';
-import { Checklist } from '@/components/checklist';
 import { WalkIn } from '@/components/walk-in';
 import { nextMemberNo, ownerDashboard, walkinPrices } from '@/lib/data';
 import { ago, kes, kesShort } from '@/lib/format';
 import { requireSession } from '@/lib/session';
-import { db } from '@/server/db';
 import { LiveRefresh, RefreshButton } from './_dash/live-refresh';
 import { MoneyIn } from './_dash/money-in';
 import { RemindAll } from './_dash/remind-all';
@@ -57,14 +55,11 @@ export default async function Dashboard({
   const s = await requireSession();
   const { p, v, denied } = await searchParams;
   const days = PERIODS.find((x) => String(x) === p) ?? 30;
-  const [d, nextNo, walkins, setup] = await Promise.all([
+  const [d, nextNo, walkins] = await Promise.all([
     ownerDashboard(s.tid, days),
     nextMemberNo(s.tid),
     walkinPrices(s.tid),
-    // A new club sees what is left to set up until everything is done.
-    can(s, 'settings.payments') ? onboardingChecklist(db(), s.tid) : Promise.resolve([]),
   ]);
-  const setupLeft = setup.some((i) => !i.done);
   const weekly = days > 7 && v === 'w';
   const full = can(s, 'reports.all');
   const change = pct(d.revenue.now, d.revenue.prev);
@@ -154,11 +149,6 @@ export default async function Dashboard({
           <RefreshButton />
         </div>
       </section>
-      {setupLeft && (
-        <div className="mb-4">
-          <Checklist items={setup} />
-        </div>
-      )}
       {denied && (
         <div className="mb-4 rounded-xl bg-amber-50 p-3 text-sm text-amber-900 ring-1 ring-amber-200">
           You don’t have access to that page.
