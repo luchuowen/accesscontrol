@@ -2,6 +2,7 @@ import { can } from '@lango/server';
 import { Check, CreditCard, DoorOpen, type LucideIcon, MessageSquare, Monitor } from 'lucide-react';
 import Link from 'next/link';
 import { AddMember } from '@/components/add-member';
+import { GuestCheckIn } from '@/components/guest-checkin';
 import { WalkIn } from '@/components/walk-in';
 import { nextMemberNo, ownerDashboard, walkinPrices } from '@/lib/data';
 import { ago, kes, kesShort } from '@/lib/format';
@@ -128,6 +129,7 @@ export default async function Dashboard({
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {can(s, 'payments.record') && <WalkIn prices={walkins} />}
+          {can(s, 'payments.record') && <GuestCheckIn variant="band" />}
           {can(s, 'members.edit') && <AddMember club={d.tenantName} nextNo={nextNo} />}
           {full && (
             <nav

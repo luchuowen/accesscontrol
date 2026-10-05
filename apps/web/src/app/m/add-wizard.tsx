@@ -17,35 +17,44 @@ export interface WizService {
   note: string;
   options: WizOption[];
 }
-type Line = { service: WizService; option: WizOption };
+export type Person = { id: string; name: string };
+type Line = { person: Person; service: WizService; option: WizOption };
 
 const kes = (n: number) => `KES ${n.toLocaleString('en-KE')}`;
 
 /**
  * "Add a service", design A "One question at a time" (5 Oct 2026): what → how long → the bill. One question per
  * screen with a progress bar and big choices, so members who rarely use apps cannot get lost. The bill can hold
- * several services and is paid with one M-Pesa prompt.
+ * several services and is paid with one M-Pesa prompt. A phone shared by family members first asks "Who is it for?",
+ * so one bill pays for everyone (each person's own pass opens).
  */
 export function AddWizard({
   services,
   phone,
   start,
+  people,
 }: {
   services: WizService[];
   phone: string;
   start: { productId: string } | null;
+  people: Person[];
 }) {
+  const me = people[0] as Person;
+  const family = people.length > 1;
+  const steps = family ? 4 : 3;
   const fromRenew = start
     ? services
-        .flatMap((s) => s.options.map((o) => ({ service: s, option: o })))
+        .flatMap((s) => s.options.map((o) => ({ person: me, service: s, option: o })))
         .find((l) => l.option.productId === start.productId)
     : undefined;
   const [lines, setLines] = useState<Line[]>(fromRenew ? [fromRenew] : []);
-  const [step, setStep] = useState<1 | 2 | 3>(fromRenew ? 3 : 1);
+  const [step, setStep] = useState<0 | 1 | 2 | 3>(fromRenew ? 3 : family ? 0 : 1);
+  const [who, setWho] = useState<Person>(me);
   const [svc, setSvc] = useState<WizService | null>(null);
   const [opt, setOpt] = useState<WizOption | null>(null);
   const total = lines.reduce((a, l) => a + l.option.price, 0);
-  const inBill = new Set(lines.map((l) => l.service.id));
+  const key = (l: { person: Person; service: WizService }) => `${l.person.id}:${l.service.id}`;
+  const inBill = new Set(lines.filter((l) => l.person.id === who.id).map((l) => l.service.id));
   const choices = services.filter((s) => !inBill.has(s.id));
 
   const pickService = (s: WizService) => {
@@ -54,7 +63,8 @@ export function AddWizard({
   };
   const toBill = () => {
     if (!svc || !opt) return;
-    setLines((ls) => [...ls.filter((l) => l.service.id !== svc.id), { service: svc, option: opt }]);
+    const line = { person: who, service: svc, option: opt };
+    setLines((ls) => [...ls.filter((l) => key(l) !== key(line)), line]);
     setSvc(null);
     setOpt(null);
     setStep(3);
@@ -65,14 +75,16 @@ export function AddWizard({
       <div className="flex items-center justify-between">
         <div>
           <div className="text-[15px] font-semibold">{title}</div>
-          <div className="text-[12px] text-ink-500">Step {step} of 3</div>
+          <div className="text-[12px] text-ink-500">
+            Step {family ? step + 1 : step} of {steps}
+          </div>
         </div>
         <Link href="/m" className="rounded-lg px-2.5 py-1.5 text-[13px] text-ink-500 hover:text-ink-900">
           Cancel
         </Link>
       </div>
-      <div className="mt-3 grid grid-cols-3 gap-1.5" aria-hidden>
-        {[1, 2, 3].map((n) => (
+      <div className={`mt-3 grid gap-1.5 ${family ? 'grid-cols-4' : 'grid-cols-3'}`} aria-hidden>
+        {(family ? [0, 1, 2, 3] : [1, 2, 3]).map((n) => (
           <span key={n} className={`h-1.5 rounded-full ${n <= step ? 'bg-emerald-600' : 'bg-[#DDE3EA]'}`} />
         ))}
       </div>
@@ -86,13 +98,47 @@ export function AddWizard({
     'mt-5 grid h-[52px] w-full place-items-center rounded-2xl bg-emerald-600 text-[15px] font-bold text-white transition hover:bg-emerald-700 disabled:bg-[#C9D2DC]';
   const back = 'mt-2 w-full py-2 text-center text-[13px] font-semibold text-ink-500 hover:text-ink-900';
 
+  if (step === 0)
+    return (
+      <div>
+        {header(lines.length ? 'Add another service' : 'Add a service')}
+        <h1 className="text-[21px] font-bold leading-tight">Who is it for?</h1>
+        <p className="mt-1 text-[13px] text-ink-500">Everyone on this phone. One bill, one M-Pesa payment.</p>
+        <div className="mt-4 grid gap-2.5" role="radiogroup" aria-label="Who">
+          {people.map((p) => (
+            <button
+              key={p.id}
+              type="button"
+              role="radio"
+              aria-checked={who.id === p.id}
+              onClick={() => setWho(p)}
+              className={choice(who.id === p.id)}
+            >
+              <span className={dot(who.id === p.id)} />
+              <b className="text-[15px] font-semibold">{p.id === me.id ? `Me (${p.name})` : p.name}</b>
+            </button>
+          ))}
+        </div>
+        <button type="button" onClick={() => setStep(1)} className={next}>
+          Next
+        </button>
+        {lines.length > 0 && (
+          <button type="button" onClick={() => setStep(3)} className={back}>
+            Back to my bill
+          </button>
+        )}
+      </div>
+    );
+
   if (step === 1)
     return (
       <div>
         {header(lines.length ? 'Add another service' : 'Add a service')}
-        <h1 className="text-[21px] font-bold leading-tight">What would you like?</h1>
+        <h1 className="text-[21px] font-bold leading-tight">
+          {who.id === me.id ? 'What would you like?' : `What would ${who.name} like?`}
+        </h1>
         {choices.length === 0 ? (
-          <p className="mt-3 text-[14px] text-ink-500">Everything the club sells is already on your bill.</p>
+          <p className="mt-3 text-[14px] text-ink-500">Everything the club sells is already on the bill for them.</p>
         ) : (
           <div className="mt-4 grid gap-2.5" role="radiogroup" aria-label="Service">
             {choices.map((s) => (
@@ -107,7 +153,9 @@ export function AddWizard({
                 <span className={dot(svc?.id === s.id)} />
                 <span className="min-w-0 flex-1">
                   <b className="block text-[15px] font-semibold">{s.name}</b>
-                  <span className="block text-[12.5px] text-ink-500">{s.note}</span>
+                  <span className="block text-[12.5px] text-ink-500">
+                    {who.id === me.id ? s.note : `From ${kes(Math.min(...s.options.map((o) => o.price)))}`}
+                  </span>
                 </span>
               </button>
             ))}
@@ -128,7 +176,9 @@ export function AddWizard({
     return (
       <div>
         {header(lines.length ? 'Add another service' : 'Add a service')}
-        <h1 className="text-[21px] font-bold leading-tight">How long do you want {svc.name}?</h1>
+        <h1 className="text-[21px] font-bold leading-tight">
+          How long {who.id === me.id ? 'do you' : `does ${who.name}`} want {svc.name}?
+        </h1>
         <div className="mt-4 grid gap-2.5" role="radiogroup" aria-label="How long">
           {svc.options.map((o) => (
             <button
@@ -142,7 +192,9 @@ export function AddWizard({
               <span className={dot(opt?.productId === o.productId)} />
               <span className="min-w-0 flex-1">
                 <b className="block text-[15px] font-semibold">{o.label}</b>
-                <span className="block text-[12.5px] text-ink-500">{o.starts}</span>
+                <span className="block text-[12.5px] text-ink-500">
+                  {who.id === me.id ? o.starts : 'Starts today, or after their current plan'}
+                </span>
               </span>
               <span className="shrink-0 text-[15px] font-bold tabular-nums">{kes(o.price)}</span>
             </button>
@@ -157,6 +209,7 @@ export function AddWizard({
       </div>
     );
 
+  const note = (l: Line) => (l.person.id === me.id ? l.option.starts : 'Starts today, or after their current plan');
   return (
     <form action={memberPay}>
       {header('Your bill')}
@@ -167,16 +220,21 @@ export function AddWizard({
         <div className="mt-4 rounded-2xl border border-[#E4E8EF] bg-white p-4">
           <ul className="grid gap-3">
             {lines.map((l) => (
-              <li key={l.service.id} className="flex items-start gap-3">
-                <input type="hidden" name="productId" value={l.option.productId} />
+              <li key={key(l)} className="flex items-start gap-3">
+                <input type="hidden" name="item" value={`${l.person.id}:${l.option.productId}`} />
                 <div className="min-w-0 flex-1">
+                  {family && (
+                    <span className="block text-[11px] font-semibold uppercase tracking-[0.08em] text-emerald-700">
+                      {l.person.id === me.id ? 'Me' : l.person.name}
+                    </span>
+                  )}
                   <b className="block text-[14.5px] font-semibold">
                     {l.service.name} · {l.option.label}
                   </b>
-                  <span className="block text-[12.5px] text-ink-500">{l.option.starts}</span>
+                  <span className="block text-[12.5px] text-ink-500">{note(l)}</span>
                   <button
                     type="button"
-                    onClick={() => setLines((ls) => ls.filter((x) => x.service.id !== l.service.id))}
+                    onClick={() => setLines((ls) => ls.filter((x) => key(x) !== key(l)))}
                     className="mt-1 inline-flex items-center gap-1 text-[12.5px] font-semibold text-rose-600"
                   >
                     <Minus size={13} /> Remove
@@ -192,13 +250,14 @@ export function AddWizard({
           </div>
         </div>
       )}
-      {choices.length > 0 && (
+      {(family || choices.length > 0) && (
         <button
           type="button"
           onClick={() => {
             setSvc(null);
             setOpt(null);
-            setStep(1);
+            setWho(me);
+            setStep(family ? 0 : 1);
           }}
           className="mt-3 inline-flex items-center gap-1.5 text-[14px] font-semibold text-emerald-700"
         >

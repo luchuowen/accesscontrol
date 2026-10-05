@@ -29,6 +29,7 @@ import { handleAck, handleDrift, handleEvents, handleInventory, handlePair, hand
 import { parseMeta, ReplyError, receiveEmail, receiveWhatsApp, sendReply, verifyMeta } from './comms.js';
 import { encrypt } from './crypto.js';
 import { applyResendEvent, Resend, sendEmail, verifySvix } from './email.js';
+import { findGuestPass, redeemGuestPass, startGuestPass } from './guests.js';
 import { memberLastPlan, startMemberPrompt } from './member-pay.js';
 import {
   platformAlerts,
@@ -1539,6 +1540,150 @@ describe('walking skeleton: pay → door', () => {
         await owner`select phone from sms_messages where member_id = ${id} and dedupe_key like 'phone-changed:%'`;
       expect(warn?.phone).toBe('0700000888');
     } else expect(r).toBe('failed'); // the club cannot send SMS here: nothing changes
+  });
+  it('guest pass: paid by the member, nothing opens for them, the code gets the friend a band until 23:59; family pays in one bill', async () => {
+    // Two walk-in day passes in different services, and a free band.
+    const [sv1] =
+      await owner`insert into services (tenant_id, name, zone_keys, sold_to) values (${tenantId}, 'Guest Gym', '{gym}', 'both') returning id`;
+    const [sv2] =
+      await owner`insert into services (tenant_id, name, zone_keys, sold_to) values (${tenantId}, 'Guest Sauna', '{sauna}', 'both') returning id`;
+    const [d1] =
+      await owner`insert into products (tenant_id, service_id, name, price_kes, duration_unit, duration_count, zone_keys)
+      values (${tenantId}, ${sv1?.id}, 'Guest Gym · 1 day', 700, 'day', 1, '{gym}') returning id`;
+    const [d2] =
+      await owner`insert into products (tenant_id, service_id, name, price_kes, duration_unit, duration_count, zone_keys)
+      values (${tenantId}, ${sv2?.id}, 'Guest Sauna · 1 day', 300, 'day', 1, '{sauna}') returning id`;
+    const [band] =
+      await owner`insert into members (tenant_id, member_no, first_name, last_name) values (${tenantId}, 11950, 'Wristband', '50') returning id`;
+    await owner`insert into credentials (tenant_id, member_id, card_code) values (${tenantId}, ${band?.id}, 11950)`;
+    const [host] = await owner`insert into members (tenant_id, member_no, first_name, last_name, phone)
+      values (${tenantId}, 28901, 'Host', 'Member', '0700000901') returning id`;
+    const hostId = host?.id as string;
+    let intentId = '';
+    let amount = 0;
+    const fakeFetch = (async (u: string, init?: RequestInit) => {
+      const url = String(u);
+      if (url.endsWith('/auth/token')) return new Response(JSON.stringify({ access_token: 't', expires_in: '3599' }));
+      if (url.includes('/initiate')) {
+        const body = JSON.parse(String(init?.body)) as { externalId: string; amount: number };
+        intentId = body.externalId;
+        amount = body.amount;
+        return new Response(JSON.stringify({ transaction: { id: `TP-G-${intentId.slice(0, 8)}` } }));
+      }
+      const id = url.split('/').at(-1) as string;
+      return new Response(
+        JSON.stringify({
+          transaction: { id, status: 'COMPLETED', amount, accountReference: '28901', externalReference: intentId },
+        }),
+      );
+    }) as typeof fetch;
+    const client = new TaifaPay({ env: 'live', clientId: 'guest', clientSecret: 's' }, fakeFetch);
+    const hook = (tx: string) =>
+      handleTaifaWebhook(
+        app,
+        new Request('http://x', { method: 'POST', body: JSON.stringify({ data: { transactionId: tx } }) }),
+        'demo-club',
+        client,
+      );
+    const today = DateTime.now().setZone('Africa/Nairobi').toISODate() as string;
+
+    // A pass for a members-only product, or a bad phone, never reaches M-Pesa.
+    const [gymMonth] = await owner`select id from products where name = 'Gym · 1 month'`;
+    expect(
+      await startGuestPass(
+        app,
+        tenantId,
+        hostId,
+        { name: 'Ali', phone: '0711 222 333', date: today, productIds: [gymMonth?.id] },
+        client,
+      ),
+    ).toBe('invalid');
+    expect(
+      await startGuestPass(
+        app,
+        tenantId,
+        hostId,
+        { name: 'Ali', phone: '123', date: today, productIds: [d1?.id] },
+        client,
+      ),
+    ).toBe('invalid');
+    // Gym + Sauna for a friend today, paid on the host's phone.
+    expect(
+      await startGuestPass(
+        app,
+        tenantId,
+        hostId,
+        { name: 'Ali Hassan', phone: '0711 222 333', date: today, productIds: [d1?.id, d2?.id] },
+        client,
+      ),
+    ).toBe('sent');
+    expect(amount).toBe(1000);
+    expect(await (await hook(`TP-G-${intentId.slice(0, 8)}`)).json()).toMatchObject({ status: 'applied' });
+    expect(await (await hook(`TP-G-${intentId.slice(0, 8)}`)).json()).toMatchObject({ status: 'duplicate' });
+    const [hostEnts] = await owner`select count(*)::int as n from entitlements where member_id = ${hostId}`;
+    expect(hostEnts?.n).toBe(0); // the member who paid gets nothing opened
+    const [code] =
+      await owner`select body from sms_messages where phone = '254711222333' and dedupe_key like 'guest-code:%'`;
+    const six = /(\d{3}) (\d{3})/.exec(code?.body ?? '');
+    expect(six).toBeTruthy();
+    const found = await withTenant(app, tenantId, (tx) => findGuestPass(tx, tenantId, `${six?.[1]}${six?.[2]}`));
+    expect(found).toMatchObject({ status: 'paid', guestName: 'Ali Hassan', hostNo: 28901 });
+    const byPhone = await withTenant(app, tenantId, (tx) => findGuestPass(tx, tenantId, '0711222333'));
+    expect(byPhone?.id).toBe(found?.id);
+    // Reception hands band 11950: it opens gym and sauna until 23:59 today, once.
+    const r = await redeemGuestPass(app, tenantId, { guestPassId: found?.id as string, bandNo: 11950, actor: 'test' });
+    expect(r).toMatchObject({ ok: true, band: 11950, until: '23:59' });
+    const zones =
+      await owner`select zone_key from entitlements where member_id = ${band?.id} and ends_at > now() order by 1`;
+    expect(zones.map((z) => z.zone_key)).toEqual(['gym', 'sauna']);
+    expect(
+      await redeemGuestPass(app, tenantId, { guestPassId: found?.id as string, bandNo: 11950, actor: 'test' }),
+    ).toMatchObject({ ok: false });
+    // The club's monthly limit per member.
+    await owner`insert into tenant_settings (tenant_id, data) values (${tenantId}, ${owner.json({ memberRules: { guest: { enabled: true, perMonth: 1 } } } as never)})
+                on conflict (tenant_id) do update set data = tenant_settings.data || excluded.data`;
+    expect(
+      await startGuestPass(
+        app,
+        tenantId,
+        hostId,
+        { name: 'Wanjiru', phone: '0711 222 444', date: today, productIds: [d1?.id] },
+        client,
+      ),
+    ).toBe('limit');
+    await owner`update tenant_settings set data = data - 'memberRules' where tenant_id = ${tenantId}`;
+
+    // Family: a parent pays for themself and a child who shares the phone, in one prompt; each gets their own access.
+    const [kid] = await owner`insert into members (tenant_id, member_no, first_name, last_name, phone)
+      values (${tenantId}, 28902, 'Kid', 'Member', '+254700000901') returning id`;
+    const [stranger] = await owner`insert into members (tenant_id, member_no, first_name, last_name, phone)
+      values (${tenantId}, 28903, 'Other', 'Person', '0700000999') returning id`;
+    expect(
+      await startMemberPrompt(app, tenantId, hostId, [{ productId: d1?.id, memberId: stranger?.id }], 'member', client),
+    ).toBe('invalid'); // not on the payer's phone
+    expect(
+      await startMemberPrompt(
+        app,
+        tenantId,
+        hostId,
+        [
+          { productId: d1?.id, memberId: hostId },
+          { productId: d1?.id, memberId: kid?.id },
+        ],
+        'member',
+        client,
+      ),
+    ).toBe('sent');
+    expect(amount).toBe(1400);
+    const fam = (await (await hook(`TP-G-${intentId.slice(0, 8)}`)).json()) as { family: { status: string }[] };
+    expect(fam.family.map((f) => f.status)).toEqual(['applied', 'applied']);
+    for (const who of [hostId, kid?.id]) {
+      const [e] =
+        await owner`select count(*)::int as n from entitlements where member_id = ${who} and zone_key = 'gym'`;
+      expect(e?.n).toBe(1);
+    }
+    const again = (await (await hook(`TP-G-${intentId.slice(0, 8)}`)).json()) as { family: { status: string }[] };
+    expect(again.family.map((f) => f.status)).toEqual(['duplicate', 'duplicate']);
   });
 });
 

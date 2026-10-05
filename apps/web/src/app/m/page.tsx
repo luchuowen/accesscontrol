@@ -20,6 +20,7 @@ import { db } from '@/server/db';
 import { LiveRefresh } from '../(console)/_dash/live-refresh';
 import { memberLogout, readMember, setNews } from './actions';
 import { AddWizard, type WizService } from './add-wizard';
+import { ClubScreen, GuestList, GuestScreen } from './guests';
 import { CardScreen, DetailsScreen, MoreMenu, PauseScreen } from './more';
 import { MemberReceipt, ReceiptList, VisitList } from './records';
 import { MemberSignIn } from './signin';
@@ -74,6 +75,9 @@ export default async function MemberPortal({
   if (sp.v === 'card') return shell(<CardScreen who={who} sp={sp} />);
   if (sp.v === 'pause') return shell(<PauseScreen who={who} sp={sp} />);
   if (sp.v === 'details') return shell(<DetailsScreen who={who} sp={sp} />);
+  if (sp.v === 'guest') return shell(<GuestScreen who={who} sp={sp} />);
+  if (sp.v === 'guests') return shell(<GuestList who={who} sp={sp} />);
+  if (sp.v === 'club') return shell(<ClubScreen who={who} />);
 
   const d = await withTenant(db(), who.tenantId, async (tx) => {
     const [m] = await tx<
@@ -87,6 +91,13 @@ export default async function MemberPortal({
       }[]
     >`select first_name, last_name, member_no, sms_news, phone, cards_blocked_at is not null as blocked
       from members where id = ${who.memberId}`;
+    // Family: other members of this club on the same phone (paid for in one bill).
+    const family = await tx<{ id: string; first_name: string }[]>`
+      select f.id, f.first_name from members f, members me
+      where me.id = ${who.memberId} and f.id <> me.id and f.status = 'active' and me.phone is not null
+        and f.member_no not between 11001 and 11999
+        and right(regexp_replace(coalesce(f.phone, ''), '\D', '', 'g'), 9) = right(regexp_replace(me.phone, '\D', '', 'g'), 9)
+      order by f.first_name limit 6`;
     const [pause] = await tx<{ starts_at: Date; ends_at: Date }[]>`
       select starts_at, ends_at from member_pauses where member_id = ${who.memberId} and status = 'on' and ends_at > now()
       order by starts_at limit 1`;
@@ -139,6 +150,7 @@ export default async function MemberPortal({
       receipts: counts?.receipts ?? 0,
       waiting: waiting?.amount_kes ?? null,
       pause: pause ?? null,
+      family,
       club: t?.name,
       ch,
       wa: wa?.phone ?? null,
@@ -204,7 +216,11 @@ export default async function MemberPortal({
   if (sp.v === 'add') {
     if (d.waiting !== null) redirect('/m');
     const start = sp.renew && d.plans.some((p) => p.id === sp.renew) ? { productId: sp.renew } : null;
-    return shell(<AddWizard services={services} phone={phone} start={start} />);
+    const people = [
+      { id: who.memberId, name: d.m?.first_name ?? 'Me' },
+      ...d.family.map((f) => ({ id: f.id, name: f.first_name })),
+    ];
+    return shell(<AddWizard services={services} phone={phone} start={start} people={people} />);
   }
 
   const lastPlan = d.plans.find((p) => p.id === d.last);

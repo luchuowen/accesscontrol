@@ -1,6 +1,6 @@
 import { withTenant } from '@lango/db';
 import { memberRules } from '@lango/server';
-import { ChevronLeft, ChevronRight, CreditCard, PauseCircle, UserRound } from 'lucide-react';
+import { Building2, ChevronLeft, ChevronRight, CreditCard, PauseCircle, UserRound, UsersRound } from 'lucide-react';
 import Link from 'next/link';
 import { SubmitButton } from '@/components/submit-button';
 import { date, kes } from '@/lib/format';
@@ -100,7 +100,10 @@ export async function MoreMenu({ who }: { who: Who }) {
               ? `${date(d.pause.starts_at)} to ${date(new Date(d.pause.ends_at.getTime() - 1))}`
               : 'Travel, illness or exams: keep your days',
           )}
+        {d.rules.guest.enabled &&
+          row('/m?v=guests', <UsersRound size={19} />, 'Bring a guest', 'Pay a friend’s day pass; they get a code')}
         {row('/m?v=details', <UserRound size={19} />, 'My details', 'Phone number and emergency contact')}
+        {row('/m?v=club', <Building2 size={19} />, 'Club information', 'Opening hours, location and contacts')}
       </div>
     </>
   );

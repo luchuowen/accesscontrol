@@ -15,6 +15,7 @@ import {
   requestOtp,
   requestPhoneChange,
   setEmergencyContact,
+  startGuestPass,
   startMemberPrompt,
   startPause,
   unblockCards,
@@ -149,8 +150,39 @@ export async function memberLogin(form: FormData) {
 export async function memberPay(form: FormData) {
   const who = await readMember();
   if (!who) redirect('/m');
-  const r = await startMemberPrompt(db(), who.tenantId, who.memberId, form.getAll('productId').map(String), 'member');
+  // Each bill line is "memberId:productId" (family) or a bare productId (the member themself).
+  const items = form
+    .getAll('item')
+    .map(String)
+    .map((x) => {
+      const [m, p] = x.includes(':') ? x.split(':') : [who.memberId, x];
+      return { memberId: m as string, productId: p as string };
+    });
+  const r = await startMemberPrompt(db(), who.tenantId, who.memberId, items, 'member');
   redirect(r === 'invalid' ? '/m?v=add' : `/m?pay=${r}`);
+}
+
+/** Guest pass: the member pays for a friend's day pass; the friend gets a code by SMS. */
+export async function memberGuest(form: FormData) {
+  const who = await readMember();
+  if (!who) redirect('/m');
+  const r = await startGuestPass(db(), who.tenantId, who.memberId, {
+    name: String(form.get('name') ?? ''),
+    phone: String(form.get('phone') ?? ''),
+    date: String(form.get('date') ?? ''),
+    productIds: form.getAll('productId').map(String),
+  });
+  const why: Record<string, string> = {
+    invalid: 'Check the guest’s name, their Kenyan mobile number and the day.',
+    limit: 'You have used all your guest passes for this month.',
+    off: 'This club does not sell guest passes online. Ask at reception.',
+    unavailable: 'Online payment isn’t switched on for this club yet. Pay at reception.',
+    wait: 'A payment request was just sent. Give it a few minutes before trying again.',
+    failed: 'We couldn’t reach M-Pesa just now. Try again in a minute.',
+  };
+  redirect(
+    r === 'sent' ? '/m?v=guests&n=guest-sent' : `/m?v=guest&e=${encodeURIComponent(why[r] ?? (why.failed as string))}`,
+  );
 }
 
 // ── Phase 2 self-service (5 Oct 2026) ─────────────────────────────────────────────────────────────────────────

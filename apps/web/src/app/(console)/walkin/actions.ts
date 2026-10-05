@@ -1,7 +1,16 @@
 'use server';
 import { randomUUID } from 'node:crypto';
 import { withTenant } from '@lango/db';
-import { can, initiatedTransactionId, rebuildAccessState, recordPayment, tenantTaifa } from '@lango/server';
+import {
+  can,
+  findGuestPass,
+  type GuestLookup,
+  initiatedTransactionId,
+  rebuildAccessState,
+  recordPayment,
+  redeemGuestPass,
+  tenantTaifa,
+} from '@lango/server';
 import { revalidatePath } from 'next/cache';
 import { requireSession } from '@/lib/session';
 import { db } from '@/server/db';
@@ -207,4 +216,24 @@ export async function addBands(form: FormData) {
              values (${s.tid}, ${s.uid}, 'bands.added', 'day-passes', ${tx.json({ count: n } as never)})`;
   });
   revalidatePath('/members');
+}
+
+/** Reception: look up a guest pass by its 6-digit code or the guest's phone. */
+export async function lookupGuest(q: string): Promise<GuestLookup | null> {
+  const s = await requireSession();
+  if (!can(s, 'payments.record')) return null;
+  return withTenant(db(), s.tid, (tx) => findGuestPass(tx, s.tid, q));
+}
+
+/** Reception hands a free day wristband to a guest with a paid pass for today. */
+export async function handOverGuest(
+  id: string,
+  band: number,
+): Promise<{ ok: true; band: number; until: string } | { ok: false; why: string }> {
+  const s = await requireSession();
+  if (!can(s, 'payments.record')) return { ok: false, why: 'Your role can’t hand out wristbands.' };
+  if (!UUID.test(id)) return { ok: false, why: 'Look the guest up again.' };
+  const r = await redeemGuestPass(db(), s.tid, { guestPassId: id, bandNo: band, actor: s.uid });
+  if (r.ok) revalidatePath('/members');
+  return r;
 }

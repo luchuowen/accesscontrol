@@ -9,43 +9,66 @@ export type PromptResult = 'sent' | 'failed' | 'wait' | 'unavailable' | 'invalid
  * to five of the club's products, one per service. Prices come from the club's products at this moment, never from
  * the caller. Settlement is the normal TaifaPay path (webhook or reconcile), which reads the intent's lines.
  */
+export type PromptItem = { productId: string; memberId?: string };
+
 export async function startMemberPrompt(
   sql: Sql,
   tenantId: string,
   memberId: string,
-  productIds: string[],
+  items: (string | PromptItem)[],
   createdBy: 'member' | 'renew-link',
   client?: TaifaPay,
 ): Promise<PromptResult> {
-  const ids = [...new Set(productIds)].filter((x) => /^[0-9a-f-]{36}$/.test(x));
-  if (!ids.length || ids.length > 5) return 'invalid';
-  if (!rateLimit(`member-pay:${memberId}`, 3, 5 * 60_000)) return 'wait';
+  // Each item: a product for the payer, or for a family member who shares the payer's phone at this club.
+  const want = items
+    .map((x) =>
+      typeof x === 'string' ? { productId: x, memberId } : { productId: x.productId, memberId: x.memberId ?? memberId },
+    )
+    .filter((x) => /^[0-9a-f-]{36}$/.test(x.productId) && /^[0-9a-f-]{36}$/.test(x.memberId));
+  const keys = new Set(want.map((x) => `${x.memberId}:${x.productId}`));
+  if (!want.length || want.length > 8 || keys.size !== want.length) return 'invalid';
   const taifa = client ?? (await tenantTaifa(sql, tenantId));
   if (!taifa) return 'unavailable';
   const intent = await withTenant(sql, tenantId, async (tx) => {
     const [m] = await tx<
       { member_no: number; phone: string }[]
     >`select member_no, phone from members where id = ${memberId} and status = 'active' and phone is not null`;
+    if (!m) return null;
+    const people = [...new Set(want.map((x) => x.memberId))];
+    const family = await tx<{ id: string }[]>`
+      select id from members where id = any(${people}) and status = 'active'
+        and right(regexp_replace(coalesce(phone, ''), '\D', '', 'g'), 9) = right(regexp_replace(${m.phone}, '\D', '', 'g'), 9)`;
+    if (family.length !== people.length) return null;
+    const ids = [...new Set(want.map((x) => x.productId))];
     const ps = await tx<{ id: string; price_kes: number; name: string; service_id: string | null }[]>`
       select id, price_kes, name, service_id from products where id = any(${ids}) and active
         and (products.service_id is null or exists (select 1 from services sv where sv.id = products.service_id
              and sv.active and sv.deleted_at is null and sv.sold_to <> 'walkins'))`;
-    if (!m || ps.length !== ids.length) return null;
-    const services = ps.map((p) => p.service_id ?? p.id);
-    if (new Set(services).size !== services.length) return null;
-    const ordered = ids.map((id) => ps.find((p) => p.id === id) as (typeof ps)[number]);
-    const amount = ordered.reduce((a, p) => a + p.price_kes, 0);
-    const lines = ordered.map((p) => ({ productId: p.id, priceKes: p.price_kes }));
-    const first = ordered[0] as (typeof ps)[number];
+    if (ps.length !== ids.length) return null;
+    const rows = want.map((x) => ({ ...x, p: ps.find((p) => p.id === x.productId) as (typeof ps)[number] }));
+    // One price per service per person.
+    const per = rows.map((r) => `${r.memberId}:${r.p.service_id ?? r.p.id}`);
+    if (new Set(per).size !== per.length) return null;
+    // Only a valid bill counts towards the limit of 3 prompts in 5 minutes.
+    if (!rateLimit(`member-pay:${memberId}`, 3, 5 * 60_000)) return 'wait' as const;
+    const amount = rows.reduce((a, r) => a + r.p.price_kes, 0);
+    const forOthers = rows.some((r) => r.memberId !== memberId);
+    const lines = rows.map((r) => ({
+      productId: r.p.id,
+      priceKes: r.p.price_kes,
+      ...(forOthers ? { memberId: r.memberId } : {}),
+    }));
+    const first = rows[0]?.p as (typeof ps)[number];
     const [i] = await tx<
       { id: string }[]
     >`insert into payment_intents (tenant_id, member_id, product_id, amount_kes, phone, provider, created_by, lines)
       values (${tenantId}, ${memberId}, ${first.id}, ${amount}, ${m.phone}, 'taifapay', ${createdBy},
-              ${ordered.length > 1 ? tx.json(lines as never) : null}) returning id`;
-    const name = ordered.length > 1 ? `${ordered.length} services` : first.name;
+              ${rows.length > 1 || forOthers ? tx.json(lines as never) : null}) returning id`;
+    const name = rows.length > 1 ? `${rows.length} services` : first.name;
     return { id: i?.id as string, amount, ref: String(m.member_no), phone: m.phone, name };
   });
   if (!intent) return 'invalid';
+  if (intent === 'wait') return 'wait';
   try {
     const res = await taifa.stkPush({
       phone: intent.phone,

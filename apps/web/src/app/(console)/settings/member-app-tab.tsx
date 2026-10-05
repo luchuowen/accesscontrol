@@ -1,6 +1,6 @@
 import { withTenant } from '@lango/db';
 import { can, memberRules } from '@lango/server';
-import { CalendarRange, CreditCard, PauseCircle, Smartphone } from 'lucide-react';
+import { CalendarRange, Clock, CreditCard, MapPin, PauseCircle, Phone, Smartphone, UsersRound } from 'lucide-react';
 import { MoneyInput } from '@/components/money-input';
 import { SubmitButton } from '@/components/submit-button';
 import type { Session } from '@/lib/session';
@@ -84,6 +84,57 @@ export async function MemberAppTab({ s, m }: { s: Session; m?: string }) {
             hint="Members block a lost card themselves at once. The fee is shown to them and paid at reception; 0 = free."
           >
             <MoneyInput name="replaceFeeKes" defaultValue={r.card.replaceFeeKes} className="inline-flex h-9 w-32" />
+          </Row>
+        </Group>
+        <Group title="Guests">
+          <Row
+            icon={UsersRound}
+            label={
+              <>
+                Members can buy a guest pass, up to{' '}
+                <input
+                  name="guestPerMonth"
+                  type="number"
+                  min={1}
+                  max={31}
+                  defaultValue={r.guest.perMonth}
+                  aria-label="Guest passes a month"
+                  className={small}
+                />{' '}
+                a month
+              </>
+            }
+            hint="Priced at your walk-in day passes. The guest gets a code by SMS; reception hands a day wristband."
+          >
+            <Switch name="guest" on={r.guest.enabled} label="Members can buy guest passes" />
+          </Row>
+        </Group>
+        <Group title="Club information members see">
+          <Row icon={Clock} label="Opening hours" hint="One line per day or group of days">
+            <textarea
+              name="hours"
+              rows={3}
+              defaultValue={r.info.hours}
+              placeholder={'Mon–Fri 5:30–22:00\nSat–Sun 7:00–20:00'}
+              className="input w-72 py-2 text-[13px]"
+            />
+          </Row>
+          <Row icon={MapPin} label="Location">
+            <input
+              name="address"
+              defaultValue={r.info.address}
+              placeholder="Karura Rd, Nairobi"
+              className="input w-72 py-1.5"
+            />
+          </Row>
+          <Row icon={Phone} label="Club phone">
+            <input
+              name="clubPhone"
+              inputMode="tel"
+              defaultValue={r.info.phone}
+              placeholder="07…"
+              className="input w-40 py-1.5"
+            />
           </Row>
         </Group>
       </fieldset>

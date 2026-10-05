@@ -2,6 +2,7 @@ import { withTenant } from '@lango/db';
 import { can } from '@lango/server';
 import Link from 'next/link';
 import { AddMember } from '@/components/add-member';
+import { GuestCheckIn } from '@/components/guest-checkin';
 import { Notice } from '@/components/notice';
 import { Pager } from '@/components/pager';
 import { PageHeader } from '@/components/ui';
@@ -71,6 +72,7 @@ export default async function Members({ searchParams }: { searchParams: Promise<
         actions={
           <div className="flex flex-wrap gap-2">
             {can(s, 'payments.record') && <WalkIn prices={walkins} variant="outline" />}
+            {can(s, 'payments.record') && <GuestCheckIn />}
             {can(s, 'members.edit') && <ImportMembers />}
             {can(s, 'members.edit') && <AddMember club={club} nextNo={nextNo} variant="primary" />}
           </div>

@@ -13,17 +13,28 @@ import { msisdn, type SourceCodeSms, sendNow } from './sms.js';
 export interface MemberRules {
   pause: { enabled: boolean; minDays: number; maxDays: number; perYear: number };
   card: { replaceFeeKes: number };
+  guest: { enabled: boolean; perMonth: number };
+  /** Shown on the member page under "Club". */
+  info: { hours: string; address: string; phone: string };
 }
 export const DEFAULT_RULES: MemberRules = {
   pause: { enabled: true, minDays: 3, maxDays: 30, perYear: 60 },
   card: { replaceFeeKes: 0 },
+  guest: { enabled: true, perMonth: 4 },
+  info: { hours: '', address: '', phone: '' },
 };
+const text = (v: unknown, max: number) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
 const clamp = (n: unknown, lo: number, hi: number, d: number) => {
   const v = Math.round(Number(n));
   return Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : d;
 };
 export function normaliseRules(raw: unknown): MemberRules {
-  const r = (raw ?? {}) as { pause?: Partial<MemberRules['pause']>; card?: Partial<MemberRules['card']> };
+  const r = (raw ?? {}) as {
+    pause?: Partial<MemberRules['pause']>;
+    card?: Partial<MemberRules['card']>;
+    guest?: Partial<MemberRules['guest']>;
+    info?: Partial<MemberRules['info']>;
+  };
   const d = DEFAULT_RULES;
   const minDays = clamp(r.pause?.minDays, 1, 90, d.pause.minDays);
   const maxDays = Math.max(minDays, clamp(r.pause?.maxDays, 1, 180, d.pause.maxDays));
@@ -35,6 +46,11 @@ export function normaliseRules(raw: unknown): MemberRules {
       perYear: Math.max(maxDays, clamp(r.pause?.perYear, 1, 365, d.pause.perYear)),
     },
     card: { replaceFeeKes: clamp(r.card?.replaceFeeKes, 0, 100_000, d.card.replaceFeeKes) },
+    guest: {
+      enabled: r.guest?.enabled ?? d.guest.enabled,
+      perMonth: clamp(r.guest?.perMonth, 1, 31, d.guest.perMonth),
+    },
+    info: { hours: text(r.info?.hours, 400), address: text(r.info?.address, 160), phone: text(r.info?.phone, 20) },
   };
 }
 export async function memberRules(tx: Tx, tenantId: string): Promise<MemberRules> {

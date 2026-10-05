@@ -3,6 +3,7 @@ import type { Sql } from '@lango/db';
 import { withTenant } from '@lango/db';
 import { DateTime } from 'luxon';
 import { decrypt } from './crypto.js';
+import { settleGuestPayment } from './guests.js';
 import { recordPayment } from './payments.js';
 
 /** TaifaPay merchant API (docs/research/taifapay.md). One merchant account per tenant. */
@@ -232,11 +233,65 @@ export async function settleTaifaTransaction(
           product_id: string | null;
           member_no: number;
           amount_kes: number;
-          lines: { productId: string; priceKes: number }[] | null;
+          lines: { productId: string; priceKes: number; memberId?: string }[] | null;
+          guest_pass_id: string | null;
+          member_id: string;
         }[]
       >`
-      select i.product_id, m.member_no, i.amount_kes, i.lines from payment_intents i join members m on m.id = i.member_id where i.id = ${externalRef}`,
+      select i.product_id, m.member_no, i.amount_kes, i.lines, i.guest_pass_id, i.member_id
+      from payment_intents i join members m on m.id = i.member_id where i.id = ${externalRef}`,
     );
+    const parsedAt = rec.paidAt ? DateTime.fromISO(rec.paidAt, { zone: t.timezone }) : null;
+    const paidAt = parsedAt?.isValid && parsedAt.toMillis() <= Date.now() + 60_000 ? parsedAt.toJSDate() : new Date();
+    // A guest pass: the money is for a friend's day pass; nothing opens for the member who paid.
+    if (it && it.amount_kes === amount && it.guest_pass_id) {
+      const g = await settleGuestPayment(sql, t.id, {
+        guestPassId: it.guest_pass_id,
+        intentId: externalRef,
+        txId,
+        amount,
+        phone: rec.phone,
+        paidAt,
+        raw: { event: raw, verified: truth },
+      });
+      return { status: 200, body: g as unknown as Record<string, unknown> };
+    }
+    // One bill for several family members: each person's lines are recorded as their own payment and pass.
+    if (it && it.amount_kes === amount && it.lines?.some((l) => l.memberId && l.memberId !== it.member_id)) {
+      const groups = new Map<string, { productId: string; priceKes: number }[]>();
+      for (const l of it.lines) {
+        const who = l.memberId ?? it.member_id;
+        groups.set(who, [...(groups.get(who) ?? []), { productId: l.productId, priceKes: l.priceKes }]);
+      }
+      const results: unknown[] = [];
+      let n = 0;
+      for (const [who, ls] of groups) {
+        const [m] = await withTenant(
+          sql,
+          t.id,
+          (tx) => tx<{ member_no: number }[]>`select member_no from members where id = ${who}`,
+        );
+        const sum = ls.reduce((a, l) => a + l.priceKes, 0);
+        results.push(
+          await recordPayment(sql, t.id, {
+            provider: 'taifapay',
+            providerTxnId: n++ === 0 ? txId : `${txId}#${n}`,
+            amountKes: sum,
+            accountRef: String(m?.member_no ?? ''),
+            phone: rec.phone,
+            externalRef,
+            expectedKes: sum,
+            lines: ls,
+            intentId: externalRef,
+            channel: rec.channel,
+            paidAt,
+            raw: { event: raw, verified: truth, family: true },
+          }),
+        );
+      }
+      const first = results[0] as { status: string };
+      return { status: 200, body: { ...first, family: results } as unknown as Record<string, unknown> };
+    }
     if (it && it.amount_kes === amount) {
       productId = it.product_id;
       lines = it.lines;

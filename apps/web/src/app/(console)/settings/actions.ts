@@ -124,6 +124,12 @@ export async function saveMemberRules(form: FormData) {
       perYear: form.get('perYear'),
     },
     card: { replaceFeeKes: String(form.get('replaceFeeKes') ?? '0').replace(/[^\d]/g, '') || 0 },
+    guest: { enabled: form.get('guest') === 'on', perMonth: form.get('guestPerMonth') },
+    info: {
+      hours: String(form.get('hours') ?? ''),
+      address: String(form.get('address') ?? ''),
+      phone: String(form.get('clubPhone') ?? ''),
+    },
   });
   await withTenant(db(), s.tid, async (tx) => {
     await tx`insert into tenant_settings (tenant_id, data) values (${s.tid}, ${tx.json({ memberRules } as never)})
