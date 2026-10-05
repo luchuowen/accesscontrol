@@ -6,7 +6,7 @@ import { usePathname } from 'next/navigation';
 const PAGES = [
   { href: '/partner/clubs', label: 'Clubs', icon: Building2 },
   { href: '/partner/new', label: 'Clubs', icon: Building2 },
-  { href: '/partner/partners', label: 'People', icon: UsersRound },
+  { href: '/partner/partners', label: 'Users', icon: UsersRound },
   { href: '/partner/terms', label: 'Partner terms', icon: Handshake },
   { href: '/partner/settings', label: 'Platform settings', icon: Settings2 },
   { href: '/partner/account', label: 'Your account', icon: CircleUserRound },

@@ -24,8 +24,8 @@ const MSG: Record<string, [tone: 'green' | 'amber' | 'red', text: string]> = {
   'owner-password': ['red', 'Your password was not right, so nothing was sent.'],
   'owner-now': ['green', 'You are now the owner of this club.'],
   missing: ['amber', 'That person is no longer in this club.'],
-  suspended: ['green', 'Login paused. They were signed out and can’t sign in until you restore it.'],
-  restored: ['green', 'Login restored. They can sign in again.'],
+  suspended: ['green', 'User suspended. They were signed out and can’t sign in until you reactivate them.'],
+  restored: ['green', 'User reactivated. They can sign in again.'],
 };
 
 export async function TeamTab({ m }: { m?: string }) {
@@ -46,7 +46,7 @@ export async function TeamTab({ m }: { m?: string }) {
     <>
       <SectionHead
         icon={UsersRound}
-        title="Team & roles"
+        title="Users & roles"
         sub="Who can sign in to this club, and what each person may do."
         action={
           <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[12px] font-semibold text-ink-700 tabular-nums">
@@ -76,8 +76,8 @@ export async function TeamTab({ m }: { m?: string }) {
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="font-medium">{t.name}</span>
                         {t.id === s.uid && <span className="text-xs text-ink-500">(you)</span>}
-                        {!t.accepted_at && <Badge tone="amber">invited</Badge>}
-                        {t.suspended_at && <Badge tone="red">login paused</Badge>}
+                        {!t.accepted_at && <Badge tone="amber">Pending</Badge>}
+                        {t.suspended_at && <Badge tone="red">Suspended</Badge>}
                         {tuned > 0 && <Badge tone="blue">custom permissions</Badge>}
                       </div>
                       <div className="truncate text-xs text-ink-500">
@@ -158,7 +158,7 @@ export async function TeamTab({ m }: { m?: string }) {
                         <form action={resend}>
                           <input type="hidden" name="staffId" value={t.id} />
                           <button type="submit" className="font-medium text-ink-500 hover:text-ink-900">
-                            Resend invitation
+                            Resend invite
                           </button>
                         </form>
                       )}
@@ -170,13 +170,13 @@ export async function TeamTab({ m }: { m?: string }) {
                             type="submit"
                             className={`font-medium ${t.suspended_at ? 'text-emerald-700 hover:text-emerald-800' : 'text-amber-700 hover:text-amber-800'}`}
                           >
-                            {t.suspended_at ? 'Restore login' : 'Pause login'}
+                            {t.suspended_at ? 'Reactivate' : 'Suspend'}
                           </button>
                         </form>
                       )}
                       <details>
                         <summary className="cursor-pointer list-none font-medium text-rose-700 hover:text-rose-800">
-                          {t.accepted_at ? 'Remove' : 'Cancel invitation'}
+                          {t.accepted_at ? 'Remove' : 'Revoke invite'}
                         </summary>
                         <form
                           action={remove}
@@ -192,7 +192,7 @@ export async function TeamTab({ m }: { m?: string }) {
                             pendingText="Removing…"
                             className="btn mt-2 bg-rose-700 py-2 text-xs text-white hover:bg-rose-800"
                           >
-                            {t.accepted_at ? `Remove ${t.name.split(' ')[0]}` : 'Cancel invitation'}
+                            {t.accepted_at ? `Remove ${t.name.split(' ')[0]}` : 'Revoke invite'}
                           </SubmitButton>
                         </form>
                       </details>
@@ -220,7 +220,7 @@ export async function TeamTab({ m }: { m?: string }) {
 
         <div className="min-w-0 space-y-6">
           <section className="rounded-2xl border border-[#E7EBF3] p-5">
-            <div className="font-medium">Invite someone</div>
+            <div className="font-medium">Invite user</div>
             <p className="mb-4 mt-0.5 text-xs text-ink-500">
               They get an email (and an SMS if you add a mobile) to set their own password.
             </p>

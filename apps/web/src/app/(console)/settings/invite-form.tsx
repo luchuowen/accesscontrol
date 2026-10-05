@@ -53,7 +53,7 @@ export function InviteForm({ roles }: { roles: { key: string; label: string; hin
         ))}
       </fieldset>
       <SubmitButton pendingText="Sending…" className="btn-primary w-full">
-        Send invitation
+        Send invite
       </SubmitButton>
     </form>
   );

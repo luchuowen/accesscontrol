@@ -21,7 +21,7 @@ const TABS = [
   { key: 'billing', label: 'Billing', icon: ReceiptText, any: ['billing.manage'] as Perm[] },
   { key: 'sms', label: 'SMS credit', icon: Wallet, any: ['sms.buy', 'messages.manage'] as Perm[] },
   { key: 'notifications', label: 'Notifications', icon: Bell, any: ['messages.manage'] as Perm[] },
-  { key: 'team', label: 'Team & roles', icon: UsersRound, any: ['team.manage'] as Perm[] },
+  { key: 'team', label: 'Users & roles', icon: UsersRound, any: ['team.manage'] as Perm[] },
   { key: 'audit', label: 'System audit', icon: History, any: ['team.manage'] as Perm[] },
 ] as const;
 

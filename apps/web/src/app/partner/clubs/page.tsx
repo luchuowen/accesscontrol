@@ -24,7 +24,7 @@ interface Row {
 
 const MSG: Record<string, [ok: boolean, text: string]> = {
   'owner-invited': [true, 'Invitation sent to the club owner. The link works for 7 days.'],
-  'owner-not-sent': [false, 'The owner was added but the email did not go out. Use “Resend invitation”.'],
+  'owner-not-sent': [false, 'The owner was added but the email did not go out. Use “Resend invite”.'],
   'owner-taken': [
     false,
     'That email already belongs to another club. Each login is for one club only; use a different email.',

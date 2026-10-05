@@ -384,9 +384,9 @@ const GUIDES: Guide[] = [
     href: '/settings?tab=team',
     steps: [
       {
-        title: 'Open Team & roles',
-        text: 'In Settings, open Team & roles and fill in Invite someone.',
-        where: 'Settings › Team & roles',
+        title: 'Open Users & roles',
+        text: 'In Settings, open Users & roles and fill in Invite user.',
+        where: 'Settings › Users & roles',
       },
       {
         title: 'Choose the right role',
@@ -397,7 +397,7 @@ const GUIDES: Guide[] = [
         title: 'Send the invitation',
         text: 'They get an email to set their own password. Remove someone at any time and they are signed out at once.',
         where: 'Invite form',
-        button: { icon: Mail, label: 'Send invitation' },
+        button: { icon: Mail, label: 'Send invite' },
       },
     ],
   },

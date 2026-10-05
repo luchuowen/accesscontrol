@@ -239,7 +239,7 @@ export default async function PartnerClub({
                         <form action={resendOwnerInvite}>
                           <input type="hidden" name="tenantId" value={id} />
                           <SubmitButton pendingText="Sending…" className="btn-ghost px-3 py-1.5 text-[12.5px]">
-                            Resend invitation
+                            Resend invite
                           </SubmitButton>
                         </form>
                       )}
@@ -253,7 +253,7 @@ export default async function PartnerClub({
                   <input name="email" type="email" required placeholder="Email" className="input py-2" />
                   <input name="phone" type="tel" placeholder="Mobile (optional)" className="input py-2" />
                   <SubmitButton pendingText="Sending…" className="btn-primary py-2">
-                    Send invitation
+                    Send invite
                   </SubmitButton>
                 </form>
               ) : (

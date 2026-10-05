@@ -53,7 +53,7 @@ export function RoleMatrix({
     <section className="rounded-2xl border border-[#E7EBF3] p-5">
       <div className="flex flex-wrap items-center gap-2">
         <ShieldCheck size={16} className="text-emerald-600" />
-        <h3 className="font-semibold">What each role can do</h3>
+        <h3 className="font-semibold">Roles & permissions</h3>
         <span className="ml-auto text-[12px] text-ink-500">
           {editable
             ? pending

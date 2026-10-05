@@ -26,7 +26,7 @@ export function PartnerNav({
       on: path.startsWith('/partner/new') || path.startsWith('/partner/clubs'),
     },
     ...(people
-      ? [{ href: '/partner/partners', label: 'People', icon: UsersRound, on: path.startsWith('/partner/partners') }]
+      ? [{ href: '/partner/partners', label: 'Users', icon: UsersRound, on: path.startsWith('/partner/partners') }]
       : []),
     ...(platform
       ? [

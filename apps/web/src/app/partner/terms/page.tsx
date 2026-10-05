@@ -56,7 +56,7 @@ export default async function PartnerTerms({ searchParams }: { searchParams: Pro
       )}
       {terms.length === 0 && (
         <p className="rounded-2xl border border-[#E7EBF3] bg-white p-6 text-[13px] text-ink-500">
-          No partner companies yet. Invite a partner admin under People to add one.
+          No partner organizations yet. Invite a partner admin under Users to add one.
         </p>
       )}
       <div className="grid gap-4">
