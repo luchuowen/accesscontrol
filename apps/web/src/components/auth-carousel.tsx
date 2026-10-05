@@ -4,19 +4,19 @@ import { useEffect, useState } from 'react';
 const STAFF = [
   {
     eyebrow: 'MEMBERSHIP + ACCESS',
-    title: 'Pay and walk in.',
+    title: 'Instant door access',
     body: 'M-Pesa payments activate access within seconds, so members can enter without waiting at the gate for payment confirmation.',
     icon: 'door',
   },
   {
     eyebrow: 'PAYMENTS',
-    title: 'Payments auto-match.',
+    title: 'Payments auto-match',
     body: 'The payment gateway links each payment to the correct member and sends a receipt by SMS and email.',
     icon: 'receipt',
   },
   {
     eyebrow: 'RELIABLE ACCESS',
-    title: 'Access works offline.',
+    title: 'Access works offline',
     body: 'If the internet goes down, members can still enter. Any changes made at the door are saved and updated when the connection returns.',
     icon: 'shield',
   },
@@ -26,19 +26,19 @@ const STAFF = [
 const MEMBERS = [
   {
     eyebrow: 'YOUR ACCESS',
-    title: 'See your membership anytime.',
+    title: 'See your days left',
     body: 'Check which areas you can use and when your membership ends.',
     icon: 'door',
   },
   {
     eyebrow: 'M-PESA',
-    title: 'Renew in seconds.',
+    title: 'Renew in seconds',
     body: 'Pay with M-Pesa from your phone and your access updates right away.',
     icon: 'receipt',
   },
   {
     eyebrow: 'RECEIPTS',
-    title: 'Every payment on record.',
+    title: 'Instant SMS receipts',
     body: 'You get an SMS receipt for every payment you make.',
     icon: 'shield',
   },

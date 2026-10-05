@@ -57,7 +57,7 @@ export default async function MemberPortal({
         : sp.e === '1'
           ? step === 'code'
             ? 'That code isn’t right or has expired. Check the latest SMS and try again.'
-            : 'We couldn’t find an active membership with those details. Check your club code and member number.'
+            : 'We couldn’t find an active membership with those details. Check your member code and member number.'
           : null;
     if (step === 'code') {
       const st = await memberOtpStatus(db(), club.toLowerCase(), Number.parseInt(no, 10));
@@ -110,7 +110,7 @@ export default async function MemberPortal({
           sub={
             step === 'phone'
               ? 'Enter the phone number your club has for you.'
-              : 'Use your club code and member number.'
+              : 'Use your member code and member number.'
           }
         />
         {error && <AuthNotice tone="error">{error}</AuthNotice>}
@@ -119,7 +119,7 @@ export default async function MemberPortal({
             <FromStaff />
             <div>
               <label htmlFor="club" className="auth-label">
-                Club code
+                Member code
               </label>
               <input
                 id="club"
@@ -127,7 +127,7 @@ export default async function MemberPortal({
                 defaultValue={club}
                 required
                 autoCapitalize="none"
-                placeholder="Enter club code, e.g. demo-club"
+                placeholder="Enter member code"
                 className="auth-input"
               />
             </div>
