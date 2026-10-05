@@ -122,7 +122,7 @@ export default async function PartnerClub({
   const tabLink = (k: Tab, label: string, I: typeof DoorOpen) => (
     <Link
       href={`/partner/clubs/${id}${k === 'overview' ? '' : `?tab=${k}`}`}
-      className={`inline-flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-[13px] font-semibold ${tab === k ? 'bg-white text-ink-900 shadow-sm' : 'text-ink-500 hover:text-ink-900'}`}
+      className={`inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-3.5 py-2 text-[13px] font-semibold ${tab === k ? 'bg-white text-ink-900 shadow-sm' : 'text-ink-500 hover:text-ink-900'}`}
     >
       <I size={15} /> {label}
     </Link>
@@ -152,7 +152,7 @@ export default async function PartnerClub({
           <p className="mt-0.5 text-[13px] text-ink-500">
             <span className="font-mono">{club.slug}</span>
             {club.partner ? ` · ${club.partner}` : ''}
-            {owner?.owner_name ? ` · owner ${owner.owner_name}` : ''}
+            {owner?.owner_name ? ` · Owner: ${owner.owner_name}` : ''}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -168,7 +168,7 @@ export default async function PartnerClub({
           )}
         </div>
       </div>
-      <div className="mt-5 inline-flex rounded-xl bg-[#EEF1F6] p-1">
+      <div className="mt-5 flex w-fit max-w-full overflow-x-auto rounded-xl bg-[#EEF1F6] p-1 [scrollbar-width:none]">
         {tabLink('overview', 'Overview', LayoutGrid)}
         {tabLink('pay', 'Payments', CreditCard)}
         {admin && tabLink('billing', 'Billing', ReceiptText)}
@@ -190,8 +190,8 @@ export default async function PartnerClub({
                 ['Active members', `${club.active_members}`, `of ${club.members} on record`],
                 ...(platform
                   ? [
-                      ['Payment Gateway · 30 d', kes(Number(club.via_taifapay)), 'fee-earning volume'],
-                      ['Cash · 30 d', kes(Number(club.cash)), 'recorded at the desk'],
+                      ['Payment Gateway · 30 days', kes(Number(club.via_taifapay)), 'fee-earning volume'],
+                      ['Cash · 30 days', kes(Number(club.cash)), 'recorded at the desk'],
                     ]
                   : [
                       [
@@ -278,6 +278,7 @@ export default async function PartnerClub({
 
 async function Doors({ tenantId }: { tenantId: string }) {
   const d = await doorsBoard(tenantId);
+  const lbl = 'mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-500';
   const host = (await headers()).get('host');
   const base = (process.env.PUBLIC_URL ?? `https://${host}`).replace(/\/$/, '');
   // While a door PC is being installed (or has not read AxTraxNG yet), the page checks again every 5 seconds.
@@ -298,7 +299,7 @@ async function Doors({ tenantId }: { tenantId: string }) {
           ...[...new Set(linked)]
             .filter((id) => !known.some((r) => r.id === id))
             .map((id) => ({ id, name: `Reader ${id}` })),
-        ];
+        ].sort((a, b) => a.id - b.id);
         const zones = d.zones.filter((z) => z.site_id === st.id);
         const online = b?.last_seen_at && Date.now() - b.last_seen_at.getTime() < 10 * 60_000;
         return (
@@ -333,8 +334,14 @@ async function Doors({ tenantId }: { tenantId: string }) {
             </header>
             {b?.pair_code && (
               <div className="grid gap-3 border-b border-[#EEF1F6] bg-[#FAFBFC] px-5 py-4 md:grid-cols-2">
-                <CopyField value={b.pair_code} label="Pairing code" />
-                <CopyField value={`irm ${base}/bridge/install.ps1 | iex`} label="Install command" />
+                <div>
+                  <span className={lbl}>Pairing code · valid 30 days</span>
+                  <CopyField value={b.pair_code} label="Pairing code" />
+                </div>
+                <div>
+                  <span className={lbl}>Install command</span>
+                  <CopyField value={`irm ${base}/bridge/install.ps1 | iex`} label="Install command" />
+                </div>
                 <p className="text-[12px] text-ink-500 md:col-span-2">
                   On the AxTraxNG PC: open PowerShell as Administrator, paste the install command, then give the pairing
                   code and the AxTraxNG operator login (the login stays on that PC).
@@ -372,7 +379,8 @@ async function Doors({ tenantId }: { tenantId: string }) {
                             defaultChecked={z.reader_ids.includes(r.id)}
                             className="h-3.5 w-3.5 accent-emerald-600"
                           />
-                          {r.name} <span className="text-ink-300">#{r.id}</span>
+                          {r.name}
+                          {r.name !== `Reader ${r.id}` && <span className="text-ink-300">#{r.id}</span>}
                         </label>
                       ))
                     ) : (
@@ -416,7 +424,7 @@ async function Billing({ tenantId, uid }: { tenantId: string; uid: string }) {
   ]);
   const navac = !!plat?.ok;
   const state = billingState(plan);
-  const lbl = 'mb-1.5 block text-[11.5px] font-semibold text-ink-500';
+  const lbl = 'mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-500';
   const tone =
     state === 'active'
       ? 'bg-emerald-50 text-emerald-700'
@@ -580,7 +588,7 @@ async function Payments({ tenantId, uid }: { tenantId: string; uid: string }) {
   const host = (await headers()).get('host');
   const base = (process.env.PUBLIC_URL ?? `https://${host}`).replace(/\/$/, '');
   const card = 'rounded-2xl border border-[#E4E8EF] bg-white p-5';
-  const lbl = 'mb-1.5 block text-[11.5px] font-semibold text-ink-500';
+  const lbl = 'mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-500';
   const pill = (ok: boolean, text: string) => (
     <span
       className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11.5px] font-semibold ${ok ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-800'}`}
@@ -665,7 +673,7 @@ async function Payments({ tenantId, uid }: { tenantId: string; uid: string }) {
                   name="paybill"
                   inputMode="numeric"
                   defaultValue={ch.paybill ?? ''}
-                  placeholder="400200"
+                  placeholder="Paybill number"
                   className="input py-2"
                 />
               </label>
@@ -675,7 +683,7 @@ async function Payments({ tenantId, uid }: { tenantId: string; uid: string }) {
                   name="till"
                   inputMode="numeric"
                   defaultValue={ch.till ?? ''}
-                  placeholder="Optional"
+                  placeholder="Till number (optional)"
                   className="input py-2"
                 />
               </label>
@@ -694,7 +702,7 @@ async function Payments({ tenantId, uid }: { tenantId: string; uid: string }) {
               <input
                 name="settlementBank"
                 defaultValue={ch.settlementBank ?? ''}
-                placeholder="KCB · ending 4821"
+                placeholder="Bank and last 4 digits of the account"
                 className="input py-2"
               />
             </label>
@@ -707,7 +715,7 @@ async function Payments({ tenantId, uid }: { tenantId: string; uid: string }) {
               />
               Settlement confirmed by the Payment Gateway
             </label>
-            <SubmitButton pendingText="Saving…" className="btn-ghost py-2.5">
+            <SubmitButton pendingText="Saving…" className="btn-primary py-2.5">
               Save
             </SubmitButton>
           </form>
@@ -770,7 +778,7 @@ async function Comms({ tenantId, uid, admin, slug }: { tenantId: string; uid: st
     </header>
   );
   const card = 'rounded-2xl border border-[#E4E8EF] bg-white p-5';
-  const lbl = 'mb-1.5 block text-[11px] font-medium text-ink-500';
+  const lbl = 'mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-500';
   return (
     <div className="space-y-4">
       <p className="text-[13px] text-ink-500">
@@ -801,8 +809,14 @@ async function Comms({ tenantId, uid, admin, slug }: { tenantId: string; uid: st
         )}
         {wa?.routing_token && (
           <div className="mt-4 grid gap-3 rounded-xl bg-[#FAFBFC] p-4 md:grid-cols-2">
-            <CopyField value={`${base}/api/webhooks/whatsapp/${wa.routing_token}`} label="Callback URL" />
-            <CopyField value={wa.verify_token ?? ''} label="Verify token" />
+            <div>
+              <span className={lbl}>Callback URL</span>
+              <CopyField value={`${base}/api/webhooks/whatsapp/${wa.routing_token}`} label="Callback URL" />
+            </div>
+            <div>
+              <span className={lbl}>Verify token</span>
+              <CopyField value={wa.verify_token ?? ''} label="Verify token" />
+            </div>
             <p className="text-[12px] text-ink-500 md:col-span-2">
               In Meta › WhatsApp › Configuration, paste both, then subscribe the webhook to <b>messages</b>.
             </p>

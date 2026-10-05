@@ -38,6 +38,8 @@ const MSG: Record<string, [ok: boolean, text: string]> = {
   denied: [false, 'You can’t do that for this club.'],
 };
 
+const isOnline = (seen: Date | null) => !!seen && Date.now() - seen.getTime() < 10 * 60_000;
+
 export default async function PartnerClubs({ searchParams }: { searchParams: Promise<{ m?: string; add?: string }> }) {
   const s = await requirePartner();
   const { m, add } = await searchParams;
@@ -45,7 +47,8 @@ export default async function PartnerClubs({ searchParams }: { searchParams: Pro
   const rows = await db()<Row[]>`
     select c.id, c.slug, c.name, c.partner, st.members, st.active_members, st.via_taifapay, st.cash, st.unmatched,
            st.bridge_seen, st.taifapay_env, st.paybill, st.till
-    from app_partner_clubs(${s.uid}) c join app_partner_stats(${s.uid}) st on st.tenant_id = c.id`;
+    from app_partner_clubs(${s.uid}) c join app_partner_stats(${s.uid}) st on st.tenant_id = c.id
+    order by c.name`;
   const progress = await Promise.all(
     rows.map(async (r) => {
       const items = await onboardingChecklist(db(), r.id);
@@ -62,6 +65,8 @@ export default async function PartnerClubs({ searchParams }: { searchParams: Pro
   const [plat] = await db()<{ ok: boolean }[]>`select app_is_platform(${s.uid}) as ok`;
   // Member payment volume is NAVAC's business: only NAVAC admins see it.
   const navac = !!plat?.ok;
+  const live = progress.filter((p) => p.total > 0 && p.done === p.total).length;
+  const onlineCount = rows.filter((r) => isOnline(r.bridge_seen)).length;
   return (
     <>
       <PageHeader
@@ -79,7 +84,64 @@ export default async function PartnerClubs({ searchParams }: { searchParams: Pro
           {msg[1]}
         </div>
       )}
-      <div className="overflow-x-auto rounded-2xl border border-[#E4E8EF] bg-white">
+      {rows.length > 0 && (
+        <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
+          {[
+            ['Clubs', String(rows.length), s.kind === 'partner_tech' ? 'assigned to you' : 'in your portfolio'],
+            ['Live', String(live), 'every setup step done'],
+            ['Setting up', String(rows.length - live), 'steps still open'],
+            ['Door PCs online', `${onlineCount} of ${rows.length}`, 'connected right now'],
+          ].map(([k, v, h]) => (
+            <div key={k} className="rounded-2xl border border-[#E4E8EF] bg-white px-[18px] py-4">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-500">{k}</div>
+              <div className="mt-1.5 text-[26px] font-semibold leading-none tabular-nums tracking-tight">{v}</div>
+              <div className="mt-1.5 truncate text-[12px] text-ink-500">{h}</div>
+            </div>
+          ))}
+        </div>
+      )}
+      {/* Phones: one card per club. */}
+      <ul className="grid gap-2.5 md:hidden">
+        {rows.map((r) => {
+          const p = prog.get(r.id);
+          const on = isOnline(r.bridge_seen);
+          return (
+            <li key={r.id}>
+              <Link
+                href={`/partner/clubs/${r.id}`}
+                className="flex items-center gap-3 rounded-2xl border border-[#E4E8EF] bg-white px-4 py-3.5"
+              >
+                <span className="min-w-0 flex-1">
+                  <b className="block truncate text-[14px]">{r.name}</b>
+                  <span className="block truncate text-[12px] text-ink-500">
+                    {r.active_members} of {r.members} members active ·{' '}
+                    {on
+                      ? 'Door PC online'
+                      : r.bridge_seen
+                        ? `Door PC seen ${ago(r.bridge_seen)}`
+                        : 'Door PC not installed'}
+                  </span>
+                  {p && (
+                    <span className="mt-2 flex items-center gap-2">
+                      <span className="h-1.5 w-20 overflow-hidden rounded-full bg-ink-100">
+                        <span
+                          className="block h-full rounded-full bg-emerald-500"
+                          style={{ width: `${Math.round((p.done / p.total) * 100)}%` }}
+                        />
+                      </span>
+                      <span className="text-[11.5px] tabular-nums text-ink-500">
+                        Setup {p.done}/{p.total}
+                      </span>
+                    </span>
+                  )}
+                </span>
+                <ChevronRight size={18} className="shrink-0 text-ink-300" />
+              </Link>
+            </li>
+          );
+        })}
+      </ul>
+      <div className="hidden overflow-x-auto rounded-2xl border border-[#E4E8EF] bg-white md:block">
         <table className="w-full min-w-[860px] text-[13px]">
           <thead className="bg-[#FAFBFC] text-left">
             <tr>
@@ -90,10 +152,13 @@ export default async function PartnerClubs({ searchParams }: { searchParams: Pro
                 'Payments',
                 'Door PC',
                 'Members',
-                ...(navac ? ['Gateway · 30 d', 'Cash · 30 d'] : []),
+                ...(navac ? ['Money · 30 days'] : []),
                 '',
               ].map((h) => (
-                <th key={h} className="px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.06em] text-ink-500">
+                <th
+                  key={h}
+                  className="whitespace-nowrap px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.06em] text-ink-500"
+                >
                   {h}
                 </th>
               ))}
@@ -103,7 +168,7 @@ export default async function PartnerClubs({ searchParams }: { searchParams: Pro
             {rows.map((r) => {
               const p = prog.get(r.id);
               const o = owners.get(r.id);
-              const online = r.bridge_seen && Date.now() - r.bridge_seen.getTime() < 10 * 60_000;
+              const online = isOnline(r.bridge_seen);
               const href = `/partner/clubs/${r.id}`;
               const dot = (tone: string, text: string) => (
                 <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
@@ -163,15 +228,15 @@ export default async function PartnerClubs({ searchParams }: { searchParams: Pro
                         ? dot('bg-amber-500', `Seen ${ago(r.bridge_seen)}`)
                         : dot('bg-ink-300', 'Not installed')}
                   </td>
-                  <td className="px-4 py-3.5 tabular-nums">
-                    {r.active_members} <span className="text-ink-500">/ {r.members}</span>
+                  <td className="whitespace-nowrap px-4 py-3.5 tabular-nums">
+                    {r.active_members} <span className="text-ink-500">of {r.members}</span>
                     {r.unmatched > 0 && <div className="text-[11px] text-amber-700">{r.unmatched} to sort</div>}
                   </td>
                   {navac && (
-                    <td className="whitespace-nowrap px-4 py-3.5 tabular-nums">{kes(Number(r.via_taifapay))}</td>
-                  )}
-                  {navac && (
-                    <td className="whitespace-nowrap px-4 py-3.5 tabular-nums text-ink-500">{kes(Number(r.cash))}</td>
+                    <td className="whitespace-nowrap px-4 py-3.5 tabular-nums">
+                      {kes(Number(r.via_taifapay))} <span className="text-[11.5px] text-ink-500">gateway</span>
+                      <div className="text-[11.5px] text-ink-500">{kes(Number(r.cash))} cash</div>
+                    </td>
                   )}
                   <td className="px-4 py-3.5 text-right">
                     <Link href={href} aria-label={`Open ${r.name}`} className="text-ink-300 group-hover:text-ink-900">
@@ -183,10 +248,12 @@ export default async function PartnerClubs({ searchParams }: { searchParams: Pro
             })}
           </tbody>
         </table>
-        {rows.length === 0 && (
-          <div className="p-10 text-center text-sm text-ink-500">No clubs yet. Add the first one.</div>
-        )}
       </div>
+      {rows.length === 0 && (
+        <div className="rounded-2xl border border-dashed border-[#DDE2EA] bg-white p-10 text-center text-sm text-ink-500">
+          No clubs yet. Add the first one.
+        </div>
+      )}
     </>
   );
 }

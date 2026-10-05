@@ -60,7 +60,7 @@ const SECTION_OF: Record<string, string> = {
   grant: 'pricing',
 };
 
-const label = 'mb-1.5 block text-[11px] font-medium text-ink-500';
+const label = 'mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-500';
 const input = 'input py-2';
 
 function Head({ title, desc, badge }: { title: string; desc: React.ReactNode; badge?: React.ReactNode }) {
@@ -499,23 +499,22 @@ export default async function PlatformSettings({ searchParams }: { searchParams:
               <Notice id="pricing" />
             </div>
             <div className="mt-5 overflow-x-auto">
-              <table className="w-full text-[13px]">
-                <thead className="border-y border-[#E4E8EF] bg-[#FBFCFD] text-left text-[11px] text-ink-500">
+              <table className="w-full min-w-[720px] text-[13px]">
+                <thead className="whitespace-nowrap border-y border-[#E4E8EF] bg-[#FBFCFD] text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-ink-500">
                   <tr>
-                    <th className="px-6 py-2.5 font-medium">Club</th>
-                    <th className="px-3 py-2.5 font-medium">Sender &amp; price</th>
-                    <th className="px-3 py-2.5 text-right font-medium">Balance</th>
-                    <th className="px-3 py-2.5 text-right font-medium">Sent · 30 d</th>
-                    <th className="px-3 py-2.5 text-right font-medium">Sold · 30 d</th>
-                    <th className="px-6 py-2.5 font-medium">Add free SMS</th>
+                    <th className="px-6 py-2.5">Club</th>
+                    <th className="px-3 py-2.5">Sender &amp; price</th>
+                    <th className="px-3 py-2.5 text-right">Balance</th>
+                    <th className="px-3 py-2.5 text-right">Last 30 days</th>
+                    <th className="px-6 py-2.5" />
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#F0F2F6]">
                   {clubs.map((c) => (
                     <tr key={c.tenant_id}>
                       <td className="px-6 py-3">
-                        <div className="font-medium">{c.name}</div>
-                        <div className="font-mono text-[11px] text-ink-500">{c.slug}</div>
+                        <div className="whitespace-nowrap font-medium">{c.name}</div>
+                        <div className="whitespace-nowrap font-mono text-[11px] text-ink-500">{c.slug}</div>
                       </td>
                       <td className="px-3 py-3">
                         <form action={saveClubSms} className="flex items-center gap-2">
@@ -526,7 +525,7 @@ export default async function PlatformSettings({ searchParams }: { searchParams:
                             placeholder={cfg?.sender ?? 'NAVAC'}
                             maxLength={11}
                             aria-label="Sender ID"
-                            className="input w-28 py-1.5 font-mono text-xs"
+                            className="input w-24 py-1.5 font-mono text-xs"
                           />
                           <input
                             name="priceKes"
@@ -534,7 +533,7 @@ export default async function PlatformSettings({ searchParams }: { searchParams:
                             placeholder={String(price)}
                             inputMode="decimal"
                             aria-label="Price per SMS"
-                            className="input w-16 py-1.5 text-xs"
+                            className="input w-24 py-1.5 text-xs"
                           />
                           <SubmitButton pendingText="…" className="btn-ghost px-3 py-1.5 text-xs">
                             Save
@@ -542,32 +541,39 @@ export default async function PlatformSettings({ searchParams }: { searchParams:
                         </form>
                       </td>
                       <td className="px-3 py-3 text-right tabular-nums">{Number(c.balance).toLocaleString('en-KE')}</td>
-                      <td className="px-3 py-3 text-right tabular-nums text-ink-500">
-                        {Number(c.sent_30d).toLocaleString('en-KE')}
+                      <td className="whitespace-nowrap px-3 py-3 text-right tabular-nums">
+                        {kes(Number(c.sold_kes_30d))}
+                        <div className="text-[11.5px] text-ink-500">
+                          {Number(c.sent_30d).toLocaleString('en-KE')} sent
+                        </div>
                       </td>
-                      <td className="px-3 py-3 text-right tabular-nums">{kes(Number(c.sold_kes_30d))}</td>
-                      <td className="px-6 py-3">
-                        <form action={grantSms} className="flex items-center gap-2">
-                          <input type="hidden" name="tenantId" value={c.tenant_id} />
-                          <input
-                            name="units"
-                            type="number"
-                            required
-                            placeholder="SMS"
-                            aria-label="SMS units"
-                            className="input w-20 py-1.5 text-xs"
-                          />
-                          <input
-                            name="note"
-                            required
-                            placeholder="Reason, e.g. starter credit"
-                            aria-label="Reason"
-                            className="input w-44 py-1.5 text-xs"
-                          />
-                          <SubmitButton pendingText="…" className="btn-ghost px-3 py-1.5 text-xs">
-                            Add
-                          </SubmitButton>
-                        </form>
+                      <td className="px-6 py-3 text-right">
+                        <details className="group inline-block text-left">
+                          <summary className="btn-ghost cursor-pointer list-none px-3 py-1.5 text-xs [&::-webkit-details-marker]:hidden">
+                            Add free SMS
+                          </summary>
+                          <form action={grantSms} className="mt-2 flex items-center gap-2">
+                            <input type="hidden" name="tenantId" value={c.tenant_id} />
+                            <input
+                              name="units"
+                              type="number"
+                              required
+                              placeholder="How many"
+                              aria-label="SMS units"
+                              className="input w-24 py-1.5 text-xs"
+                            />
+                            <input
+                              name="note"
+                              required
+                              placeholder="Reason, e.g. starter credit"
+                              aria-label="Reason"
+                              className="input w-40 py-1.5 text-xs"
+                            />
+                            <SubmitButton pendingText="…" className="btn-ghost px-3 py-1.5 text-xs">
+                              Add
+                            </SubmitButton>
+                          </form>
+                        </details>
                       </td>
                     </tr>
                   ))}

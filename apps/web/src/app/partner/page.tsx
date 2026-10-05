@@ -238,7 +238,7 @@ export default async function PartnerHome({ searchParams }: { searchParams: Prom
       {d.money ? (
         <div className="grid gap-3.5 sm:grid-cols-2 xl:grid-cols-4">
           {tile(
-            d.platform ? `Partner shares · ${days} d` : `You earned · ${days} d`,
+            d.platform ? `Partner shares · ${days} days` : `You earned · ${days} days`,
             kes(d.earned.now),
             change == null ? (
               'Nothing to compare with yet'
@@ -409,7 +409,8 @@ export default async function PartnerHome({ searchParams }: { searchParams: Prom
                   ['Paid so far', d.payout.paidKes, 'text-emerald-700'],
                 ].map(([k, v, c], i) => (
                   <div key={k as string} className={`px-3 py-2.5 ${i < 2 ? 'border-r border-[#EEF1F6]' : ''}`}>
-                    <div className={`text-[18px] font-semibold tabular-nums ${c}`}>
+                    <div className={`text-[16px] font-semibold tabular-nums ${c}`}>
+                      <span className="mr-0.5 text-[10.5px] font-semibold text-ink-500">KES</span>
                       {(v as number).toLocaleString('en-KE')}
                     </div>
                     <div className="text-[11.5px] text-ink-500">{k}</div>
@@ -570,7 +571,7 @@ export default async function PartnerHome({ searchParams }: { searchParams: Prom
               </span>
               <span className="min-w-0 flex-1">
                 <b className="block text-[13.5px]">{i.text}</b>
-                <span className="block truncate text-[12px] text-ink-500">{i.sub}</span>
+                <span className="line-clamp-2 block text-[12px] leading-snug text-ink-500">{i.sub}</span>
               </span>
               <span className="rounded-[10px] border border-[#E1E5EC] px-2.5 py-1.5 text-[12.5px] font-semibold">
                 {i.cta}

@@ -40,7 +40,7 @@ export default async function PartnerTerms({ searchParams }: { searchParams: Pro
   if (!plat?.ok) redirect('/partner');
   const { m } = await searchParams;
   const msg = m ? MSG[m] : undefined;
-  const lbl = 'mb-1.5 block text-[11.5px] font-semibold text-ink-500';
+  const lbl = 'mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-500';
   return (
     <>
       <PageHeader

@@ -4,6 +4,7 @@ import Link from 'next/link';
 
 /** Club setup progress. Every tick is worked out from live data, so it can't drift from reality. */
 const BY = { navac: 'NAVAC sets this up', installer: 'Your installer', club: '' } as const;
+const BY_PARTNER = { navac: 'NAVAC', installer: 'Installer', club: 'Club' } as const;
 
 /**
  * In the club console, steps NAVAC or the installer do are shown with who does them and are not links; in the
@@ -48,15 +49,15 @@ export function Checklist({
               <span className="min-w-0">
                 <span className={i.done ? 'text-ink-700' : 'font-medium'}>{i.label}</span>
                 <span className="block text-xs text-ink-500">{i.hint}</span>
-                {theirs && !i.done && (
+                {!i.done && (theirs || audience === 'partner') && (
                   <span className="mt-1.5 inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-[10.5px] font-semibold text-ink-500">
-                    {BY[i.by]}
+                    {audience === 'partner' ? BY_PARTNER[i.by] : BY[i.by]}
                   </span>
                 )}
               </span>
             </>
           );
-          const cls = `flex items-start gap-2.5 rounded-xl p-3 text-sm ring-1 transition ${i.done ? 'ring-emerald-100 bg-emerald-50/40' : 'ring-ink-100'}`;
+          const cls = `flex h-full items-start gap-2.5 rounded-xl p-3 text-sm ring-1 transition ${i.done ? 'ring-emerald-100 bg-emerald-50/40' : 'ring-ink-100'}`;
           return (
             <li key={i.key}>
               {theirs || audience === 'partner' ? (

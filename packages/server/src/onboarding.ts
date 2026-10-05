@@ -35,7 +35,7 @@ export async function onboardingChecklist(sql: Sql, tenantId: string): Promise<C
     return [
       {
         key: 'taifapay',
-        label: 'Payment Gateway account connected',
+        label: 'Payment Gateway connected',
         done: !!taifa,
         hint: 'Merchant keys verified with the Payment Gateway',
         href: '/settings?tab=payments',
@@ -67,17 +67,17 @@ export async function onboardingChecklist(sql: Sql, tenantId: string): Promise<C
       },
       {
         key: 'doors',
-        label: 'Doors mapped to zones',
+        label: 'Doors linked to areas',
         done: (z?.mapped ?? 0) > 0 && (unmappedInUse?.n ?? 0) === 0,
-        hint: 'Every zone a plan sells opens at least one reader',
+        hint: 'Every area a service opens has a reader',
         href: '/access',
         by: 'installer',
       },
       {
         key: 'plans',
-        label: 'Plans priced',
+        label: 'Services priced',
         done: (p?.n ?? 0) > 0,
-        hint: 'At least one plan on sale',
+        hint: 'At least one service on sale',
         href: '/services',
         by: 'club',
       },
@@ -91,9 +91,9 @@ export async function onboardingChecklist(sql: Sql, tenantId: string): Promise<C
       },
       {
         key: 'first-payment',
-        label: 'First payment through the Payment Gateway',
+        label: 'First payment received',
         done: (pay?.n ?? 0) > 0,
-        hint: 'A real KES 10 test is enough',
+        hint: 'A real KES 10 M-Pesa test is enough',
         href: '/payments',
         by: 'club',
       },

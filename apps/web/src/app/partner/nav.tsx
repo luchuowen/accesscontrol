@@ -17,6 +17,11 @@ export function PartnerNav({
   subtitle: string;
 }) {
   const path = usePathname();
+  const initials = name
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((w) => w[0]?.toUpperCase())
+    .join('');
   const items = [
     { href: '/partner', label: 'Home', icon: LayoutDashboard, on: path === '/partner' },
     {
@@ -42,16 +47,33 @@ export function PartnerNav({
   ];
   return (
     <>
-      <header className="flex items-center gap-4 overflow-x-auto bg-[#0B1629] px-4 py-3 text-[13px] text-[#C9D1DE] lg:hidden print:hidden">
-        <LangoMark size={28} className="shrink-0" />
-        {items.map(({ href, label, on }) => (
-          <Link key={href} href={href} className={`whitespace-nowrap ${on ? 'text-white' : ''}`}>
-            {label}
+      <header className="sticky top-0 z-20 bg-[#0B1629] text-[#C9D1DE] lg:hidden print:hidden">
+        <div className="flex items-center gap-3 px-4 pb-2 pt-3">
+          <LangoMark size={28} className="shrink-0" />
+          <span className="min-w-0 flex-1 leading-tight">
+            <b className="block text-[14px] text-white">Lango</b>
+            <span className="block truncate text-[11px] text-[#8D9AB0]">{subtitle}</span>
+          </span>
+          <Link
+            href="/partner/account"
+            aria-label="Your account"
+            className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-white/10 text-[11px] font-bold text-white"
+          >
+            {initials}
           </Link>
-        ))}
-        <Link href="/partner/account" className="ml-auto shrink-0" aria-label="Your account">
-          <CircleUserRound size={18} />
-        </Link>
+        </div>
+        <nav className="flex gap-1 overflow-x-auto px-3 pb-2.5 [scrollbar-width:none]" aria-label="Sections">
+          {items.map(({ href, label, on, icon: I }) => (
+            <Link
+              key={href}
+              href={href}
+              aria-current={on ? 'page' : undefined}
+              className={`inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-3 py-1.5 text-[12.5px] font-medium ${on ? 'bg-white text-ink-950' : 'text-[#C9D1DE] hover:bg-white/10'}`}
+            >
+              <I size={14} /> {label}
+            </Link>
+          ))}
+        </nav>
       </header>
       <aside className="fixed inset-y-0 left-0 hidden w-64 flex-col bg-[#0B1629] px-4 py-5 text-[#C9D1DE] lg:flex print:hidden">
         <div className="flex items-center gap-2.5 px-2 pb-6">
