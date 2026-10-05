@@ -4,7 +4,7 @@
  * - SMS dispatch through the platform's Source Code account, every 20 s
  * - SMS credit top-ups (NAVAC TaifaPay), every 60 s
  * - expiry reminders, "we miss you", 19:00 staff summaries, every 15 min
- * - door PC (Site Bridge) offline / back online alerts, every 2 min
+ * - door PC (NAVAC Bridge) offline / back online alerts, every 2 min
  * - NAVAC platform alerts (Source Code credit, door PCs down over 1 h), every 15 min
  * Quiet hours and the one-message-a-day limit are applied by the dispatcher, not here.
  */

@@ -44,10 +44,10 @@
 - TaifaPay webhooks can be missed (seen live 2026-10-02): a 60 s poller settles pending STK/invoice requests through
   the same code path as the webhook, exactly once.
 - Onboarding: partner_admin (partner_id null = NAVAC platform) creates clubs in one step (`app_create_club`) and opens
-  any club as owner. The Site Bridge sends an AxTraxNG inventory (readers, groups, users+cards) for zone mapping and
+  any club as owner. The NAVAC Bridge sends an AxTraxNG inventory (readers, groups, users+cards) for zone mapping and
   member import; staff groups are never imported; imported users keep today's end date or get a grace period.
-- Site Bridge installs with `irm <lango>/bridge/install.ps1 | iex`; the AxTraxNG login stays in
-  C:\ProgramData\Lango\site.json (SYSTEM/Administrators only).
+- NAVAC Bridge installs with `irm <lango>/bridge/install.ps1 | iex`; the AxTraxNG login stays in
+  C:\ProgramData\NAVAC Bridge\site.json (SYSTEM/Administrators only).
 - Active plans have unique prices (a paybill payment must match exactly one plan); mismatches go to the
   missed-payment queue, where staff assign them (amount must equal the plan price).
 - SMS etiquette (dispatcher-enforced): quiet hours per club (default 20:00–07:00, club timezone) hold everything

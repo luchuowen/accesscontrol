@@ -1,6 +1,6 @@
 # Lango — agent rules (factory v2.1)
 
-Pay-to-access membership SaaS that writes into Rosslare AxTraxNG via an on-site Site Bridge.
+Pay-to-access membership SaaS that writes into Rosslare AxTraxNG via an on-site NAVAC Bridge.
 Read `docs/BLUEPRINT.md` (architecture, data model, rules, protocol) before designing anything.
 
 ## Commands

@@ -73,7 +73,7 @@ export async function queueWinbacks(sql: Sql): Promise<number> {
 }
 
 /**
- * Site Bridge (door PC) watch: one alert when it has been silent for 15 minutes, one "back online" when it returns.
+ * NAVAC Bridge (door PC) watch: one alert when it has been silent for 15 minutes, one "back online" when it returns.
  * If it returns before the alert went out (e.g. overnight), neither is sent.
  */
 export async function watchBridges(sql: Sql, offlineAfterMin = 15): Promise<number> {

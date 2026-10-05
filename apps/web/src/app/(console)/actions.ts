@@ -285,7 +285,7 @@ const zoneKey = (name: string) =>
     .replace(/^-+|-+$/g, '')
     .slice(0, 30);
 
-/** Create a zone or change which AxTraxNG readers it opens (readers come from the Site Bridge's inventory). */
+/** Create a zone or change which AxTraxNG readers it opens (readers come from the NAVAC Bridge's inventory). */
 /**
  * Add or rename an area. Club owners and managers name their areas; only the installer links door readers to them
  * (doors.setup): for anyone else the readers already linked are kept as they are.
@@ -324,7 +324,7 @@ export async function saveZone(form: FormData) {
   redirect(`/access?n=${r}`);
 }
 
-/** Ask the Site Bridge to read AxTraxNG again (doors, groups, users) on its next sync. */
+/** Ask the NAVAC Bridge to read AxTraxNG again (doors, groups, users) on its next sync. */
 export async function requestInventory(form: FormData) {
   const s = await requireSession();
   if (!can(s, 'doors.setup')) redirect('/access?n=forbidden');

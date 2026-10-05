@@ -3,8 +3,10 @@ import { AxtraxClient } from '@lango/axtrax';
 import { Bridge } from './bridge.js';
 import { Journal } from './journal.js';
 
-// Site settings written by the installer (AxTraxNG login, pairing code); environment variables still win.
-const siteFile = `${process.env.LANGO_DATA ?? (process.platform === 'win32' ? 'C:\\ProgramData\\Lango' : './.lango')}/site.json`;
+// NAVAC Bridge. Site settings are written by the installer (AxTraxNG login, pairing code); environment variables win.
+// Settings use NAVAC_BRIDGE_* names; the LANGO_* names of the first installs are still read.
+const DEFAULT_DATA = process.platform === 'win32' ? 'C:\\ProgramData\\NAVAC Bridge' : './.navac-bridge';
+const siteFile = `${process.env.NAVAC_BRIDGE_DATA ?? process.env.LANGO_DATA ?? DEFAULT_DATA}/site.json`;
 const site: Record<string, string> = (() => {
   try {
     return JSON.parse(readFileSync(siteFile, 'utf8').replace(/^\uFEFF/, ''));
@@ -13,12 +15,13 @@ const site: Record<string, string> = (() => {
   }
 })();
 const env = (k: string, d?: string) => {
-  const v = process.env[k] ?? site[k] ?? d;
+  const old = k.replace(/^NAVAC_BRIDGE_/, 'LANGO_');
+  const v = process.env[k] ?? process.env[old] ?? site[k] ?? site[old] ?? d;
   if (v === undefined) throw new Error(`missing ${k}`);
   return v;
 };
-const dataDir = env('LANGO_DATA', process.platform === 'win32' ? 'C:\\ProgramData\\Lango' : './.lango');
-const cloud = env('LANGO_CLOUD');
+const dataDir = env('NAVAC_BRIDGE_DATA', DEFAULT_DATA);
+const cloud = env('NAVAC_BRIDGE_CLOUD');
 const credFile = `${dataDir}/bridge.json`;
 mkdirSync(dataDir, { recursive: true });
 
@@ -44,7 +47,7 @@ async function credentials(): Promise<{ bridgeId: string; secret: string }> {
   const r = await fetch(`${cloud}/api/bridge/pair`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ code: env('LANGO_PAIR_CODE'), version: '0.1.0' }),
+    body: JSON.stringify({ code: env('NAVAC_BRIDGE_PAIR_CODE'), version: '0.1.0' }),
   });
   if (!r.ok) throw new Error(`pairing failed: HTTP ${r.status} ${await r.text()}`);
   const c = (await r.json()) as { bridgeId: string; secret: string };

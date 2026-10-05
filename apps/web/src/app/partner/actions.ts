@@ -62,7 +62,7 @@ async function inviterName(uid: string, name: string) {
   return `${name} from ${p?.name ?? 'NAVAC Global'}`;
 }
 
-/** One form → a ready club: tenant, site, pairing code for the Site Bridge, and an emailed invitation for the owner. */
+/** One form → a ready club: tenant, site, pairing code for the NAVAC Bridge, and an emailed invitation for the owner. */
 export async function createClub(_prev: CreateClubState, form: FormData): Promise<CreateClubState> {
   const s = await requirePartner();
   if (s.kind !== 'partner_admin') return { error: 'Only a partner admin can add clubs.' };
@@ -552,7 +552,7 @@ const toClub = (tenantId: string, tab: string, n: string): never =>
   redirect(`/partner/clubs/${tenantId}?tab=${tab}&n=${n}`);
 const INSTALLERS = ['partner_admin', 'partner_tech'];
 
-/** Installer: which door readers open each area (from the readers the Site Bridge read from AxTraxNG). */
+/** Installer: which door readers open each area (from the readers the NAVAC Bridge read from AxTraxNG). */
 export async function partnerSaveReaders(form: FormData) {
   const { s, tenantId } = await partnerClub(form, INSTALLERS);
   const zoneId = String(form.get('zoneId') ?? '');
@@ -567,7 +567,7 @@ export async function partnerSaveReaders(form: FormData) {
   toClub(tenantId, 'doors', 'readers-saved');
 }
 
-/** Installer: ask the Site Bridge to read AxTraxNG again on its next sync. */
+/** Installer: ask the NAVAC Bridge to read AxTraxNG again on its next sync. */
 export async function partnerInventory(form: FormData) {
   const { tenantId } = await partnerClub(form, INSTALLERS);
   const siteId = String(form.get('siteId') ?? '');

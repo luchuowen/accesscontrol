@@ -68,7 +68,7 @@ export const DriftRequest = z.object({
 });
 
 /**
- * What the site's AxTraxNG already holds, sent by the Site Bridge so a club can be onboarded from its existing
+ * What the site's AxTraxNG already holds, sent by the NAVAC Bridge so a club can be onboarded from its existing
  * setup: doors/readers to map to zones, and existing users + cards to import. Never includes biometrics.
  */
 export const InventoryRequest = z.object({

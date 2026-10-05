@@ -2,7 +2,7 @@
 
 Working name **Lango** (Swahili: gate). Final brand to be agreed with John.
 Pay-to-access membership platform: a multi-tenant cloud business system that writes member access
-directly into Rosslare AxTraxNG through an on-site **Site Bridge**.
+directly into Rosslare AxTraxNG through an on-site **NAVAC Bridge**.
 
 Sources: `docs/research/*` (AxTraxNG REST API v2.0 spec, TaifaPay docs, meeting prep, AxTraxNG PDFs),
 John's requirements (`docs/research/john-requirements.md`).
@@ -23,7 +23,7 @@ John's requirements (`docs/research/john-requirements.md`).
  Member phone ──► Member Portal (PWA) ─┐
  Reception PC ──► Staff Console ───────┤        ┌──────────── CLIENT SITE (LAN) ────────────┐
  John ─────────► Partner Console ──────┤        │                                            │
-                                       ▼        │  Site Bridge (Windows service)             │
+                                       ▼        │  NAVAC Bridge (Windows service)             │
                  ┌──────── Lango Cloud ───────┐ │   ├ outbound HTTPS long-poll  ◄────────────┼── no inbound ports
  TaifaPay ──────►│ Next.js app + API          │◄┼───┤ local journal (desired state, schedule)│
   (webhooks)     │ Postgres (RLS per tenant)  │ │   └ AxTraxNG adapter ──► REST API :8080     │
@@ -40,7 +40,7 @@ John's requirements (`docs/research/john-requirements.md`).
 
 | Fact (from REST API v2.0 spec) | Design consequence |
 |---|---|
-| REST service is LAN-only, HTTP, Windows, port 8080; `POST /token` (password grant), bearer on every call | Site Bridge on the AxTraxNG server, talks to `localhost:8080`; cloud never reaches the site |
+| REST service is LAN-only, HTTP, Windows, port 8080; `POST /token` (password grant), bearer on every call | NAVAC Bridge on the AxTraxNG server, talks to `localhost:8080`; cloud never reaches the site |
 | Every response is `{Data, Errors}`, HTTP 200 even on failure | Adapter treats non-empty `Errors` as failure |
 | User = `EmployeeInfoDT`: `EmpNumCompany` (user number), `bValidDate`, `dtStartDate`, `dtStopDate`, `bAccessDenied`, `UserAccGrp`, `UserDepartment`, `UserCards[]` | Member number = `EmpNumCompany` = M-Pesa account ref |
 | **One access group per user** (`UserAccGrp`) | Bridge maintains *combination* groups (`LG: Gym+Sauna`) built from zone readers |
@@ -64,7 +64,7 @@ whether `bValidDate` must be true, local-time vs UTC for dates, token TTL, AddUs
   expiry reminders, reconciliation, event ingestion.
 - Auth: staff = email/phone + password (+ SMS OTP for owners/managers); members = phone + SMS OTP.
 
-### 4.2 Site Bridge (`apps/bridge`)
+### 4.2 NAVAC Bridge (`apps/bridge`)
 - Node 22 TypeScript service packaged as a single Windows executable, run as a Windows service (WinSW).
   Installer = MSI/zip + `pair <code>` command. Config in `%ProgramData%\Lango\bridge.json` (DPAPI-protected secret).
 - **Outbound only:** `POST /api/bridge/pair`, then long-poll `GET /api/bridge/sync?cursor=` (25 s hold).
@@ -188,7 +188,7 @@ Auth: `Authorization: Bridge <bridgeId>:<HMAC-SHA256(secret, method|path|timesta
 | Env | Where |
 |---|---|
 | Dev / CI | Container: Postgres 16 + fake AxTraxNG; all tests run without Windows |
-| Lab (mimic John) | **Google Cloud Compute Engine, Windows Server 2019 Datacenter, e2-standard-2, 60 GB SSD, region africa-south1 (Johannesburg)**: AxTraxNG 27.7.1.2x + SQL Express (VERITRAX) + REST API 2.0 + Site Bridge. RDP restricted to Owen's IP. |
+| Lab (mimic John) | **Google Cloud Compute Engine, Windows Server 2019 Datacenter, e2-standard-2, 60 GB SSD, region africa-south1 (Johannesburg)**: AxTraxNG 27.7.1.2x + SQL Express (VERITRAX) + REST API 2.0 + NAVAC Bridge. RDP restricted to Owen's IP. |
 | Production | Cloud Run (africa-south1) for `apps/web` + worker; Cloud SQL Postgres 16; Secret Manager; domain e.g. `lango.navac.co.ke` |
 
 Why GCP: Owen already runs Cloud Run/Firebase there; Johannesburg is the closest region to Nairobi; Windows

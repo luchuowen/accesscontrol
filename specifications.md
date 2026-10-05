@@ -17,7 +17,7 @@ zones. Desired AxTraxNG state per member = `AccessState` (versioned), derived, n
 
 ## Device floor
 - Staff console: desktop/laptop Chrome/Edge, 1280 px+. Member portal: Android phone, 360 px, 3G.
-- Site Bridge: Windows 10 / Server 2016+ (same machine as AxTraxNG 27.7.1.20+, REST API 2.0).
+- NAVAC Bridge: Windows 10 / Server 2016+ (same machine as AxTraxNG 27.7.1.20+, REST API 2.0).
 
 ## Out of scope (v1)
 Biometric template capture (vendor tool stays), AxTraxPro/ZKTeco adapters, POS/inventory, payroll,

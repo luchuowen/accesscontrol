@@ -5,7 +5,7 @@ at 50/90/100 %). Delete the project to remove everything.
 
 | Resource | What | Cost control |
 |---|---|---|
-| `lango-axtrax` (africa-south1-a) | Windows Server 2019, e2-standard-2, 60 GB: AxTraxNG 27.7.1.20 + SQL Express (VERITRAX) + AxTraxNG REST API 2.0 + Lango Site Bridge (scheduled task "Lango Site Bridge") | Stops itself daily 21:00 Nairobi (`lango-nightly-stop`). Bills only while running + disk. |
+| `lango-axtrax` (africa-south1-a) | Windows Server 2019, e2-standard-2, 60 GB: AxTraxNG 27.7.1.20 + SQL Express (VERITRAX) + AxTraxNG REST API 2.0 + NAVAC Bridge (scheduled task "NAVAC Bridge") | Stops itself daily 21:00 Nairobi (`lango-nightly-stop`). Bills only while running + disk. |
 | `lango-cloud` (us-central1-a) | Debian 12 e2-micro (free tier): Postgres 15, Node 22, Caddy (auto HTTPS), Lango web as `lango-web.service` | Free tier eligible. |
 | URL | `https://lango.34-71-138-135.sslip.io` (console `/`, member portal `/m`) | — |
 
@@ -48,9 +48,10 @@ job files dropped into `lab/queue/`, writing output to `lab/results/`:
   confirmed by the bridge ack 3.1 s after the payment was recorded. Lapsed members move to Unauthorized with cards
   inactive. Leftover group `LG: probe` (from the API probe) cannot be deleted through the REST API.
 
-## Update the Site Bridge
-Bundle `apps/bridge/src/main.ts` with esbuild (node22 ESM), gzip+base64 it into a `.ps1` job that stops the task, writes
-`lango-bridge.mjs`, checks its SHA-256, removes `bridge.lock` and starts the task (pattern: `lab/hold/5x-*.ps1`).
+## Update the NAVAC Bridge
+A `.ps1` job runs the installer unattended: `$env:NAVAC_BRIDGE_UPGRADE = '1'; irm <lango>/bridge/install.ps1 | iex`.
+On a paired PC it asks nothing, keeps the pairing and AxTraxNG login, and moves first installs from the old `Lango`
+folders to `C:\Program Files\NAVAC Bridge` and `C:\ProgramData\NAVAC Bridge`.
 Every `.ps1` job reboots the Windows VM; the REST service answers ~2 min after boot.
 
 ## Proof 2 (2026-10-02, after two review passes)
