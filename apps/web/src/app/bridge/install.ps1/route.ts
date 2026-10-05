@@ -31,7 +31,7 @@ Write-Host ''; Write-Host '  NAVAC Bridge' -ForegroundColor Green; Write-Host ' 
 New-Item -ItemType Directory -Force $app, $data | Out-Null
 $paired = Test-Path "$data\bridge.json"
 $code = ''
-if ($paired) { $code = (Read-Host '  Already connected. To move this PC to another club, enter its pairing code (or press Enter to keep it)').Trim().ToUpper() } else { $code = (Read-Host '  Pairing code (club console > Doors & access)').Trim().ToUpper() }
+if ($paired) { $code = (Read-Host '  Already connected. To move this PC to another club, enter its pairing code (or press Enter to keep it)').Trim().ToUpper() } else { $code = (Read-Host '  Pairing code (partner console > Clubs > this club > Doors)').Trim().ToUpper() }
 # On a PC that already runs the bridge, the saved AxTraxNG login is offered: press Enter to keep it.
 $old = $null; try { $old = Get-Content "$data\site.json" -Raw -ErrorAction Stop | ConvertFrom-Json } catch {}
 $defUrl = if ($old -and $old.AXTRAX_URL) { $old.AXTRAX_URL } else { 'http://localhost:8080' }
@@ -84,6 +84,6 @@ for ($i = 0; $i -lt 20; $i++) {
   $log = Get-Content "$data\bridge.log" -Tail 3 -ErrorAction SilentlyContinue
   if ($log -match 'pairing failed') { throw "Pairing failed: the code is wrong, used or expired. Get a new one in the club console. ($($log -join ' '))" }
 }
-if (Test-Path "$data\bridge.json") { Write-Host '  Done. This site is connected to Lango; refresh Doors & access in the console.' -ForegroundColor Green }
+if (Test-Path "$data\bridge.json") { Write-Host '  Done. This site is connected to Lango; the Doors tab in the console updates by itself.' -ForegroundColor Green }
 else { Write-Host "  Installed, still connecting. If the console does not show the bridge online within 2 minutes, send $data\bridge.log to support." -ForegroundColor Yellow }
 `;
