@@ -4,13 +4,13 @@ import { useEffect, useState } from 'react';
 const STAFF = [
   {
     eyebrow: 'MEMBERSHIP + ACCESS',
-    title: 'Paid members get access immediately.',
+    title: 'Pay and walk in.',
     body: 'M-Pesa payments activate access within seconds, so members can enter without waiting at the gate for payment confirmation.',
     icon: 'door',
   },
   {
     eyebrow: 'PAYMENTS',
-    title: 'Payments are recorded automatically.',
+    title: 'Payments auto-match.',
     body: 'The payment gateway links each payment to the correct member and sends a receipt by SMS and email.',
     icon: 'receipt',
   },

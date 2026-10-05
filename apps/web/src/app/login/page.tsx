@@ -31,7 +31,7 @@ export default async function Login({ searchParams }: { searchParams: Promise<{ 
   const note = m ? NOTES[m] : undefined;
   return (
     <AuthShell>
-      <AuthHeading title="Welcome back" sub="Sign in to your Lango account." />
+      <AuthHeading title="Staff sign-in" sub="Sign in with your work email." />
       {e && ERRORS[e] && <AuthNotice tone="error">{ERRORS[e]}</AuthNotice>}
       {!e && note && <AuthNotice tone={note[0]}>{note[1]}</AuthNotice>}
       <form action={login} className="mt-8 grid gap-[18px]">

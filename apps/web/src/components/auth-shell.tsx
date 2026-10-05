@@ -16,9 +16,8 @@ export function AuthShell({
     <div className="auth-bg grid min-h-screen place-items-center sm:p-6">
       <div className="grid min-h-screen w-full overflow-hidden bg-white sm:min-h-0 sm:max-w-[520px] sm:rounded-[20px] sm:shadow-[0_30px_80px_rgba(15,23,41,.18)] lg:min-h-[620px] lg:max-w-[1040px] lg:grid-cols-2">
         <div className="auth-panel relative hidden flex-col items-center p-11 text-white lg:flex">
-          <div className="flex items-center gap-2.5 self-center">
+          <div className="flex justify-center self-center">
             <LangoMark size={36} />
-            <span className="text-lg font-semibold">Lango</span>
           </div>
           <div className="my-auto py-8">
             <AuthCarousel audience={audience} />
@@ -26,9 +25,8 @@ export function AuthShell({
           <div className="text-[11px] tracking-[0.08em] text-[#6B7A90]">© {new Date().getFullYear()} NAVAC GLOBAL</div>
         </div>
         <div className="flex flex-col justify-center px-6 py-10 sm:px-12 lg:px-[60px] lg:py-16">
-          <div className="mb-8 flex items-center gap-2.5 lg:hidden">
+          <div className="mb-8 flex justify-center lg:hidden">
             <LangoMark size={32} />
-            <span className="text-base font-semibold">Lango</span>
           </div>
           {children}
           <div className="mt-10 text-center text-[11px] tracking-[0.08em] text-[#94A3B8] lg:hidden">© NAVAC GLOBAL</div>

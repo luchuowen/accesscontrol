@@ -45,9 +45,9 @@ export default async function MemberPortal({
     const BackToStaff = () =>
       staff ? (
         <p className="mt-3 text-center text-[13px] text-slate-500">
-          Staff?{' '}
+          Not a member?{' '}
           <a href="/login" className="auth-link font-semibold">
-            Sign in with email
+            Staff sign-in
           </a>
         </p>
       ) : null;
@@ -106,11 +106,11 @@ export default async function MemberPortal({
     return (
       <AuthShell audience="members">
         <AuthHeading
-          title={step === 'phone' ? 'Confirm your phone' : 'Your membership'}
+          title={step === 'phone' ? 'Confirm your phone' : 'Member sign-in'}
           sub={
             step === 'phone'
               ? 'Enter the phone number your club has for you.'
-              : 'Sign in with your club code and member number.'
+              : 'Use your club code and member number.'
           }
         />
         {error && <AuthNotice tone="error">{error}</AuthNotice>}
