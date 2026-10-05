@@ -32,9 +32,37 @@ $app = 'C:\Program Files\NAVAC Bridge'; $data = 'C:\ProgramData\NAVAC Bridge'
 $oldApp = 'C:\Program Files\Lango Bridge'; $oldData = 'C:\ProgramData\Lango'
 Write-Host ''; Write-Host '  NAVAC Bridge' -ForegroundColor Green; Write-Host '  Connects this AxTraxNG server to Lango. Doors keep working if the internet drops.'; Write-Host ''
 New-Item -ItemType Directory -Force $app, $data | Out-Null
-# First installs used the Lango folder names: stop that bridge and carry its pairing, journal and settings over.
-$moved = $false
-if ((Test-Path "$oldData\bridge.json") -and -not (Test-Path "$data\bridge.json")) {
+# If anything fails after the old bridge was stopped, start it again so the doors are never left without a bridge.
+$moved = $false; $registered = $false
+trap { if ($moved -and -not $registered) { foreach ($t in 'Lango Site Bridge', 'NAVAC Bridge') { Start-ScheduledTask -TaskName $t -ErrorAction SilentlyContinue } }; break }
+$paired = (Test-Path "$data\bridge.json") -or (Test-Path "$oldData\bridge.json")
+$quiet = $paired -and ($env:NAVAC_BRIDGE_UPGRADE -eq '1')
+$code = ''
+if ($quiet) { Write-Host '  Upgrading in place, keeping the pairing and the AxTraxNG login.' }
+elseif ($paired) { $code = (Read-Host '  Already connected. To move this PC to another club, enter its pairing code (or press Enter to keep it)').Trim().ToUpper() } else { $code = (Read-Host '  Pairing code (partner console > Clubs > this club > Doors)').Trim().ToUpper() }
+# On a PC that already runs the bridge, the saved AxTraxNG login is offered: press Enter to keep it.
+$old = $null; foreach ($f in "$data\site.json", "$oldData\site.json") { if (-not $old) { try { $old = Get-Content $f -Raw -ErrorAction Stop | ConvertFrom-Json } catch {} } }
+# The very first installs kept the AxTraxNG login in run.cmd instead of site.json.
+$cmd = @{}
+foreach ($f in "$oldApp\run.cmd", "$app\run.cmd") { if (Test-Path $f) { Get-Content $f | ForEach-Object { if ($_ -match '^\s*set\s+"?([A-Z_]+)=(.*?)"?\s*$' -and -not $cmd.ContainsKey($Matches[1])) { $cmd[$Matches[1]] = $Matches[2] } } } }
+if (-not $old) { $old = [pscustomobject]@{} }
+foreach ($k in 'AXTRAX_URL', 'AXTRAX_USER', 'AXTRAX_PASSWORD') { if (-not $old.$k -and $cmd[$k]) { $old | Add-Member -NotePropertyName $k -NotePropertyValue $cmd[$k] -Force } }
+$defUrl = if ($old.AXTRAX_URL) { $old.AXTRAX_URL } else { 'http://localhost:8080' }
+$defUser = if ($old.AXTRAX_USER) { $old.AXTRAX_USER } else { 'Administrator' }
+if ($quiet) { $axUrl = $defUrl; $axUser = $defUser; $axPass = $old.AXTRAX_PASSWORD } else {
+$axUrl = Read-Host "  AxTraxNG REST address [$defUrl]"; if (-not $axUrl) { $axUrl = $defUrl }
+$axUser = Read-Host "  AxTraxNG operator [$defUser]"; if (-not $axUser) { $axUser = $defUser }
+$hint = if ($old.AXTRAX_PASSWORD) { ' (Enter keeps the saved one)' } else { '' }
+$sec = Read-Host "  AxTraxNG operator password$hint" -AsSecureString
+$axPass = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($sec))
+if (-not $axPass -and $old.AXTRAX_PASSWORD) { $axPass = $old.AXTRAX_PASSWORD }
+}
+Write-Host '  Checking the AxTraxNG login...'
+try { $null = Invoke-RestMethod -UseBasicParsing -Method Post -Uri "$axUrl/token" -ContentType 'application/x-www-form-urlencoded' -Body @{ grant_type = 'password'; username = $axUser; password = $axPass } }
+catch { throw "Could not sign in to the AxTraxNG REST API at $axUrl. Check the REST service is running and the operator login. ($($_.Exception.Message))" }
+# First installs used the Lango folder names: once the login is checked, stop that bridge and carry its pairing,
+# journal and settings over.
+if (Test-Path "$oldData\bridge.json") {
   Write-Host '  Moving the existing bridge to the NAVAC Bridge folders...'
   foreach ($t in 'NAVAC Bridge', 'Lango Site Bridge') { Stop-ScheduledTask -TaskName $t -ErrorAction SilentlyContinue }
   Get-Process node -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "$oldApp*" } | Stop-Process -Force
@@ -43,26 +71,6 @@ if ((Test-Path "$oldData\bridge.json") -and -not (Test-Path "$data\bridge.json")
   if ((Test-Path "$oldApp\node\node.exe") -and -not (Test-Path "$app\node\node.exe")) { Copy-Item "$oldApp\node" "$app\node" -Recurse -Force }
   $moved = $true
 }
-$paired = Test-Path "$data\bridge.json"
-$quiet = $paired -and ($env:NAVAC_BRIDGE_UPGRADE -eq '1')
-$code = ''
-if ($quiet) { Write-Host '  Upgrading in place, keeping the pairing and the AxTraxNG login.' }
-elseif ($paired) { $code = (Read-Host '  Already connected. To move this PC to another club, enter its pairing code (or press Enter to keep it)').Trim().ToUpper() } else { $code = (Read-Host '  Pairing code (partner console > Clubs > this club > Doors)').Trim().ToUpper() }
-# On a PC that already runs the bridge, the saved AxTraxNG login is offered: press Enter to keep it.
-$old = $null; try { $old = Get-Content "$data\site.json" -Raw -ErrorAction Stop | ConvertFrom-Json } catch {}
-$defUrl = if ($old -and $old.AXTRAX_URL) { $old.AXTRAX_URL } else { 'http://localhost:8080' }
-$defUser = if ($old -and $old.AXTRAX_USER) { $old.AXTRAX_USER } else { 'Administrator' }
-if ($quiet) { $axUrl = $defUrl; $axUser = $defUser; $axPass = $old.AXTRAX_PASSWORD } else {
-$axUrl = Read-Host "  AxTraxNG REST address [$defUrl]"; if (-not $axUrl) { $axUrl = $defUrl }
-$axUser = Read-Host "  AxTraxNG operator [$defUser]"; if (-not $axUser) { $axUser = $defUser }
-$hint = if ($old -and $old.AXTRAX_PASSWORD) { ' (Enter keeps the saved one)' } else { '' }
-$sec = Read-Host "  AxTraxNG operator password$hint" -AsSecureString
-$axPass = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($sec))
-if (-not $axPass -and $old -and $old.AXTRAX_PASSWORD) { $axPass = $old.AXTRAX_PASSWORD }
-}
-Write-Host '  Checking the AxTraxNG login...'
-try { $null = Invoke-RestMethod -UseBasicParsing -Method Post -Uri "$axUrl/token" -ContentType 'application/x-www-form-urlencoded' -Body @{ grant_type = 'password'; username = $axUser; password = $axPass } }
-catch { throw "Could not sign in to the AxTraxNG REST API at $axUrl. Check the REST service is running and the operator login. ($($_.Exception.Message))" }
 if (-not (Test-Path "$app\node\node.exe")) {
   Write-Host '  Downloading Node.js runtime...'
   Invoke-WebRequest -UseBasicParsing https://nodejs.org/dist/v22.20.0/node-v22.20.0-win-x64.zip -OutFile "$env:TEMP\navac-bridge-node.zip"
@@ -94,6 +102,7 @@ $act = New-ScheduledTaskAction -Execute 'cmd.exe' -Argument ('/c "' + "$app\run.
 $trg = New-ScheduledTaskTrigger -AtStartup
 $set = New-ScheduledTaskSettingsSet -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero) -AllowStartIfOnBatteries
 Register-ScheduledTask -TaskName 'NAVAC Bridge' -Action $act -Trigger $trg -Settings $set -User 'SYSTEM' -RunLevel Highest -Force | Out-Null
+$registered = $true
 Start-ScheduledTask -TaskName 'NAVAC Bridge'
 Write-Host '  Starting...'
 for ($i = 0; $i -lt 20; $i++) {
