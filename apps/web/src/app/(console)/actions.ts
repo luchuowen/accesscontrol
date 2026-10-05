@@ -167,10 +167,15 @@ export async function grantOverride(form: FormData) {
     const [z] = await tx`select 1 from zones where key = ${zone} limit 1`;
     const [m] = await tx`select 1 from members where id = ${memberId}`;
     if (!z || !m) return false;
-    // Whole local days in the club's own time zone: today 00:00 → (today + days) 00:00 minus 1 ms.
+    // Whole local days in the club's own time zone, added after the access the member already has in this area
+    // (like a renewal), otherwise from today 00:00: start → start + days, ending 1 ms before midnight.
     const [e] = await tx<{ id: string }[]>`
       with t as (select timezone as tz from tenants where id = ${s.tid}),
-           d as (select date_trunc('day', now() at time zone t.tz) as day, t.tz from t)
+           cur as (select max(ends_at) as ends from entitlements
+                   where member_id = ${memberId} and zone_key = ${zone} and ends_at > now()),
+           d as (select greatest(date_trunc('day', now() at time zone t.tz),
+                                 date_trunc('day', (cur.ends + interval '1 millisecond') at time zone t.tz)) as day, t.tz
+                 from t, cur)
       insert into entitlements (tenant_id, member_id, zone_key, starts_at, ends_at, source)
       select ${s.tid}, ${memberId}, ${zone}, d.day at time zone d.tz,
              (d.day + ${`${days} days`}::interval - interval '1 millisecond') at time zone d.tz, 'override' from d
