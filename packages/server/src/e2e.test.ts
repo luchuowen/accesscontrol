@@ -40,6 +40,7 @@ import {
 import { importMembers, onboardingChecklist, planImport } from './onboarding.js';
 import { requestOtp, verifyOtp } from './otp.js';
 import { assignPayment, recordPayment } from './payments.js';
+import { readRenewLink } from './renew.js';
 import { dispatchSms, msisdn, queueReminders, SourceCodeSms, smsUnits } from './sms.js';
 import { reconcileTopups, smsDescription, startTopup } from './sms-topup.js';
 import { handleTaifaWebhook, reconcileTaifaPay, TaifaAuthError, TaifaPay } from './taifapay.js';
@@ -617,6 +618,15 @@ describe('walking skeleton: pay → door', () => {
       values (${tenantId}, ${m?.id}, 'gym', now() - interval '20 days', now() + interval '2 days', 'override')`;
     expect(await queueReminders(app, 'https://lango.test')).toBeGreaterThanOrEqual(1);
     expect(await queueReminders(app, 'https://lango.test')).toBe(0); // never twice for the same end date
+    // The reminder carries a pay-only renew link that resolves to that member, and nothing else.
+    const [rem] =
+      await owner`select body, member_id from sms_messages where kind = 'reminder' order by created_at desc limit 1`;
+    const code = /https:\/\/lango\.test\/r\/([A-Za-z0-9]{10})/.exec(rem?.body ?? '')?.[1] as string;
+    expect(code).toBeTruthy();
+    expect((await readRenewLink(app, code))?.memberId).toBe(rem?.member_id);
+    expect(await readRenewLink(app, 'AAAAAAAAAA')).toBeNull();
+    await owner`update renew_links set expires_at = now() - interval '1 minute' where code = ${code}`;
+    expect(await readRenewLink(app, code)).toBeNull(); // expired after 48 hours
     expect(await dispatchSms(app, client, () => {})).toBeGreaterThanOrEqual(1);
     expect(
       sent.some((x) => x.mobile === '254700000001' && /received for Sauna/.test(x.message) && x.sender === 'DEMOCLUB'),

@@ -2,6 +2,7 @@ import type { Sql, Tx } from '@lango/db';
 import { withTenant } from '@lango/db';
 import { DateTime } from 'luxon';
 import { decrypt } from './crypto.js';
+import { renewLink } from './renew.js';
 
 /** Source Code bulk SMS (api.sourcecode.co.ke). One platform account; the sender ID (e.g. NAVAC) is per platform. */
 const BASE = 'https://api.sourcecode.co.ke/sms';
@@ -397,15 +398,18 @@ export async function queueReminders(sql: Sql, portalUrl: string): Promise<numbe
         const left = Math.floor(end.startOf('day').diff(now.startOf('day'), 'days').days);
         const which = left <= 0 ? 'today' : left <= days ? `${days}d` : null;
         if (!which) continue;
-        const how = ch?.paybill
-          ? `Renew on M-Pesa Paybill ${ch.paybill}, account ${d.member_no}, or at ${portalUrl}/m.`
-          : `Renew at ${portalUrl}/m (member no. ${d.member_no}).`;
+        const key = `reminder:${which}:${d.member_id}:${end.toISODate()}`;
+        const [sent] = await tx`select 1 from sms_messages where dedupe_key = ${key} limit 1`;
+        if (sent) continue;
+        // A pay-only link straight to their renewal (48 h), so renewing takes two taps from the SMS.
+        const link = await renewLink(tx, t.id, d.member_id, portalUrl);
+        const how = ch?.paybill ? `Renew: ${link} or Paybill ${ch.paybill}, account ${d.member_no}.` : `Renew: ${link}`;
         const body =
           which === 'today'
             ? `${t.name}: ${d.first_name}, your access ends today at ${end.toFormat('HH:mm')}. ${how}`
             : `${t.name}: ${d.first_name}, your access ends on ${end.toFormat('d LLL')}. ${how}`;
         const r = await tx`insert into sms_messages (tenant_id, member_id, phone, body, kind, dedupe_key, send_before)
-          values (${t.id}, ${d.member_id}, ${d.phone}, ${body}, 'reminder', ${`reminder:${which}:${d.member_id}:${end.toISODate()}`}, ${d.ends})
+          values (${t.id}, ${d.member_id}, ${d.phone}, ${body}, 'reminder', ${key}, ${d.ends})
           on conflict (tenant_id, dedupe_key) where dedupe_key is not null do nothing returning id`;
         q += r.length;
       }

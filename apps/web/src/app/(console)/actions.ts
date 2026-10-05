@@ -8,6 +8,7 @@ import {
   newPairCode,
   rebuildAccessState,
   recordPayment,
+  renewLink,
   tenantTaifa,
 } from '@lango/server';
 import { DateTime } from 'luxon';
@@ -356,12 +357,14 @@ export async function remindEnding(_prev: { done?: string }, _form: FormData): P
     let n = 0;
     for (const d of due) {
       const end = DateTime.fromJSDate(d.ends, { zone: t?.timezone ?? 'Africa/Nairobi' });
-      const how = t?.paybill
-        ? `Renew on M-Pesa Paybill ${t.paybill}, account ${d.member_no}, or at ${portal}/m.`
-        : `Renew at ${portal}/m (member no. ${d.member_no}).`;
+      const key = `reminder:manual:${d.member_id}:${end.toISODate()}`;
+      const [sent] = await tx`select 1 from sms_messages where dedupe_key = ${key} limit 1`;
+      if (sent) continue;
+      const link = await renewLink(tx, s.tid, d.member_id, portal);
+      const how = t?.paybill ? `Renew: ${link} or Paybill ${t.paybill}, account ${d.member_no}.` : `Renew: ${link}`;
       const body = `${t?.name}: ${d.first_name}, your access ends on ${end.toFormat('d LLL')}. ${how}`;
       const r = await tx`insert into sms_messages (tenant_id, member_id, phone, body, kind, dedupe_key, send_before)
-        values (${s.tid}, ${d.member_id}, ${d.phone}, ${body}, 'reminder', ${`reminder:manual:${d.member_id}:${end.toISODate()}`}, ${d.ends})
+        values (${s.tid}, ${d.member_id}, ${d.phone}, ${body}, 'reminder', ${key}, ${d.ends})
         on conflict (tenant_id, dedupe_key) where dedupe_key is not null do nothing returning id`;
       n += r.length;
     }

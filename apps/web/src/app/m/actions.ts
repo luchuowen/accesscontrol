@@ -2,7 +2,6 @@
 import { withTenant } from '@lango/db';
 import {
   clientIp,
-  initiatedTransactionId,
   isLimited,
   type MemberMatch,
   membersByPhone,
@@ -11,12 +10,12 @@ import {
   rateLimit,
   recordFailure,
   requestOtp,
-  tenantTaifa,
   verifyOtp,
 } from '@lango/server';
 import { cookies, headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { db } from '@/server/db';
+import { startMemberPrompt } from './prompt';
 import { PHONE, PICK, type Pick, pendingPhone, pendingPicks, short, sign } from './session';
 
 const COOKIE = 'lango_member';
@@ -139,66 +138,10 @@ export async function memberLogin(form: FormData) {
   await finish(ms, from);
 }
 
-/**
- * Self-service purchase (design A, 5 Oct 2026): the bill can hold several services, paid in one M-Pesa prompt.
- * Prices come from the club's products at this moment, never from the form; each service appears at most once.
- */
+/** Self-service purchase (design A): the bill's services in one M-Pesa prompt to the member's own phone. */
 export async function memberPay(form: FormData) {
   const who = await readMember();
   if (!who) redirect('/m');
-  const ids = [...new Set(form.getAll('productId').map(String))].filter((x) => /^[0-9a-f-]{36}$/.test(x));
-  if (!ids.length || ids.length > 5) redirect('/m?v=add');
-  if (!rateLimit(`member-pay:${who.memberId}`, 3, 5 * 60_000)) redirect('/m?pay=wait');
-  const client = await tenantTaifa(db(), who.tenantId);
-  if (!client) redirect('/m?pay=unavailable');
-  const intent = await withTenant(db(), who.tenantId, async (tx) => {
-    const [m] = await tx<
-      { member_no: number; phone: string }[]
-    >`select member_no, phone from members where id = ${who.memberId} and status = 'active' and phone is not null`;
-    const ps = await tx<{ id: string; price_kes: number; name: string; service_id: string | null }[]>`
-      select id, price_kes, name, service_id from products where id = any(${ids}) and active
-        and (products.service_id is null or exists (select 1 from services sv where sv.id = products.service_id
-             and sv.active and sv.deleted_at is null and sv.sold_to <> 'walkins'))`;
-    if (!m || ps.length !== ids.length) return null;
-    const services = ps.map((p) => p.service_id ?? p.id);
-    if (new Set(services).size !== services.length) return null;
-    const ordered = ids.map((id) => ps.find((p) => p.id === id) as (typeof ps)[number]);
-    const amount = ordered.reduce((a, p) => a + p.price_kes, 0);
-    const lines = ordered.map((p) => ({ productId: p.id, priceKes: p.price_kes }));
-    const first = ordered[0] as (typeof ps)[number];
-    const [i] = await tx<
-      { id: string }[]
-    >`insert into payment_intents (tenant_id, member_id, product_id, amount_kes, phone, provider, created_by, lines)
-      values (${who.tenantId}, ${who.memberId}, ${first.id}, ${amount}, ${m.phone}, 'taifapay', 'member',
-              ${ordered.length > 1 ? tx.json(lines as never) : null}) returning id`;
-    const name = ordered.length > 1 ? `${ordered.length} services` : first.name;
-    return { id: i?.id as string, amount, ref: String(m.member_no), phone: m.phone, name };
-  });
-  if (!intent) redirect('/m?pay=unavailable');
-  let sent = true;
-  try {
-    const res = await client.stkPush({
-      phone: intent.phone,
-      amount: intent.amount,
-      accountReference: intent.ref,
-      description: intent.name.slice(0, 20),
-      externalId: intent.id,
-    });
-    const ref = initiatedTransactionId(res);
-    if (ref)
-      await withTenant(
-        db(),
-        who.tenantId,
-        (tx) => tx`update payment_intents set provider_ref = ${ref} where id = ${intent.id}`,
-      );
-  } catch (err) {
-    sent = false;
-    console.error('stk push failed', err instanceof Error ? err.message : err);
-    await withTenant(
-      db(),
-      who.tenantId,
-      (tx) => tx`update payment_intents set status = 'failed' where id = ${intent.id}`,
-    );
-  }
-  redirect(sent ? '/m?pay=sent' : '/m?pay=failed');
+  const r = await startMemberPrompt(who.tenantId, who.memberId, form.getAll('productId').map(String), 'member');
+  redirect(r === 'invalid' ? '/m?v=add' : `/m?pay=${r}`);
 }
