@@ -319,10 +319,10 @@ function Drawer({ id, canPay, onClose }: { id: string; canPay: boolean; onClose:
                   <Smartphone size={16} /> Send M-Pesa prompt
                 </Link>
                 <div className="mt-2 grid grid-cols-3 gap-2">
-                  <Link href={`/members/${m.id}#cash`} className={act}>
+                  <Link href={`/members/${m.id}?pay=cash#pay`} className={act}>
                     <Wallet size={16} /> Record cash
                   </Link>
-                  <Link href={`/members/${m.id}#card`} className={act}>
+                  <Link href={`/members/${m.id}?open=card#card`} className={act}>
                     <CreditCard size={16} /> {m.card ? 'Replace card' : 'Link card'}
                   </Link>
                   <Link href={`/communications/start?member=${m.id}`} className={act}>

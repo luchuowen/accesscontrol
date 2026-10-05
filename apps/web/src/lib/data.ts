@@ -193,11 +193,11 @@ export async function member(tenantId: string, id: string) {
     >`
       select p.id, p.amount_kes, p.paid_at, p.status, p.channel, coalesce((select string_agg(l.label, ' + ' order by l.created_at) from payment_lines l where l.payment_id = p.id), pr.name) as product, p.provider_txn_id
       from payments p left join products pr on pr.id = p.product_id where p.member_id = ${id} or p.account_ref = ${String(m.member_no)}
-      order by p.paid_at desc limit 30`;
+      order by p.paid_at desc limit 100`;
     const visits = await tx<{ at: Date; zone: string | null; granted: boolean }[]>`
       select e.at, z.name as zone, e.granted from access_events e
       left join zones z on e.reader_id = any(z.reader_ids) and z.site_id = e.site_id
-      where e.member_no = ${m.member_no} order by e.at desc limit 20`;
+      where e.member_no = ${m.member_no} order by e.at desc limit 200`;
     const sync = await tx<
       { version: number; applied_version: number | null; applied_at: Date | null; error: string | null }[]
     >`
