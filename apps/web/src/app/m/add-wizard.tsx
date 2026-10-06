@@ -261,7 +261,7 @@ export function AddWizard({
           }}
           className="mt-3 inline-flex items-center gap-1.5 text-[14px] font-semibold text-emerald-700"
         >
-          <Plus size={16} /> Add another service
+          <Plus size={16} /> {family ? 'Add for someone else, or another service' : 'Add another service'}
         </button>
       )}
       <div className="mt-4 rounded-xl border border-[#E4E8EF] bg-white px-4 py-3">
