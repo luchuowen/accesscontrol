@@ -24,10 +24,19 @@ const NOTES: Record<string, [tone: 'ok' | 'info', text: string]> = {
   everywhere: ['info', 'You were signed out on every device.'],
 };
 
-export default async function Login({ searchParams }: { searchParams: Promise<{ e?: string; m?: string }> }) {
-  const { e, m } = await searchParams;
-  const s = await getSession();
-  if (s) redirect(s.partner && !s.tid ? '/partner' : s.tid ? '/' : '/choose');
+export default async function Login({
+  searchParams,
+}: {
+  searchParams: Promise<{ e?: string; m?: string; for?: string }>;
+}) {
+  const { e, m, for: forArea } = await searchParams;
+  // The partner console and a club console sign in separately, so either can be signed in alongside the other.
+  if (forArea === 'partner') {
+    if (await getSession('partner')) redirect('/partner');
+  } else {
+    const s = await getSession('club');
+    if (s) redirect(s.tid ? '/' : '/choose');
+  }
   const note = m ? NOTES[m] : undefined;
   return (
     <AuthShell>

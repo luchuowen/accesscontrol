@@ -9,7 +9,8 @@ import { trustBrowser } from '../actions';
 export const metadata = { title: 'Trust this browser? · Lango' };
 
 export default async function Trust({ searchParams }: { searchParams: Promise<{ next?: string }> }) {
-  const s = await getSession();
+  const { next: nx = '/' } = await searchParams;
+  const s = await getSession(nx === '/partner' ? 'partner' : 'club');
   if (!s) redirect('/login?m=signed-out');
   const { next = '/' } = await searchParams;
   const days = deviceDays(s.kind);

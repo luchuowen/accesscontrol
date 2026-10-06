@@ -1,7 +1,7 @@
 import 'server-only';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { type LiveSession, type Perm, readSession, sessionEndReason } from '@lango/server';
-import { cookies } from 'next/headers';
+import { cookies, headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { db } from '@/server/db';
 
@@ -12,6 +12,15 @@ import { db } from '@/server/db';
  */
 const prod = process.env.NODE_ENV === 'production';
 export const SESSION_COOKIE = prod ? '__Host-lango' : 'lango_session';
+/** The partner console keeps its own sign-in, so a partner tab and a club tab work side by side in one browser. */
+export const PARTNER_COOKIE = prod ? '__Host-lango-partner' : 'lango_partner_session';
+export type Area = 'club' | 'partner';
+const cookieFor = (a: Area) => (a === 'partner' ? PARTNER_COOKIE : SESSION_COOKIE);
+/** Which console this request is in (set by middleware): partner, club, or any (sign-in steps shared by both). */
+async function requestArea(): Promise<Area | 'any'> {
+  const a = (await headers()).get('x-lango-area');
+  return a === 'partner' || a === 'any' ? a : 'club';
+}
 export const DEVICE_COOKIE = prod ? '__Host-lango-device' : 'lango_device';
 export const PENDING_COOKIE = prod ? '__Host-lango-pending' : 'lango_pending';
 
@@ -32,16 +41,29 @@ export const publicUrl = () => {
 
 const cookieBase = { httpOnly: true, secure: prod, sameSite: 'lax' as const, path: '/' };
 
-export async function sessionToken() {
-  return (await cookies()).get(SESSION_COOKIE)?.value;
+export async function sessionToken(area?: Area): Promise<string | undefined> {
+  const jar = await cookies();
+  const a = area ?? (await requestArea());
+  if (a !== 'any') return jar.get(cookieFor(a))?.value;
+  return jar.get(SESSION_COOKIE)?.value ?? jar.get(PARTNER_COOKIE)?.value;
 }
 
-export async function getSession(): Promise<Session | null> {
-  return readSession(db(), await sessionToken());
+/** The session of this console. A partner sign-in is never used as a club sign-in, nor the other way round. */
+export async function getSession(area?: Area): Promise<Session | null> {
+  const a = area ?? (await requestArea());
+  if (a === 'any') {
+    for (const x of ['club', 'partner'] as const) {
+      const s = await readSession(db(), await sessionToken(x));
+      if (s && !!s.partner === (x === 'partner')) return s;
+    }
+    return null;
+  }
+  const s = await readSession(db(), await sessionToken(a));
+  return s && !!s.partner === (a === 'partner') ? s : null;
 }
 
-export async function setSessionCookie(token: string, maxHours: number) {
-  (await cookies()).set(SESSION_COOKIE, token, { ...cookieBase, maxAge: maxHours * 3600 });
+export async function setSessionCookie(token: string, maxHours: number, area: Area = 'club') {
+  (await cookies()).set(cookieFor(area), token, { ...cookieBase, maxAge: maxHours * 3600 });
 }
 
 export async function setDeviceCookie(token: string, days: number) {
@@ -100,7 +122,7 @@ async function signedOut(): Promise<never> {
             : reason === 'signed-out-everywhere'
               ? 'everywhere'
               : 'signed-out';
-  redirect(`/login?m=${m}`);
+  redirect(`/login?m=${m}${(await requestArea()) === 'partner' ? '&for=partner' : ''}`);
 }
 
 /** A signed-in person working in a club. Partner logins without an open club go to their clubs list. */
@@ -139,6 +161,9 @@ export async function requireSignedIn(): Promise<Session> {
 }
 
 /** Remove the session cookie (with the same attributes it was set with, as __Host- cookies require). */
-export async function clearSessionCookie() {
-  (await cookies()).set(SESSION_COOKIE, '', { ...cookieBase, maxAge: 0 });
+export async function clearSessionCookie(area?: Area | 'any') {
+  const a = area ?? (await requestArea());
+  const jar = await cookies();
+  for (const x of a === 'any' ? (['club', 'partner'] as const) : [a])
+    jar.set(cookieFor(x), '', { ...cookieBase, maxAge: 0 });
 }

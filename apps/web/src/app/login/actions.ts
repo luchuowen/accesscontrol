@@ -62,7 +62,7 @@ async function startSession(staff: StaffRow): Promise<string> {
     next = tenantId ? '/' : '/choose';
   }
   const { token, maxHours } = await createSession(db(), { staff, tenantId, ip, userAgent });
-  await setSessionCookie(token, maxHours);
+  await setSessionCookie(token, maxHours, isPartnerLevel(staff) ? 'partner' : 'club');
   await clearPending();
   await logAuth(db(), { kind: 'signin.ok', staffId: staff.id, tenantId, email: staff.email, ip, userAgent });
   return next;
@@ -134,10 +134,10 @@ const NEXT = new Set(['/', '/choose', '/partner']);
 
 /** "Trust this browser?" answered. Trusting skips the code on this browser for 30 days (7 for NAVAC/partners). */
 export async function trustBrowser(form: FormData) {
-  const token = await sessionToken();
+  const next = String(form.get('next') ?? '/');
+  const token = await sessionToken(next === '/partner' ? 'partner' : 'club');
   const s = token ? await readSession(db(), token) : null;
   if (!s) redirect('/login?m=signed-out');
-  const next = String(form.get('next') ?? '/');
   if (form.get('trust') === 'yes') {
     const staff = await staffById(db(), s.uid);
     if (staff) {
