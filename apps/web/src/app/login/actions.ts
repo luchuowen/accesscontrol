@@ -94,6 +94,8 @@ export async function login(form: FormData) {
     await noteFailedSignIn(db(), email, ip, (await headers()).get('user-agent') ?? undefined);
     redirect('/login?e=1');
   }
+  // Temporary switch (set LANGO_SIGNIN_CODE=off on the server): password only, no SMS/email code. Remove to turn codes back on.
+  if (process.env.LANGO_SIGNIN_CODE === 'off') redirect(await startSession(staff));
   if (await isTrustedDevice(db(), await deviceToken(), staff.id)) redirect(await startSession(staff));
   const ch = await startSignInCode(db(), staff, 'sms');
   // No phone and no email channel yet: sign in on the password alone (the account page asks for a phone).
