@@ -348,6 +348,18 @@ async function Doors({ tenantId }: { tenantId: string }) {
                 </p>
               </div>
             )}
+            {!b?.pair_code && b?.last_seen_at && (
+              <div className="grid gap-2 border-b border-[#EEF1F6] bg-[#FAFBFC] px-5 py-4">
+                <div>
+                  <span className={lbl}>Install command</span>
+                  <CopyField value={`irm ${base}/bridge/install.ps1 | iex`} label="Install command" />
+                </div>
+                <p className="text-[12px] text-ink-500">
+                  This PC is connected. To update the NAVAC Bridge on it, run the same command again in PowerShell as
+                  Administrator and press Enter at each question.
+                </p>
+              </div>
+            )}
             <div className="divide-y divide-[#F0F2F6]">
               {zones.map((z) => (
                 <form
